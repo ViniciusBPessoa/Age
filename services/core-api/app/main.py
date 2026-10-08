@@ -24,6 +24,7 @@ from app.api import (
     plans,
     preferences,
     study,
+    tasks,
 )
 from app.core.config import get_settings
 from app.core.db import dispose_engine
@@ -68,6 +69,7 @@ v1.include_router(preferences.router)
 v1.include_router(calendar.router)
 v1.include_router(plans.router)
 v1.include_router(study.router)
+v1.include_router(tasks.router)
 v1.include_router(conversations.router)
 v1.include_router(conversations.turns)
 # Mantido do M0 para o smoke test continuar valendo como diagnóstico de
@@ -79,6 +81,7 @@ app.include_router(v1)
 # O ai-worker le a agenda por aqui, com JWT de servico.
 app.include_router(calendar.internal)
 app.include_router(study.internal)
+app.include_router(tasks.internal)
 
 
 @app.get("/")

@@ -13,7 +13,7 @@ ARQUITETURA.md §5.7 e §2.3.2. Duas responsabilidades:
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from uuid import UUID, uuid4
 
 from sqlalchemy import text
@@ -32,6 +32,7 @@ from app.domain.plan_diff import (
     validate_plan,
 )
 from app.ports.calendar import Event, Flexibility
+from app.ports.tasks import Priority, Task, TaskStatus
 from app.services.calendar_access import load_policy, read_busy, read_events
 
 log = logging.getLogger("core-api.plan_store")
@@ -109,7 +110,15 @@ async def _promote_one(
     # o conceito de "calendario default". Resolver aqui tambem deixa o
     # item do plano completo quando o usuario o revisa.
     write_calendar_id = await _resolve_write_calendar(db, user_id)
+    # Mesma resolução para a lista: o executor recebe a porta e não
+    # deve conhecer o conceito de "lista default" (§3.3).
+    write_list_id = await _resolve_write_list(db, user_id, raw_items)
+    existing_tasks = await _load_tasks_by_id(db, user_id, raw_items)
     items: list[DiffItem] = []
+    # Mapa do id do rascunho para o id do DiffItem, para refazer os
+    # vínculos do par ligado (§5.7.1) depois de todos os itens
+    # existirem — um item pode referenciar outro que vem depois.
+    draft_to_item: dict[str, UUID] = {}
 
     # Janela que cobre todos os itens, para carregar o contexto de
     # validação de uma vez.
@@ -154,12 +163,15 @@ async def _promote_one(
         try:
             item = _build_item(
                 op=op,
+                target=raw.get("target", "event"),
                 reason=reason,
                 payload=payload,
                 sequence=index,
                 existing=by_id,
+                existing_tasks=existing_tasks,
                 timezone=policy.timezone,
                 write_calendar_id=write_calendar_id,
+                write_list_id=write_list_id,
             )
         except (ValueError, KeyError) as exc:
             log.info("item %s descartado: %s", index, exc)
@@ -167,6 +179,14 @@ async def _promote_one(
 
         if item is not None:
             items.append(item)
+            if raw.get("id"):
+                draft_to_item[str(raw["id"])] = item.id
+
+    # Vínculos, agora que todos os itens têm id definitivo. Um item cujo
+    # par foi descartado perde o vínculo em vez de apontar para o vazio:
+    # meio par é pior que nenhum, e `linked_group` trataria um id
+    # inexistente como grupo de um só.
+    items = _relink(items, raw_items, draft_to_item)
 
     plan = Plan(
         id=uuid4(),
@@ -217,12 +237,15 @@ async def _resolve_write_calendar(db: AsyncSession, user_id: UUID) -> str:
 def _build_item(
     *,
     op: str,
+    target: str,
     reason: str,
     payload: dict,
     sequence: int,
     existing: dict[str, Event],
+    existing_tasks: dict[str, Task],
     timezone: str,
     write_calendar_id: str,
+    write_list_id: str,
 ) -> DiffItem | None:
     from zoneinfo import ZoneInfo
 
@@ -233,6 +256,17 @@ def _build_item(
         # Modelo às vezes manda sem fuso; assume o do usuário em vez de
         # recusar, porque recusar perderia a proposta inteira.
         return moment if moment.tzinfo else moment.replace(tzinfo=tz)
+
+    if target == "task":
+        return _build_task_item(
+            op=op,
+            reason=reason,
+            payload=payload,
+            sequence=sequence,
+            existing_tasks=existing_tasks,
+            write_list_id=write_list_id,
+            parse=parse,
+        )
 
     match op:
         case "CREATE":
@@ -309,9 +343,338 @@ def _build_item(
             raise ValueError(f"operação não suportada: {op}")
 
 
+async def _resolve_write_list(
+    db: AsyncSession, user_id: UUID, raw_items: list[dict]
+) -> str:
+    """Onde o Age escreve tarefa por padrão (§3.3.3).
+
+    Só cria a lista nativa se o rascunho tiver algum item de tarefa: um
+    plano que só mexe na agenda não deve ter como efeito colateral criar
+    uma lista que o usuário nunca pediu.
+    """
+    if not any(raw.get("target") == "task" for raw in raw_items):
+        return ""
+
+    preferred = (
+        await db.execute(
+            text(
+                "SELECT default_write_task_list_id "
+                "FROM core.user_preferences WHERE user_id = :uid"
+            ),
+            {"uid": str(user_id)},
+        )
+    ).scalar_one_or_none()
+    if preferred:
+        return preferred
+
+    from app.adapters.tasks.local import LocalTasks
+
+    default = await LocalTasks(db=db, user_id=user_id).ensure_default_list()
+    return default.id
+
+
+async def _load_tasks_by_id(
+    db: AsyncSession, user_id: UUID, raw_items: list[dict]
+) -> dict[str, Task]:
+    """Carrega só as tarefas citadas nos rascunhos.
+
+    Carregar a lista inteira seria mais simples e errado: quem usa o
+    produto de verdade tem dezenas de tarefas, e o plano mexe em três.
+    """
+    wanted = {
+        str(raw.get("payload", {}).get("task_id"))
+        for raw in raw_items
+        if raw.get("target") == "task"
+        and raw.get("payload", {}).get("task_id")
+    }
+    for raw in raw_items:
+        if raw.get("target") == "task":
+            for tid in raw.get("payload", {}).get("ordered_ids") or []:
+                wanted.add(str(tid))
+
+    if not wanted:
+        return {}
+
+    from app.services.task_store import read_tasks
+
+    # `include_done=True`: uma tarefa concluída entre a proposta e a
+    # promoção tem de ser ENCONTRADA, para o conflito aparecer na
+    # revalidação. Se ela não viesse, o item seria descartado como
+    # "não existe" e o usuário procuraria o que não se perdeu.
+    everything = await read_tasks(db, user_id, include_done=True)
+    return {
+        e.task.id: e.task
+        for e in everything
+        if e.task.id and e.task.id in wanted
+    }
+
+
+def _relink(
+    items: list[DiffItem],
+    raw_items: list[dict],
+    draft_to_item: dict[str, UUID],
+) -> list[DiffItem]:
+    """Reconstrói os vínculos do par ligado (§5.7.1)."""
+    from dataclasses import replace as _replace
+
+    links_by_item: dict[UUID, list[UUID]] = {}
+    for raw in raw_items:
+        source = draft_to_item.get(str(raw.get("id")))
+        if source is None:
+            continue
+        for linked_draft_id in raw.get("links") or []:
+            target_item = draft_to_item.get(str(linked_draft_id))
+            if target_item is not None:
+                links_by_item.setdefault(source, []).append(target_item)
+
+    if not links_by_item:
+        return items
+
+    return [
+        _replace(item, links=tuple(links_by_item[item.id]))
+        if item.id in links_by_item
+        else item
+        for item in items
+    ]
+
+
+def _build_task_item(
+    *,
+    op: str,
+    reason: str,
+    payload: dict,
+    sequence: int,
+    existing_tasks: dict[str, Task],
+    write_list_id: str,
+    parse,
+) -> DiffItem | None:
+    """Monta um item de tarefa a partir do rascunho (§5.7)."""
+    from dataclasses import replace as _replace
+
+    def due_fields() -> dict:
+        out: dict = {}
+        if payload.get("due_at"):
+            moment = parse(payload["due_at"])
+            out["due_at"] = moment
+            out["due_date"] = moment.date()
+        elif payload.get("due_date"):
+            out["due_date"] = date.fromisoformat(payload["due_date"])
+            out["due_at"] = None
+        return out
+
+    match op:
+        case "CREATE":
+            if not payload.get("title"):
+                raise ValueError("tarefa sem título")
+            estimated = payload.get("estimated_min")
+            return DiffItem(
+                id=uuid4(),
+                target=Target.TASK,
+                op=Op.CREATE,
+                reason=reason,
+                sequence=sequence,
+                after=Task(
+                    id=None,
+                    list_id=payload.get("list_id") or write_list_id,
+                    title=payload["title"],
+                    notes=payload.get("notes"),
+                    priority=(
+                        Priority(payload["priority"])
+                        if payload.get("priority")
+                        else None
+                    ),
+                    estimated=(
+                        timedelta(minutes=int(estimated))
+                        if estimated
+                        else None
+                    ),
+                    source="age",
+                    **due_fields(),
+                ),
+            )
+
+        case "UPDATE" | "MOVE":
+            before = existing_tasks.get(str(payload.get("task_id")))
+            if before is None:
+                # O modelo pode alucinar uma tarefa. Descartar é melhor
+                # que propor mudança em algo que não existe (§9.5).
+                raise ValueError(
+                    f"tarefa {payload.get('task_id')} não existe na lista"
+                )
+
+            changes: dict = due_fields()
+            if payload.get("title"):
+                changes["title"] = payload["title"]
+            if payload.get("priority"):
+                changes["priority"] = Priority(payload["priority"])
+            if payload.get("estimated_min"):
+                changes["estimated"] = timedelta(
+                    minutes=int(payload["estimated_min"])
+                )
+            if payload.get("list_id"):
+                changes["list_id"] = payload["list_id"]
+
+            if not changes:
+                raise ValueError("UPDATE de tarefa sem nenhuma mudança")
+
+            # `MOVE` em tarefa é mudança de PRAZO ou de LISTA; qualquer
+            # outro campo é `UPDATE`. A distinção existe para a UI dar
+            # destaque diferente — repactuar prazo merece, mudar nota
+            # não.
+            touches_schedule = bool(
+                {"due_at", "due_date", "list_id"} & set(changes)
+            )
+            return DiffItem(
+                id=uuid4(),
+                target=Target.TASK,
+                op=Op.MOVE if touches_schedule else Op.UPDATE,
+                reason=reason,
+                sequence=sequence,
+                target_ref=before.id,
+                before=before,
+                after=_replace(before, **changes),
+            )
+
+        case "COMPLETE":
+            before = existing_tasks.get(str(payload.get("task_id")))
+            if before is None:
+                raise ValueError(
+                    f"tarefa {payload.get('task_id')} não existe na lista"
+                )
+            if before.is_done:
+                # Já concluída: propor de novo seria um cartão sem
+                # efeito, que só gasta a atenção de quem revisa.
+                raise ValueError(f"'{before.title}' já está concluída")
+            return DiffItem(
+                id=uuid4(),
+                target=Target.TASK,
+                op=Op.COMPLETE,
+                reason=reason,
+                sequence=sequence,
+                target_ref=before.id,
+                before=before,
+            )
+
+        case "DELETE":
+            before = existing_tasks.get(str(payload.get("task_id")))
+            if before is None:
+                raise ValueError(
+                    f"tarefa {payload.get('task_id')} não existe na lista"
+                )
+            return DiffItem(
+                id=uuid4(),
+                target=Target.TASK,
+                op=Op.DELETE,
+                reason=reason,
+                sequence=sequence,
+                target_ref=before.id,
+                before=before,
+            )
+
+        case "REORDER":
+            ordered = [str(x) for x in (payload.get("ordered_ids") or [])]
+            known = [tid for tid in ordered if tid in existing_tasks]
+            if not known:
+                raise ValueError("REORDER sem nenhuma tarefa conhecida")
+            first = existing_tasks[known[0]]
+            return DiffItem(
+                id=uuid4(),
+                target=Target.TASK,
+                op=Op.REORDER,
+                reason=reason,
+                sequence=sequence,
+                target_ref=payload.get("list_id") or first.list_id,
+                before=first,
+                after=first,
+                reorder_ids=tuple(known),
+            )
+
+        case _:
+            raise ValueError(f"operação de tarefa não suportada: {op}")
+
+
 # ---------------------------------------------------------------
 # Persistência
 # ---------------------------------------------------------------
+def _payload_json(value: Event | Task | None) -> dict | None:
+    """Serializa o lado `before`/`after`, que pode ser evento OU tarefa.
+
+    A chave `_kind` é o discriminador na volta. Sem ela, um `Task` sem
+    prazo e um `Event` malformado seriam indistinguíveis na leitura, e
+    o item voltaria do banco com o tipo errado — exatamente o que a
+    validação de `DiffItem.__post_init__` passou a recusar.
+    """
+    if value is None:
+        return None
+    if isinstance(value, Task):
+        return _task_json(value)
+    return _event_json(value)
+
+
+def _task_json(task: Task) -> dict:
+    return {
+        "_kind": "task",
+        "id": task.id,
+        "list_id": task.list_id,
+        "title": task.title,
+        "notes": task.notes,
+        "due_date": task.due_date.isoformat() if task.due_date else None,
+        "due_at": task.due_at.isoformat() if task.due_at else None,
+        "status": task.status.value,
+        "completed_at": (
+            task.completed_at.isoformat() if task.completed_at else None
+        ),
+        "priority": task.priority.value if task.priority else None,
+        "labels": list(task.labels),
+        "parent_id": task.parent_id,
+        "recurrence": task.recurrence,
+        "estimated_min": task.estimated_min,
+        "position": task.position,
+        "source": task.source,
+        "etag": task.etag,
+        "dropped_fields": list(task.dropped_fields),
+    }
+
+
+def _task_from_json(raw: dict) -> Task:
+    estimated = raw.get("estimated_min")
+    return Task(
+        id=raw.get("id"),
+        list_id=raw.get("list_id") or "",
+        title=raw.get("title") or "(sem título)",
+        notes=raw.get("notes"),
+        due_date=(
+            date.fromisoformat(raw["due_date"]) if raw.get("due_date") else None
+        ),
+        due_at=(
+            datetime.fromisoformat(raw["due_at"]) if raw.get("due_at") else None
+        ),
+        status=TaskStatus(raw.get("status", "open")),
+        completed_at=(
+            datetime.fromisoformat(raw["completed_at"])
+            if raw.get("completed_at")
+            else None
+        ),
+        priority=Priority(raw["priority"]) if raw.get("priority") else None,
+        labels=tuple(raw.get("labels") or ()),
+        parent_id=raw.get("parent_id"),
+        recurrence=raw.get("recurrence"),
+        estimated=timedelta(minutes=estimated) if estimated else None,
+        position=raw.get("position"),
+        source=raw.get("source"),
+        etag=raw.get("etag"),
+        dropped_fields=tuple(raw.get("dropped_fields") or ()),
+    )
+
+
+def _payload_from_json(raw: dict | None) -> Event | Task | None:
+    if not raw:
+        return None
+    if raw.get("_kind") == "task":
+        return _task_from_json(raw)
+    return _event_from_json(raw)
+
+
 def _event_json(event: Event | None) -> dict | None:
     if event is None:
         return None
@@ -378,11 +741,12 @@ async def _persist(db: AsyncSession, plan: Plan) -> None:
                 INSERT INTO core.plan_items
                   (id, user_id, plan_id, target, op, target_ref,
                    before, after, reason, confidence, conflicts, links,
-                   sequence, status)
+                   sequence, status, reorder_ids)
                 VALUES (:id, :uid, :pid, :target, :op, :ref,
                         CAST(:before AS json), CAST(:after AS json),
                         :reason, :conf, CAST(:conflicts AS json),
-                        CAST(:links AS json), :seq, :status)
+                        CAST(:links AS json), :seq, :status,
+                        CAST(:reorder AS json))
                 """
             ),
             {
@@ -392,8 +756,8 @@ async def _persist(db: AsyncSession, plan: Plan) -> None:
                 "target": item.target.value,
                 "op": item.op.value,
                 "ref": item.target_ref,
-                "before": _json(_event_json(item.before)),
-                "after": _json(_event_json(item.after)),
+                "before": _json(_payload_json(item.before)),
+                "after": _json(_payload_json(item.after)),
                 "reason": item.reason,
                 "conf": item.confidence,
                 "conflicts": _json(
@@ -409,6 +773,7 @@ async def _persist(db: AsyncSession, plan: Plan) -> None:
                 "links": _json([str(x) for x in item.links]),
                 "seq": item.sequence,
                 "status": item.status.value,
+                "reorder": _json(list(item.reorder_ids)),
             },
         )
 
@@ -453,7 +818,8 @@ async def load_plan(
         text(
             """
             SELECT id, target, op, target_ref, before, after, reason,
-                   confidence, conflicts, links, sequence, status
+                   confidence, conflicts, links, sequence, status,
+                   reorder_ids
             FROM core.plan_items
             WHERE plan_id = :pid AND user_id = :uid
             ORDER BY sequence
@@ -469,8 +835,8 @@ async def load_plan(
                 target=Target(r[1]),
                 op=Op(r[2]),
                 target_ref=r[3],
-                before=_event_from_json(r[4]),
-                after=_event_from_json(r[5]),
+                before=_payload_from_json(r[4]),
+                after=_payload_from_json(r[5]),
                 reason=r[6],
                 confidence=r[7] or 1.0,
                 conflicts=tuple(
@@ -484,6 +850,7 @@ async def load_plan(
                 links=tuple(UUID(x) for x in (r[9] or [])),
                 sequence=r[10],
                 status=ItemStatus(r[11]),
+                reorder_ids=tuple(r[12] or ()),
             )
         )
 
@@ -565,8 +932,10 @@ async def record_undo_log(
             text(
                 """
                 INSERT INTO core.plan_undo_log
-                  (user_id, plan_id, item_id, op, snapshot, applied_ref)
-                VALUES (:uid, :pid, :iid, :op, CAST(:snap AS json), :ref)
+                  (user_id, plan_id, item_id, op, snapshot, applied_ref,
+                   target)
+                VALUES (:uid, :pid, :iid, :op, CAST(:snap AS json), :ref,
+                        :target)
                 """
             ),
             {
@@ -574,7 +943,8 @@ async def record_undo_log(
                 "pid": str(plan_id),
                 "iid": str(record.item_id),
                 "op": record.op.value,
-                "snap": _json(_event_json(record.snapshot_before)),
+                "snap": _json(_payload_json(record.snapshot_before)),
                 "ref": record.applied_ref,
+                "target": record.target.value,
             },
         )

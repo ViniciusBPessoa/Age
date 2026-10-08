@@ -75,11 +75,28 @@ class CalendarClient:
                 return await self.mark_session(**kwargs)
             case "save_preference":
                 return await self.save_preference(**kwargs)
+            case "task_overview":
+                return await self.task_overview(
+                    kwargs.get("horizon_days", 7)
+                )
+            case "list_tasks":
+                return await self.list_tasks(**kwargs)
+            case "get_task_lists":
+                return await self.get_task_lists()
             case _:
                 raise ValueError(f"operação desconhecida: {operation}")
 
     async def _get(self, path: str, params: dict) -> Any:
-        url = f"{self._base}/internal/calendar{path}"
+        return await self._get_at("/internal/calendar", path, params)
+
+    async def _get_at(self, prefix: str, path: str, params: dict) -> Any:
+        """GET numa superfície interna do core-api.
+
+        O prefixo é parâmetro porque o worker lê de duas superfícies
+        (`/internal/calendar` e `/internal/tasks`) e nenhuma das duas
+        permite escrita — escrever passa pelo `PlanExecutor` (§3.4).
+        """
+        url = f"{self._base}{prefix}{path}"
         headers = {
             "Authorization": f"Bearer {_service_token()}",
             "X-Age-User-Id": str(self._user_id),
@@ -89,7 +106,8 @@ class CalendarClient:
 
         if response.status_code >= 400:
             raise RuntimeError(
-                f"core-api recusou leitura de agenda ({response.status_code})"
+                f"core-api recusou leitura em {prefix} "
+                f"({response.status_code})"
             )
         return response.json()
 
@@ -201,3 +219,33 @@ class CalendarClient:
             "/internal/study/preference",
             {"key": key, "value": value, "confirmed": confirmed},
         )
+
+    # -----------------------------------------------------------
+    # Tarefas (§5.9.5) — somente leitura
+    # -----------------------------------------------------------
+    async def task_overview(self, horizon_days: int = 7) -> dict:
+        """Panorama da lista, com os números já calculados.
+
+        O modelo não soma nem conta: recebe isto pronto. Mesma decisão
+        do `find_free_slots` — o LLM não inventa tempo livre, e também
+        não inventa quantas tarefas vencem nem quais têm bloco
+        reservado.
+        """
+        return await self._get_at(
+            "/internal/tasks", "/overview", {"horizon_days": horizon_days}
+        )
+
+    async def list_tasks(
+        self,
+        include_done: bool = False,
+        due_before: str | None = None,
+    ) -> list[dict]:
+        params: dict[str, Any] = {"include_done": include_done}
+        if due_before:
+            params["due_before"] = due_before
+        data = await self._get_at("/internal/tasks", "/list", params)
+        return data["tasks"]
+
+    async def get_task_lists(self) -> list[dict]:
+        data = await self._get_at("/internal/tasks", "/lists", {})
+        return data["lists"]

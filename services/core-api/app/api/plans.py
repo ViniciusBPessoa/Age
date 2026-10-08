@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import text
 
 from app.adapters.calendar.local import LocalCalendar
+from app.adapters.tasks.local import LocalTasks
 from app.core.deps import CurrentUser, DbSession
 from app.domain.plan_executor import (
     PlanExpired,
@@ -159,11 +160,17 @@ async def apply(
         )
 
     provider = LocalCalendar(db=db, user_id=user.id)
+    # A porta de tarefa vai sempre, mesmo em plano só de agenda: o
+    # executor só a usa se houver item `Target.TASK`, e instanciar é
+    # barato. A alternativa — decidir aqui se o plano tem tarefa —
+    # duplicaria no router uma regra que é do executor.
+    tasks = LocalTasks(db=db, user_id=user.id)
 
     try:
         result = await apply_plan(
             plan,
             provider,
+            tasks=tasks,
             item_ids=body.item_ids,
             skip_revalidation=False,
         )
@@ -222,6 +229,17 @@ async def apply(
     except Exception as exc:  # noqa: BLE001
         log.warning("não foi possível vincular sessões de estudo: %s", exc)
 
+    # Persiste o par tarefa↔evento (§5.7.1). Mesma política de
+    # degradação: o par já está aplicado nas duas portas, e perder o
+    # vínculo significa o Age não saber dizer "3h reservadas quinta" —
+    # incômodo, não corrupção.
+    try:
+        pairs = await _persist_task_event_links(db, user.id, plan, result)
+        if pairs:
+            log.info("%d pares tarefa/evento vinculados", pairs)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("não foi possível vincular tarefa e evento: %s", exc)
+
     # Erro tecnico fica no log; o usuario recebe linguagem util
     # (secao 5.9.13). Vazar stack de driver de banco na UI nao ajuda
     # ninguem e expoe estrutura interna.
@@ -238,6 +256,58 @@ async def apply(
         manual_fix_needed=result.manual_fix_needed,
         message=_message_for(result),
     )
+
+
+async def _persist_task_event_links(db, user_id, plan, result) -> int:
+    """Grava em `task_event_links` os pares que acabaram de ser aplicados.
+
+    O vínculo só é gravado quando **os dois lados** foram aplicados com
+    sucesso. Gravar com meio par aplicado seria pior que não gravar: o
+    Age afirmaria ter reservado tempo para uma tarefa que não existe,
+    ou apontaria para um bloco que não foi criado.
+
+    Como o executor reverte o grupo inteiro na falha parcial (§5.8),
+    "os dois aplicados" é a situação normal; esta checagem cobre o caso
+    em que a reversão também falhou.
+    """
+    from app.domain.plan_diff import Target
+    from app.services.task_store import (
+        LOCAL_EVENTS,
+        LOCAL_TASKS,
+        create_link,
+    )
+
+    applied_ref = {r.item_id: r.applied_ref for r in result.applied}
+    pairs = 0
+
+    for item in plan.items:
+        if item.target != Target.TASK or not item.links:
+            continue
+        task_ref = applied_ref.get(item.id)
+        if not task_ref:
+            continue
+
+        for linked_id in item.links:
+            other = plan.item(linked_id)
+            if other is None or other.target != Target.EVENT:
+                continue
+            event_ref = applied_ref.get(other.id)
+            if not event_ref:
+                # O evento não foi aplicado: não há bloco para apontar.
+                continue
+
+            await create_link(
+                db,
+                user_id,
+                task_ref_kind=LOCAL_TASKS,
+                task_ref_id=str(task_ref),
+                event_ref_kind=LOCAL_EVENTS,
+                event_ref_id=str(event_ref),
+                plan_id=plan.id,
+            )
+            pairs += 1
+
+    return pairs
 
 
 @router.post("/{plan_id}/reject", status_code=status.HTTP_204_NO_CONTENT)
@@ -259,7 +329,7 @@ async def undo(plan_id: UUID, user: CurrentUser, db: DbSession) -> dict:
     rows = await db.execute(
         text(
             """
-            SELECT item_id, op, snapshot, applied_ref
+            SELECT item_id, op, snapshot, applied_ref, target
             FROM core.plan_undo_log
             WHERE plan_id = :pid AND user_id = :uid AND undone_at IS NULL
             ORDER BY created_at DESC
@@ -280,10 +350,11 @@ async def undo(plan_id: UUID, user: CurrentUser, db: DbSession) -> dict:
         )
 
     provider = LocalCalendar(db=db, user_id=user.id)
+    tasks = LocalTasks(db=db, user_id=user.id)
     undone = 0
     problems: list[str] = []
 
-    for _item_id, op, snapshot, applied_ref in records:
+    for _item_id, op, snapshot, applied_ref, target in records:
         # SAVEPOINT por item. Sem isto, a primeira exceção aborta a
         # transação inteira e todos os itens seguintes falham com
         # `current transaction is aborted` — o try/except por item não
@@ -294,7 +365,9 @@ async def undo(plan_id: UUID, user: CurrentUser, db: DbSession) -> dict:
         # exatamente o que sobrou.
         try:
             async with db.begin_nested():
-                if op == "CREATE" and applied_ref:
+                if target == "task":
+                    await _undo_task(tasks, op, snapshot, applied_ref)
+                elif op == "CREATE" and applied_ref:
                     await provider.delete_event("", applied_ref)
                 elif op in ("MOVE", "UPDATE") and snapshot:
                     await provider.restore_from_snapshot(snapshot)
@@ -302,9 +375,18 @@ async def undo(plan_id: UUID, user: CurrentUser, db: DbSession) -> dict:
                     await provider.restore_event(applied_ref)
             undone += 1
         except Exception as exc:  # noqa: BLE001
-            title = (snapshot or {}).get("title", applied_ref or "evento")
+            title = (snapshot or {}).get("title", applied_ref or "item")
             log.warning("falha ao desfazer %s de '%s': %s", op, title, exc)
             problems.append(f"'{title}' não pôde ser revertido")
+
+    # Os vínculos criados pelo plano saem junto: um par desfeito não
+    # deve continuar afirmando que a tarefa tem tempo reservado.
+    try:
+        from app.services.task_store import remove_links_for_plan
+
+        await remove_links_for_plan(db, user.id, plan_id)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("não foi possível remover vínculos do plano: %s", exc)
 
     await db.execute(
         text(
@@ -326,6 +408,25 @@ async def undo(plan_id: UUID, user: CurrentUser, db: DbSession) -> dict:
         "problems": problems,
         "message": message,
     }
+
+
+async def _undo_task(tasks, op: str, snapshot: dict | None, ref: str | None):
+    """Reversão compensatória na porta de tarefa (§5.8).
+
+    `COMPLETE` é o caso que merece atenção: desfazer significa REABRIR,
+    e uma tarefa marcada como feita por engano desaparece da lista sem
+    a pessoa saber. É a reversão que mais importa funcionar.
+    """
+    if op == "CREATE" and ref:
+        await tasks.delete_task("", ref)
+    elif op == "DELETE" and ref:
+        await tasks.restore_task(ref)
+    elif op == "COMPLETE" and ref:
+        await tasks.reopen_task((snapshot or {}).get("list_id", ""), ref)
+    elif op in ("MOVE", "UPDATE") and snapshot:
+        from app.services.plan_store import _task_from_json
+
+        await tasks.update_task(_task_from_json(snapshot))
 
 
 # ---------------------------------------------------------------

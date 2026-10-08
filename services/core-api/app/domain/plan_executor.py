@@ -32,6 +32,7 @@ from app.ports.calendar import (
     CalendarProvider,
     Event,
 )
+from app.ports.tasks import Task, TaskProvider
 
 log = logging.getLogger("core-api.plan_executor")
 
@@ -43,7 +44,13 @@ class AppliedRecord:
     item_id: UUID
     op: Op
     applied_ref: str | None
-    snapshot_before: Event | None
+    snapshot_before: Event | Task | None
+    # Qual porta recebeu. A reversão precisa saber: desfazer um CREATE
+    # de tarefa é `delete_task`, não `delete_event`, e sem isto o undo
+    # chamaria a porta errada.
+    target: Target = Target.EVENT
+    # Ordem anterior, para desfazer um REORDER.
+    previous_order: tuple[str, ...] = ()
 
 
 @dataclass
@@ -81,6 +88,7 @@ async def apply_plan(
     plan: Plan,
     provider: CalendarProvider,
     *,
+    tasks: TaskProvider | None = None,
     item_ids: list[UUID] | None = None,
     skip_revalidation: bool = False,
 ) -> ExecutionResult:
@@ -116,8 +124,22 @@ async def apply_plan(
             ],
         )
 
+    # Um plano com item de tarefa exige a porta de tarefa. Falhar aqui,
+    # antes de aplicar qualquer coisa, é melhor que falhar no meio e ter
+    # de reverter — a aplicação parcial é o estado mais caro de todos.
+    if any(i.target == Target.TASK for i in selected) and tasks is None:
+        return ExecutionResult(
+            status=PlanStatus.FAILED,
+            failed=[
+                (i.id, "plano tem item de tarefa, mas nenhuma lista "
+                       "está conectada para recebê-lo")
+                for i in selected
+                if i.target == Target.TASK
+            ],
+        )
+
     if not skip_revalidation:
-        conflicts = await _revalidate(selected, provider)
+        conflicts = await _revalidate(selected, provider, tasks)
         if conflicts:
             raise RevalidationFailed(conflicts)
 
@@ -130,7 +152,7 @@ async def apply_plan(
 
         for item in ordered_for_apply(group):
             try:
-                record = await _apply_item(item, provider)
+                record = await _apply_item(item, provider, tasks)
                 group_applied.append(record)
             except Exception as exc:  # noqa: BLE001
                 log.warning("item %s falhou: %s", item.id, exc)
@@ -143,7 +165,7 @@ async def apply_plan(
             # agenda sem tarefa, ou tarefa apontando para horário vazio
             # (§5.7.1). Reverte o grupo inteiro.
             log.info("revertendo grupo de %d itens", len(group_applied))
-            unresolved = await _revert(group_applied, provider)
+            unresolved = await _revert(group_applied, provider, tasks)
             result.manual_fix_needed.extend(unresolved)
         else:
             result.applied.extend(group_applied)
@@ -158,12 +180,14 @@ async def apply_plan(
 
 # ---------------------------------------------------------------
 async def _apply_item(
-    item: DiffItem, provider: CalendarProvider
+    item: DiffItem,
+    provider: CalendarProvider,
+    tasks: TaskProvider | None = None,
 ) -> AppliedRecord:
-    if item.target != Target.EVENT:
-        raise NotImplementedError(
-            f"target {item.target} chega no M4 (§5.7)"
-        )
+    if item.target == Target.TASK:
+        if tasks is None:
+            raise RuntimeError("item de tarefa sem porta de tarefa")
+        return await _apply_task_item(item, tasks)
 
     match item.op:
         case Op.CREATE:
@@ -209,8 +233,95 @@ async def _apply_item(
             raise NotImplementedError(f"operação {item.op} não suportada")
 
 
+async def _apply_task_item(
+    item: DiffItem, tasks: TaskProvider
+) -> AppliedRecord:
+    """Aplica na porta de tarefa.
+
+    `MOVE` e `UPDATE` caem no mesmo lugar de propósito: em tarefa os
+    dois são escrita de campo (prazo ou lista num caso, título ou nota
+    no outro). A distinção existe para a UI dar destaque diferente, não
+    para o provedor.
+    """
+    match item.op:
+        case Op.CREATE:
+            task = item.task_after
+            assert task is not None
+            created = await tasks.create_task(replace(task, source="age"))
+            return AppliedRecord(
+                item_id=item.id,
+                op=Op.CREATE,
+                applied_ref=created.id,
+                snapshot_before=None,
+                target=Target.TASK,
+            )
+
+        case Op.MOVE | Op.UPDATE:
+            before = item.task_before
+            after = item.task_after
+            assert before is not None and after is not None
+            updated = await tasks.update_task(
+                replace(after, id=before.id),
+                expected_etag=before.etag,
+            )
+            return AppliedRecord(
+                item_id=item.id,
+                op=item.op,
+                applied_ref=updated.id,
+                snapshot_before=before,
+                target=Target.TASK,
+            )
+
+        case Op.COMPLETE:
+            before = item.task_before
+            assert before is not None
+            done = await tasks.complete_task(before.list_id, before.id or "")
+            return AppliedRecord(
+                item_id=item.id,
+                op=Op.COMPLETE,
+                applied_ref=done.id,
+                snapshot_before=before,
+                target=Target.TASK,
+            )
+
+        case Op.DELETE:
+            before = item.task_before
+            assert before is not None
+            await tasks.delete_task(before.list_id, before.id or "")
+            return AppliedRecord(
+                item_id=item.id,
+                op=Op.DELETE,
+                applied_ref=before.id,
+                snapshot_before=before,
+                target=Target.TASK,
+            )
+
+        case Op.REORDER:
+            list_id = item.target_ref or ""
+            # Ordem atual, para poder desfazer. Lida ANTES de escrever,
+            # porque depois dela não há como reconstruir.
+            current = await tasks.list_tasks([list_id])
+            previous = tuple(t.id or "" for t in current)
+            await tasks.reorder(list_id, list(item.reorder_ids))
+            return AppliedRecord(
+                item_id=item.id,
+                op=Op.REORDER,
+                applied_ref=list_id,
+                snapshot_before=None,
+                target=Target.TASK,
+                previous_order=previous,
+            )
+
+        case _:
+            raise NotImplementedError(
+                f"operação {item.op} não existe para tarefa"
+            )
+
+
 async def _revert(
-    records: list[AppliedRecord], provider: CalendarProvider
+    records: list[AppliedRecord],
+    provider: CalendarProvider,
+    tasks: TaskProvider | None = None,
 ) -> list[str]:
     """Reversão compensatória. Devolve o que NÃO conseguiu desfazer.
 
@@ -222,6 +333,18 @@ async def _revert(
 
     for record in reversed(records):
         try:
+            if record.target == Target.TASK:
+                if tasks is None:
+                    unresolved.append(
+                        f"não consegui desfazer {record.op.value} de tarefa: "
+                        "a lista não está mais acessível"
+                    )
+                    continue
+                note = await _revert_task(record, tasks)
+                if note:
+                    unresolved.append(note)
+                continue
+
             match record.op:
                 case Op.CREATE:
                     if record.applied_ref:
@@ -246,9 +369,9 @@ async def _revert(
                         )
         except Exception as exc:  # noqa: BLE001
             title = (
-                record.snapshot_before.title
-                if record.snapshot_before
-                else record.applied_ref or "evento"
+                getattr(record.snapshot_before, "title", None)
+                or record.applied_ref
+                or "item"
             )
             unresolved.append(
                 f"não consegui desfazer {record.op.value} de '{title}': {exc}"
@@ -257,44 +380,133 @@ async def _revert(
     return unresolved
 
 
-async def _revalidate(
-    items: list[DiffItem], provider: CalendarProvider
-) -> list[str]:
-    """Confere se os eventos a mexer ainda estão como na proposta.
+async def _revert_task(
+    record: AppliedRecord, tasks: TaskProvider
+) -> str | None:
+    """Reversão compensatória na porta de tarefa.
 
-    Dois casos distintos, com reações diferentes:
-      - evento desapareceu → o modelo pode ter alucinado, ou alguém
-        apagou. Aborta.
-      - etag divergente → alguém editou. Aborta, porque o usuário
-        aprovou uma proposta feita sobre outro estado.
+    Devolve a pendência em texto, ou `None` se desfez por completo.
+    """
+    snapshot = record.snapshot_before
+    match record.op:
+        case Op.CREATE:
+            if record.applied_ref:
+                await tasks.delete_task("", record.applied_ref)
+            return None
+
+        case Op.MOVE | Op.UPDATE:
+            if isinstance(snapshot, Task):
+                await tasks.update_task(snapshot)
+            return None
+
+        case Op.COMPLETE:
+            # Desfazer uma conclusão exige método próprio, e não todo
+            # provedor tem. Quando não tem, o usuário precisa saber:
+            # uma tarefa marcada como feita que não deveria estar é
+            # pior que um erro visível, porque ela desaparece da lista.
+            if isinstance(snapshot, Task) and snapshot.id:
+                reopen = getattr(tasks, "reopen_task", None)
+                if reopen is None:
+                    return (
+                        f"'{snapshot.title}' ficou marcada como concluída e "
+                        f"o provedor não permite reabrir pela API — "
+                        "desmarque no app da lista"
+                    )
+                await reopen(snapshot.list_id, snapshot.id)
+            return None
+
+        case Op.DELETE:
+            if isinstance(snapshot, Task):
+                restore = getattr(tasks, "restore_task", None)
+                if restore is not None and snapshot.id:
+                    await restore(snapshot.id)
+                    return None
+                # Sem restore: recriar é o melhor possível, e o id muda.
+                recreated = await tasks.create_task(
+                    replace(snapshot, id=None)
+                )
+                return (
+                    f"'{snapshot.title}' foi recriada com um id novo "
+                    f"({recreated.id}); vínculos antigos para ela não "
+                    "funcionam mais"
+                )
+            return None
+
+        case Op.REORDER:
+            if record.previous_order and record.applied_ref:
+                await tasks.reorder(
+                    record.applied_ref, list(record.previous_order)
+                )
+            return None
+
+    return None
+
+
+async def _revalidate(
+    items: list[DiffItem],
+    provider: CalendarProvider,
+    tasks: TaskProvider | None = None,
+) -> list[str]:
+    """Confere se o que vai ser mexido ainda está como na proposta.
+
+    Relê a agenda E as listas (§5.8, passo 1). Dois casos distintos,
+    com reações diferentes:
+      - desapareceu → o modelo pode ter alucinado, ou alguém apagou.
+      - etag divergente → alguém editou, e o usuário aprovou uma
+        proposta feita sobre outro estado.
+
+    Os dois abortam. Aplicar sobre um estado diferente do que o usuário
+    viu ao aprovar é pior que pedir para ele revisar de novo.
     """
     problems: list[str] = []
 
     for item in items:
-        if item.before is None or item.before.id is None:
+        event = item.event_before
+        if event is not None and event.id is not None:
+            found = await provider.list_events(
+                [event.calendar_id], event.start, event.end
+            )
+            current = next((e for e in found if e.id == event.id), None)
+
+            if current is None:
+                problems.append(f"'{event.title}' não está mais na agenda")
+            elif (
+                provider.capabilities.supports_etag_concurrency
+                and event.etag is not None
+                and current.etag != event.etag
+            ):
+                problems.append(
+                    f"'{event.title}' foi editado depois que eu propus"
+                )
             continue
 
-        found = await provider.list_events(
-            [item.before.calendar_id],
-            item.before.start,
-            item.before.end,
-        )
-        current = next((e for e in found if e.id == item.before.id), None)
-
-        if current is None:
-            problems.append(
-                f"'{item.before.title}' não está mais na agenda"
+        task = item.task_before
+        if task is not None and task.id is not None and tasks is not None:
+            # `include_done=True` de propósito: se a tarefa foi
+            # concluída entre a proposta e a aprovação, isso tem de
+            # aparecer como conflito — e não como "desapareceu", que
+            # mandaria o usuário procurar o que não se perdeu.
+            found_tasks = await tasks.list_tasks(
+                [task.list_id], include_done=True
             )
-            continue
-
-        if (
-            provider.capabilities.supports_etag_concurrency
-            and item.before.etag is not None
-            and current.etag != item.before.etag
-        ):
-            problems.append(
-                f"'{item.before.title}' foi editado depois que eu propus"
+            current_task = next(
+                (t for t in found_tasks if t.id == task.id), None
             )
+
+            if current_task is None:
+                problems.append(f"'{task.title}' não está mais na lista")
+            elif current_task.is_done and not task.is_done:
+                problems.append(
+                    f"'{task.title}' já foi concluída depois que eu propus"
+                )
+            elif (
+                tasks.capabilities.supports_etag_concurrency
+                and task.etag is not None
+                and current_task.etag != task.etag
+            ):
+                problems.append(
+                    f"'{task.title}' foi editada depois que eu propus"
+                )
 
     return problems
 

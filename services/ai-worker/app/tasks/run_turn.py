@@ -37,8 +37,23 @@ from app.domain.orchestrator import TurnCancelled, run_conversation_turn
 from app.domain.tools import (
     ToolContext,
     build_tool_specs,
-    calendar_tools,  # noqa: F401  (registra)
+    # Importar estes módulos REGISTRA as ferramentas no registry (§5.2),
+    # e os `noqa: F401` são obrigatórios: sem eles o lint remove o
+    # import e as tools somem do prompt — silenciosamente, porque o
+    # orquestrador continua funcionando com menos ferramentas.
+    #
+    # Foi exatamente isso que aconteceu com `study_tools` no M3: o
+    # módulo foi escrito, testado e documentado, mas nunca importado
+    # aqui. Nenhuma das suas ferramentas chegou ao modelo, e o smoke do
+    # M3 não pegou porque ele exercita a API direto, não o caminho
+    # conversacional.
+    #
+    # Toda tool nova precisa de uma linha aqui, e
+    # `tests/unit/test_tool_registration.py` quebra se faltar.
+    calendar_tools,  # noqa: F401
     execute_tool,
+    study_tools,  # noqa: F401
+    task_tools,  # noqa: F401
 )
 from app.ports.llm import LLMError, Message
 from app.prompts import build_system_prompt

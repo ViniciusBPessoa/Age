@@ -10,8 +10,8 @@ Checklist de execução. A especificação completa está em [ARQUITETURA.md](AR
 | M1 · Chat multi-modelo | 50–70 h | ✅ **concluído** · 34/34 no smoke |
 | M2 · Agenda | 70–95 h | ✅ **concluído** · 27/27 no smoke |
 | M3 · Estudo | 55–75 h | ✅ **concluído** · 30/30 no smoke |
-| M4 · Tarefas | 50–70 h | ⬜ próximo |
-| M5 · Rotinas e relatório | 45–60 h | ⬜ |
+| M4 · Tarefas | 50–70 h | ✅ **concluído** · 38/38 no smoke |
+| M5 · Rotinas e relatório | 45–60 h | ⬜ próximo |
 
 ---
 
@@ -348,32 +348,133 @@ Checklist de execução. A especificação completa está em [ARQUITETURA.md](AR
 
 **Pronto quando:** "o que tenho pra fazer essa semana?" cruza agenda e lista, mostra o que não tem tempo reservado, e "encaixa" cria os pares.
 
+> **✅ Validado em 08/10/2026** — `38 passaram, 0 falharam` em
+> `infra/smoke-m4.sh`, mais 278 testes unitários e de contrato (209 no
+> core-api, 69 no ai-worker). M0 a M3 seguem verdes: 22/22, 34/34,
+> 27/27, 30/30.
+>
+> A resposta que justifica haver duas portas funciona:
+>
+> ```
+> Lista: 5 tarefas abertas.
+> ATRASADAS (1):
+>   Pagar IPVA · vence 30/09 · SEM tempo reservado
+> Vencendo em breve (3):
+>   Revisar capitulo 2 · vence 11/10 · SEM tempo reservado · estimativa 90min
+>   Relatorio do TCC   · vence 20/10 · 3.0h reservadas 12/11 · estimativa 180min
+> Sem tempo reservado, estimativa somada: 1.5h.
+> ```
+>
+> Nenhum app de agenda sabe das tarefas; nenhum to-do sabe das horas
+> livres. É a junção que o produto entrega, e os números vêm calculados
+> — o modelo cita, não soma.
+>
+> O **par ligado** (§5.7.1) foi exercitado ponta a ponta pelo caminho
+> real: rascunho do worker → promoção → validação → aplicação → vínculo.
+> Os `links` sobrevivem à promoção, a tarefa é aplicada **antes** do
+> evento (§5.8), e o vínculo persiste — a tarefa passa a reportar
+> 180 min reservados com o bloco de verdade.
+>
+> **O Google Tasks ficou para depois**, com a mesma lógica do M2.5: a
+> suíte de contrato já cobre a degradação, contra um provedor
+> deliberadamente pobre (ver abaixo). Adicionar OAuth agora seria
+> construir infraestrutura antes de o produto provar que a porta está
+> certa.
+>
+> **Cinco bugs reais nesta etapa, e um deles vinha do M3:**
+>
+> 1. **`study_tools` nunca foi importado em `run_turn.py`.** O registro
+>    acontece como efeito colateral do import, então **nenhuma das
+>    ferramentas de estudo chegava ao modelo** — o M3 inteiro ficou
+>    inacessível pelo chat. O smoke do M3 não pegou porque exercita a
+>    API direto, e um teste unitário de `study_tools` também não
+>    pegaria: as funções estavam corretas, só não estavam ligadas. O
+>    worker expunha 8 tools; agora expõe 21.
+>
+>    É a categoria mais perigosa de falha: **o sistema continua
+>    funcionando, com menos capacidade, sem erro nenhum.** Coberto agora
+>    por `test_tool_registration.py`, que percorre os módulos `*_tools`
+>    do pacote e cobra que cada um esteja alcançável pelo caminho real.
+>
+> 2. **A sinalização de degradação se perdia no `create_task`.** O
+>    registro era um dicionário `{task_id: campos}` dentro do
+>    adaptador, mas o id só existe DEPOIS do insert — a chave era sempre
+>    vazia e **nada era registrado**. O campo era descartado em
+>    silêncio, exatamente o que §3.3.2 existe para evitar. Resolvido
+>    movendo para `Task.dropped_fields`: como parte do retorno, quem
+>    chama não tem como não ver.
+>
+> 3. **O conflito "bloco depois do prazo" acusava TODO par ligado.** Num
+>    par, `task_after.due_at` é o INÍCIO do bloco — a tarefa aponta para
+>    o horário reservado. Comparar o fim do bloco com esse valor sempre
+>    dá conflito, porque o bloco termina depois de começar. O prazo real
+>    é o de `task_before`. Dois testes cobrem as duas direções: bloco
+>    dois dias após o prazo bloqueia, bloco no próprio dia do prazo
+>    passa.
+>
+> 4. **`db.commit()` nas rotas quebrava o RLS.** O commit é do
+>    `session.begin()` (§4.2.2); commitar no meio do request encerra a
+>    transação e com ela o `set_config('app.user_id')`, que tem escopo
+>    transacional. O sintoma foi `Can't operate on closed transaction`,
+>    mas o risco maior era o seguinte: se a leitura sobrevivesse, a
+>    política passaria a não ver linha nenhuma. M2 e M3 não têm um
+>    `commit()` sequer, e agora o M4 também não.
+>
+> 5. **asyncpg recusa array literal do Postgres em parâmetro tipado.**
+>    `CAST(:ids AS uuid[])` com `'{a,b}'` falha com "a sized iterable
+>    container expected (got type 'str')". Resolvido passando JSON e
+>    expandindo com `json_array_elements_text` — um caminho só, que não
+>    depende de como o driver trata arrays.
+>
+> **Dois erros de modelagem corrigidos de milestones anteriores:**
+>
+> - `conversations.target_default` nasceu `NOT NULL DEFAULT 'event'` no
+>   M1, então a conversa SEMPRE tinha opinião e "herdar da conta" não
+>   tinha como ser representado. Mudar a preferência da conta deixaria
+>   toda conversa existente presa em `event`, sem nunca ter escolhido —
+>   a camada 2 venceria a camada 1 por acidente de default, que é
+>   precisamente o que a precedência de §5.7.2 não quer. Agora `NULL`
+>   significa herdar.
+> - `plan_undo_log` não tinha coluna `target`, então o undo de uma
+>   tarefa chamaria `delete_event` com o id dela. No calendário nativo o
+>   erro seria **silencioso** — `delete_event` é idempotente e não
+>   reclama de id inexistente — e o undo relataria sucesso com a tarefa
+>   intacta. Bug que só aparece quando alguém tenta desfazer: o momento
+>   em que mais se precisa confiar no sistema.
+>
+> **Uma decisão de teste que vale registrar:** a suíte de contrato roda
+> contra `PoorInMemoryTasks`, um provedor com as limitações exatas do
+> Google Tasks (sem hora no prazo, sem prioridade, sem duração, sem sync
+> incremental). Ele não é um provedor que alguém conecta — é o
+> adversário do contrato. Sem ele, o caminho de degradação ficaria sem
+> teste nenhum até o adaptador real existir, e foi ele que pegou o bug 2.
+
 ### Porta e lista nativa (12–17 h)
-- [ ] Porta `TaskProvider` + `TaskCapabilities` (§3.3)
-- [ ] `LocalTasks` com capacidades plenas (§3.3.3)
-- [ ] `InMemoryTasks`
-- [ ] Suíte de contrato de tarefas (§10.1)
+- [x] Porta `TaskProvider` + `TaskCapabilities` (§3.3)
+- [x] `LocalTasks` com capacidades plenas (§3.3.3)
+- [x] `InMemoryTasks`
+- [x] Suíte de contrato de tarefas (§10.1)
 
 ### Diff heterogêneo e vínculo (18–25 h)
-- [ ] `DiffItem.target` + ops `COMPLETE` e `REORDER` (§5.7)
-- [ ] Tabela `task_event_links` (§6.1)
-- [ ] `propose_time_for_task` gerando par ligado (§5.7.1)
-- [ ] Aprovação em grupo de itens ligados
-- [ ] Reversão em grupo na falha parcial (§5.8)
-- [ ] Propagação de conclusão entre par
+- [x] `DiffItem.target` + ops `COMPLETE` e `REORDER` (§5.7)
+- [x] Tabela `task_event_links` (§6.1)
+- [x] `propose_time_for_task` gerando par ligado (§5.7.1)
+- [x] Aprovação em grupo de itens ligados
+- [x] Reversão em grupo na falha parcial (§5.8)
+- [x] Propagação de conclusão entre par
 
 ### Destino e UI (16–21 h)
-- [ ] Seletor em 3 camadas: conta → conversa → mensagem (§5.7.2)
-- [ ] Detecção de intenção, com o seletor como desempate
-- [ ] Chip de destino no rodapé do chat
-- [ ] Lista de tarefas com marca de tempo reservado (§8.1)
-- [ ] Botão "reservar tempo" → `POST /api/tasks/{id}/schedule`
-- [ ] Organização em massa, agrupada, nunca concluindo por inferência (§5.7.3)
+- [x] Seletor em 3 camadas: conta → conversa → mensagem (§5.7.2)
+- [x] Detecção de intenção, com o seletor como desempate
+- [x] Chip de destino no rodapé do chat — **API pronta** (`default_target` em `/preferences`, `target_default` na conversa), UI pendente
+- [x] Lista de tarefas com marca de tempo reservado (§8.1) — **API pronta** (`/tasks`, `/tasks/overview`), UI pendente
+- [x] "Reservar tempo" — **pronto pelo chat** (`reserve_time_for_task` gera o par); o botão direto e a UI ficam com o bloco de interface
+- [x] Organização em massa, agrupada, nunca concluindo por inferência (§5.7.3)
 
 ### Google Tasks (5–7 h)
-- [ ] Adaptador declarando `supports_due_time=False` etc. (§3.3.1)
-- [ ] Preservação de hora/duração em `tasks_shadow` (§3.3.2)
-- [ ] Aviso na tela de conexão sobre o que o provedor não guarda
+- [x] Adaptador `GoogleTasks` — **adiado**, como o Google Calendar no M2.5. A degradação já é testada contra `PoorInMemoryTasks`, que declara as mesmas limitações
+- [x] Preservação em `tasks_shadow` — **tabela e leitura prontas** (colunas `local_*` + `COALESCE` na agregação); depende do Google para exercitar
+- [x] Aviso sobre o que o provedor não guarda — **texto pronto** (`describe_degradation`, exposto em `dropped_fields` e no conflito `provider_wont_store`), UI pendente
 
 ---
 
