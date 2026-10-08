@@ -1,0 +1,83 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: [core-api, ai-worker]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+
+      - name: Instalar dependências
+        working-directory: services/${{ matrix.service }}
+        run: |
+          uv venv
+          uv pip install -e ../../packages/age-contracts
+          uv pip install -e ".[dev]"
+
+      - name: Lint
+        working-directory: services/${{ matrix.service }}
+        run: uv run ruff check .
+
+      - name: Testes
+        working-directory: services/${{ matrix.service }}
+        run: uv run pytest -q
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Instalar
+        working-directory: services/web
+        run: npm install --no-audit --no-fund
+      - name: Typecheck
+        working-directory: services/web
+        run: npm run typecheck
+      - name: Build
+        working-directory: services/web
+        run: npm run build
+
+  # O que prova que os serviços realmente conversam. Sem isto, os testes
+  # unitários passam e a integração quebra na véspera (ARQUITETURA.md §13 M0).
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Gerar .env
+        run: |
+          cp .env.example .env
+          for key in POSTGRES_PASSWORD AGE_OWNER_PASSWORD CORE_API_DB_PASSWORD \
+                     AI_WORKER_DB_PASSWORD REDIS_PASSWORD MASTER_KEY \
+                     JWT_SIGNING_KEY SERVICE_JWT_SECRET; do
+            sed -i "s|^$key=.*|$key=$(openssl rand -hex 24)|" .env
+          done
+      - name: Subir
+        run: docker compose -f infra/docker-compose.yml up -d --build
+      - name: Aguardar core-api
+        run: |
+          for i in $(seq 1 60); do
+            curl -sf localhost:8000/readyz | grep -q '"ready":true' && exit 0
+            sleep 3
+          done
+          docker compose -f infra/docker-compose.yml logs
+          exit 1
+      - name: Migrations
+        run: make migrate
+      - name: Smoke
+        run: make smoke
+      - name: Logs em caso de falha
+        if: failure()
+        run: docker compose -f infra/docker-compose.yml logs

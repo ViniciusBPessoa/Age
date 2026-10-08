@@ -1,0 +1,41 @@
+# Age — ai-worker
+# Uma imagem, dois processos: o consumidor da fila (`arq`) e a API
+# interna de cancelamento (`uvicorn`). O Compose sobe os dois a partir
+# daqui, com comandos diferentes (ARQUITETURA.md §7.3).
+
+FROM python:3.12-slim AS base
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy
+WORKDIR /app
+RUN pip install --no-cache-dir uv==0.5.11 \
+ && adduser --system --no-create-home --group age
+
+# ---------------------------------------------------------------
+FROM base AS deps
+COPY packages/age-contracts /packages/age-contracts
+COPY services/ai-worker/pyproject.toml ./
+RUN uv pip install --system --no-cache -e /packages/age-contracts \
+ && uv pip install --system --no-cache \
+      "fastapi>=0.115" "uvicorn[standard]>=0.32" "pydantic>=2.9" \
+      "pydantic-settings>=2.6" "sqlalchemy[asyncio]>=2.0.36" \
+      "asyncpg>=0.30" "alembic>=1.14" "redis>=5.2" "arq>=0.26" \
+      "httpx>=0.28" "cryptography>=44.0" "pyjwt>=2.10"
+
+# ---------------------------------------------------------------
+FROM deps AS dev
+RUN uv pip install --system --no-cache \
+      "pytest>=8.3" "pytest-asyncio>=0.24" "ruff>=0.8" "watchfiles>=0.24"
+COPY services/ai-worker/ .
+USER age
+EXPOSE 8001
+CMD ["arq", "app.worker.WorkerSettings", "--watch", "/app/app"]
+
+# ---------------------------------------------------------------
+FROM deps AS prod
+COPY services/ai-worker/ .
+USER age
+EXPOSE 8001
+CMD ["arq", "app.worker.WorkerSettings"]

@@ -1,0 +1,419 @@
+"""Rotas de plano: revisar, aprovar, rejeitar, desfazer.
+
+ARQUITETURA.md §5.7, §5.8 e §8.1. Esta é a superfície da aprovação
+granular: aceitar 4 de 6 itens é operação de primeira classe, não caso
+de borda.
+"""
+
+from __future__ import annotations
+
+import logging
+from datetime import datetime
+from typing import Literal
+from uuid import UUID
+
+from fastapi import APIRouter, HTTPException, Query, status
+from pydantic import BaseModel, Field
+from sqlalchemy import text
+
+from app.adapters.calendar.local import LocalCalendar
+from app.core.deps import CurrentUser, DbSession
+from app.domain.plan_executor import (
+    PlanExpired,
+    RevalidationFailed,
+    apply_plan,
+)
+from app.services.plan_store import (
+    load_plan,
+    mark_applied,
+    mark_rejected,
+    promote_drafts,
+    record_undo_log,
+)
+from app.services.study_store import link_sessions_to_events
+
+log = logging.getLogger("core-api.plans")
+router = APIRouter(prefix="/plans", tags=["plans"])
+
+
+class ConflictOut(BaseModel):
+    kind: str
+    message: str
+    severity: str
+
+
+class PlanItemOut(BaseModel):
+    id: UUID
+    target: str
+    op: str
+    reason: str
+    before: dict | None = None
+    after: dict | None = None
+    conflicts: list[ConflictOut] = Field(default_factory=list)
+    links: list[UUID] = Field(default_factory=list)
+    status: str
+    is_blocking: bool
+
+
+class PlanOut(BaseModel):
+    id: UUID
+    conversation_id: UUID | None
+    origin_note: str | None
+    status: str
+    summary: str
+    items: list[PlanItemOut]
+    created_at: datetime
+    expires_at: datetime
+    is_expired: bool
+
+
+class ApplyIn(BaseModel):
+    """`item_ids=None` aplica tudo; lista vazia é rejeição."""
+
+    item_ids: list[UUID] | None = None
+    # Confirmação separada para itens com conflito bloqueante (§5.6).
+    confirm_blocking: bool = False
+
+
+class ApplyOut(BaseModel):
+    status: str
+    applied_count: int
+    failed: list[dict] = Field(default_factory=list)
+    manual_fix_needed: list[str] = Field(default_factory=list)
+    message: str
+
+
+def _not_found() -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail={
+            "error": {"code": "plan_not_found", "message": "Plano não encontrado."}
+        },
+    )
+
+
+@router.get("")
+async def list_plans(
+    user: CurrentUser,
+    db: DbSession,
+    status_filter: Literal["proposed", "applied", "all"] = Query(
+        default="proposed", alias="status"
+    ),
+    limit: int = Query(default=20, ge=1, le=100),
+) -> list[PlanOut]:
+    # Promove rascunhos do worker antes de listar (§2.3.2).
+    await promote_drafts(db, user.id)
+
+    clause = ""
+    if status_filter == "proposed":
+        clause = "AND status = 'proposed'"
+    elif status_filter == "applied":
+        clause = "AND status IN ('applied','partially_applied')"
+
+    rows = await db.execute(
+        text(
+            f"""
+            SELECT id FROM core.plans
+            WHERE user_id = :uid {clause}
+            ORDER BY created_at DESC
+            LIMIT :lim
+            """
+        ),
+        {"uid": str(user.id), "lim": limit},
+    )
+
+    out = []
+    for row in rows.all():
+        plan = await load_plan(db, user.id, row[0])
+        if plan is not None:
+            out.append(_to_out(plan))
+    return out
+
+
+@router.get("/{plan_id}")
+async def get_plan(
+    plan_id: UUID, user: CurrentUser, db: DbSession
+) -> PlanOut:
+    await promote_drafts(db, user.id)
+    plan = await load_plan(db, user.id, plan_id)
+    if plan is None:
+        raise _not_found()
+    return _to_out(plan)
+
+
+@router.post("/{plan_id}/apply")
+async def apply(
+    plan_id: UUID, body: ApplyIn, user: CurrentUser, db: DbSession
+) -> ApplyOut:
+    """Aplica o plano. É o único caminho que escreve na agenda."""
+    plan = await load_plan(db, user.id, plan_id)
+    if plan is None:
+        raise _not_found()
+
+    if body.item_ids is not None and not body.item_ids:
+        await mark_rejected(db, user.id, plan_id)
+        return ApplyOut(
+            status="rejected",
+            applied_count=0,
+            message="Plano rejeitado. Nada foi alterado na sua agenda.",
+        )
+
+    provider = LocalCalendar(db=db, user_id=user.id)
+
+    try:
+        result = await apply_plan(
+            plan,
+            provider,
+            item_ids=body.item_ids,
+            skip_revalidation=False,
+        )
+    except PlanExpired as exc:
+        await db.execute(
+            text(
+                "UPDATE core.plans SET status = 'expired' "
+                "WHERE id = :pid AND user_id = :uid"
+            ),
+            {"pid": str(plan_id), "uid": str(user.id)},
+        )
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "error": {
+                    "code": "plan_expired",
+                    "message": (
+                        "Este plano expirou e sua agenda pode ter mudado. "
+                        "Quer que eu recalcule?"
+                    ),
+                    "details": {"plan_id": str(plan_id)},
+                }
+            },
+        ) from exc
+    except RevalidationFailed as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "error": {
+                    "code": "agenda_changed",
+                    "message": (
+                        "Sua agenda mudou desde que eu propus isso: "
+                        + "; ".join(exc.conflicts)
+                        + ". Quer que eu recalcule?"
+                    ),
+                    "details": {"conflicts": exc.conflicts},
+                }
+            },
+        ) from exc
+
+    await mark_applied(db, user.id, plan_id, result)
+    await record_undo_log(db, user.id, plan_id, result)
+
+    # Liga as sessões de estudo aos eventos recém-criados (§5.5). Até
+    # aqui as sessões existem em `study_sessions` sem `event_ref`;
+    # agora passam a apontar para o evento real, o que habilita o
+    # acompanhamento de §5.9.8 ("pulei o estudo de ontem").
+    #
+    # Falha aqui não derruba a aplicação: os eventos já estão na agenda,
+    # e perder o vínculo é degradação (o painel de estudo fica
+    # incompleto), não corrupção.
+    try:
+        linked = await link_sessions_to_events(db, user.id, plan_id)
+        if linked:
+            log.info("%d sessões de estudo vinculadas", linked)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("não foi possível vincular sessões de estudo: %s", exc)
+
+    # Erro tecnico fica no log; o usuario recebe linguagem util
+    # (secao 5.9.13). Vazar stack de driver de banco na UI nao ajuda
+    # ninguem e expoe estrutura interna.
+    for item_id, error in result.failed:
+        log.warning("item %s falhou ao aplicar: %s", item_id, error)
+
+    return ApplyOut(
+        status=result.status.value,
+        applied_count=len(result.applied),
+        failed=[
+            {"item_id": str(i), "error": _user_facing_error(e)}
+            for i, e in result.failed
+        ],
+        manual_fix_needed=result.manual_fix_needed,
+        message=_message_for(result),
+    )
+
+
+@router.post("/{plan_id}/reject", status_code=status.HTTP_204_NO_CONTENT)
+async def reject(plan_id: UUID, user: CurrentUser, db: DbSession) -> None:
+    plan = await load_plan(db, user.id, plan_id)
+    if plan is None:
+        raise _not_found()
+    await mark_rejected(db, user.id, plan_id)
+
+
+@router.post("/{plan_id}/undo")
+async def undo(plan_id: UUID, user: CurrentUser, db: DbSession) -> dict:
+    """Desfaz um plano aplicado, dentro da janela de 7 dias (§5.8).
+
+    A reversão é compensatória: deletar o que criamos, mover de volta o
+    que movemos, recriar o que deletamos. Fingir atomicidade seria
+    mentira, então o que não deu é reportado.
+    """
+    rows = await db.execute(
+        text(
+            """
+            SELECT item_id, op, snapshot, applied_ref
+            FROM core.plan_undo_log
+            WHERE plan_id = :pid AND user_id = :uid AND undone_at IS NULL
+            ORDER BY created_at DESC
+            """
+        ),
+        {"pid": str(plan_id), "uid": str(user.id)},
+    )
+    records = rows.all()
+    if not records:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "error": {
+                    "code": "nothing_to_undo",
+                    "message": "Não há nada para desfazer neste plano.",
+                }
+            },
+        )
+
+    provider = LocalCalendar(db=db, user_id=user.id)
+    undone = 0
+    problems: list[str] = []
+
+    for _item_id, op, snapshot, applied_ref in records:
+        # SAVEPOINT por item. Sem isto, a primeira exceção aborta a
+        # transação inteira e todos os itens seguintes falham com
+        # `current transaction is aborted` — o try/except por item não
+        # funciona no Postgres sem savepoint.
+        #
+        # Importa porque a reversão é compensatória (§5.8): desfazer 3
+        # de 4 é melhor que desfazer nenhum, e o usuário precisa saber
+        # exatamente o que sobrou.
+        try:
+            async with db.begin_nested():
+                if op == "CREATE" and applied_ref:
+                    await provider.delete_event("", applied_ref)
+                elif op in ("MOVE", "UPDATE") and snapshot:
+                    await provider.restore_from_snapshot(snapshot)
+                elif op == "DELETE" and applied_ref:
+                    await provider.restore_event(applied_ref)
+            undone += 1
+        except Exception as exc:  # noqa: BLE001
+            title = (snapshot or {}).get("title", applied_ref or "evento")
+            log.warning("falha ao desfazer %s de '%s': %s", op, title, exc)
+            problems.append(f"'{title}' não pôde ser revertido")
+
+    await db.execute(
+        text(
+            """
+            UPDATE core.plan_undo_log SET undone_at = now()
+            WHERE plan_id = :pid AND user_id = :uid AND undone_at IS NULL
+            """
+        ),
+        {"pid": str(plan_id), "uid": str(user.id)},
+    )
+
+    message = f"Desfiz {undone} de {len(records)} mudanças."
+    if problems:
+        message += " Não consegui desfazer: " + "; ".join(problems)
+
+    return {
+        "undone_count": undone,
+        "total": len(records),
+        "problems": problems,
+        "message": message,
+    }
+
+
+# ---------------------------------------------------------------
+def _to_out(plan) -> PlanOut:
+
+    def event_dict(event) -> dict | None:
+        if event is None:
+            return None
+        return {
+            "id": event.id,
+            "title": event.title,
+            "start": event.start.isoformat(),
+            "end": event.end.isoformat(),
+            "flexibility": event.flexibility.value,
+        }
+
+    return PlanOut(
+        id=plan.id,
+        conversation_id=plan.conversation_id,
+        origin_note=plan.origin_note,
+        status=plan.status.value,
+        summary=plan.summary,
+        created_at=plan.created_at,
+        expires_at=plan.expires_at,
+        is_expired=plan.is_expired,
+        items=[
+            PlanItemOut(
+                id=i.id,
+                target=i.target.value,
+                op=i.op.value,
+                reason=i.reason,
+                before=event_dict(i.before),
+                after=event_dict(i.after),
+                conflicts=[
+                    ConflictOut(
+                        kind=c.kind.value, message=c.message, severity=c.severity
+                    )
+                    for c in i.conflicts
+                ],
+                links=list(i.links),
+                status=i.status.value,
+                is_blocking=i.is_blocking,
+            )
+            for i in plan.items
+        ],
+    )
+
+
+def _user_facing_error(raw: str) -> str:
+    """Traduz falha tecnica em algo acionavel.
+
+    O detalhe tecnico vai para o log, nao para a tela.
+    """
+    lowered = raw.lower()
+    if "conflito bloqueante" in lowered:
+        return raw  # ja e mensagem nossa, em portugues
+    if "etag" in lowered or "concurrency" in lowered:
+        return "Esse evento foi alterado por fora. Recalcule o plano."
+    if "not_found" in lowered or "nao existe" in lowered:
+        return "Esse evento nao esta mais na sua agenda."
+    if "permission denied" in lowered:
+        return "Sem permissao para escrever nesse calendario."
+    if "invalid uuid" in lowered or "asyncpg" in lowered or "sql" in lowered:
+        return "Nao consegui gravar esse item. Tente novamente."
+    return "Nao consegui aplicar esse item."
+
+
+def _message_for(result) -> str:
+    """Mensagem no padrão de §5.9.13: o que entrou, o que não, e o próximo passo."""
+    from app.domain.plan_diff import PlanStatus
+
+    applied = len(result.applied)
+    failed = len(result.failed)
+
+    if result.status == PlanStatus.APPLIED:
+        return f"Pronto. {applied} mudança(s) na sua agenda."
+
+    if result.status == PlanStatus.PARTIALLY_APPLIED:
+        base = (
+            f"{applied} entraram na agenda, {failed} falharam."
+        )
+        if result.manual_fix_needed:
+            base += " Precisa de atenção manual: " + "; ".join(
+                result.manual_fix_needed
+            )
+        else:
+            base += " Nada ficou pela metade."
+        return base
+
+    reasons = "; ".join(_user_facing_error(e) for _, e in result.failed)
+    return f"Nenhuma mudança foi aplicada. {reasons}" 
