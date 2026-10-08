@@ -105,6 +105,32 @@ async def _promote_one(
 ) -> UUID:
     policy = await load_policy(db, user_id)
 
+    # Rascunhos de ROTINA são tratados antes: cada um vira a série em
+    # `core.routines` mais um item de plano por ocorrência da janela.
+    #
+    # Por que a série é criada aqui e não na aplicação: ela não é uma
+    # mudança de agenda, é a declaração do compromisso. O que passa por
+    # aprovação são os EVENTOS — e sem a série existindo, as ocorrências
+    # não teriam a que pertencer, e "fui à academia essa semana?" ficaria
+    # sem resposta porque não haveria aderência para consultar.
+    #
+    # A série nasce pausada em `routines.paused_at`? Não: nasce ativa,
+    # mas sem nenhum evento na agenda até a aprovação. É o estado
+    # honesto — o compromisso existe, o tempo ainda não foi reservado.
+    expanded_items: list[dict] = []
+    for raw in raw_items:
+        if raw.get("target") != "routine":
+            expanded_items.append(raw)
+            continue
+        try:
+            expanded_items.extend(
+                await _promote_routine(db, user_id, raw, policy.timezone)
+            )
+        except (ValueError, KeyError) as exc:
+            log.info("rascunho de rotina descartado: %s", exc)
+
+    raw_items = expanded_items
+
     # Calendario de escrita, resolvido AQUI e nao no executor: o
     # executor recebe o provedor por porta (secao 3.2) e nao deve saber
     # o conceito de "calendario default". Resolver aqui tambem deixa o
@@ -294,6 +320,10 @@ def _build_item(
                         payload.get("flexibility", "flexible")
                     ),
                     source="age",
+                    # Ocorrência de série: o evento sabe de qual rotina
+                    # veio, e é isso que permite mover uma ocorrência
+                    # sem perder a aderência dela.
+                    routine_id=payload.get("routine_id"),
                 ),
             )
 
@@ -341,6 +371,100 @@ def _build_item(
 
         case _:
             raise ValueError(f"operação não suportada: {op}")
+
+
+async def _promote_routine(
+    db: AsyncSession, user_id: UUID, raw: dict, timezone_name: str
+) -> list[dict]:
+    """Cria a série e devolve um rascunho de evento por ocorrência.
+
+    A janela é de 28 dias por padrão — o mesmo horizonte que §5.9.4 usa
+    para contar conflitos ("só 2 conflitos no mês"). Materializar um ano
+    de uma vez encheria a agenda de eventos que o usuário ainda não
+    decidiu manter, e cada rematerialização é idempotente, então não há
+    perda em fazer por janelas.
+    """
+    from datetime import timedelta as _td
+
+    from app.services.routine_store import create_routine, materialize
+
+    payload = raw.get("payload", {})
+    reason = (raw.get("reason") or "").strip()
+    if not reason:
+        raise ValueError("rotina sem reason")
+
+    title = payload.get("title")
+    rrule = payload.get("rrule")
+    first_start = payload.get("first_start")
+    duration_min = payload.get("duration_min")
+    if not (title and rrule and first_start and duration_min):
+        raise ValueError("rotina incompleta")
+
+    from zoneinfo import ZoneInfo
+
+    tz = ZoneInfo(timezone_name)
+    started = datetime.fromisoformat(first_start)
+    if started.tzinfo is None:
+        started = started.replace(tzinfo=tz)
+
+    routine_id = await create_routine(
+        db,
+        user_id,
+        title=title,
+        rrule=rrule,
+        duration_min=int(duration_min),
+        started_at=started,
+        flexibility=payload.get("flexibility", "flexible"),
+        target_per_week=payload.get("target_per_week"),
+    )
+
+    routine = await _load_routine_for_promotion(db, user_id, routine_id)
+    window_end = started + _td(days=28)
+    await materialize(
+        db, user_id, routine, window_start=started, window_end=window_end
+    )
+
+    from app.domain.routines import expand
+
+    occurrences = expand(
+        routine, window_start=started, window_end=window_end
+    )
+
+    # Um item de plano por ocorrência. O usuário aprova a série inteira
+    # ou escolhe quais ocorrências quer — aprovação granular de §8.1
+    # funciona aqui sem nada especial, porque cada ocorrência é um item.
+    out: list[dict] = []
+    for index, occurrence in enumerate(occurrences):
+        out.append(
+            {
+                "id": f"{raw.get('id')}-{index}",
+                "op": "CREATE",
+                "target": "event",
+                "reason": (
+                    reason
+                    if index == 0
+                    else f"{reason} (ocorrência {index + 1} da série)"
+                ),
+                "payload": {
+                    "title": title,
+                    "start": occurrence.start.isoformat(),
+                    "end": occurrence.end.isoformat(),
+                    "flexibility": payload.get("flexibility", "flexible"),
+                    "routine_id": str(routine_id),
+                },
+                "sequence": index,
+            }
+        )
+    return out
+
+
+async def _load_routine_for_promotion(db, user_id, routine_id):
+    from app.services.routine_store import load_routine
+
+    routine = await load_routine(db, user_id, routine_id)
+    if routine is None:  # pragma: no cover — acabou de ser criada
+        raise ValueError("rotina criada mas não encontrada")
+    return routine
 
 
 async def _resolve_write_list(
@@ -691,6 +815,7 @@ def _event_json(event: Event | None) -> dict | None:
         "flexibility": event.flexibility.value,
         "etag": event.etag,
         "source": event.source,
+        "routine_id": event.routine_id,
     }
 
 
@@ -710,6 +835,7 @@ def _event_from_json(raw: dict | None) -> Event | None:
         flexibility=Flexibility(raw.get("flexibility", "fixed")),
         etag=raw.get("etag"),
         source=raw.get("source"),
+        routine_id=raw.get("routine_id"),
     )
 
 

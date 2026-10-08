@@ -36,3 +36,9 @@ Thumbs.db
 # Logs
 *.log
 npm-debug.log*
+
+# Scripts de sondagem copiados para dentro do container durante
+# validação manual. O serviço é bind-mounted, então um `docker cp`
+# para /app aparece aqui — duas vezes eles entraram no stage por
+# descuido.
+probe_*.py

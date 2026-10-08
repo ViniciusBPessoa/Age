@@ -164,7 +164,7 @@ class LocalCalendar(CalendarProvider):
                 """
                 SELECT id, local_calendar_id, title, start_at, end_at,
                        all_day, description, location, recurrence,
-                       flexibility, created_by_age, version
+                       flexibility, created_by_age, version, routine_id
                 FROM core.local_events
                 WHERE user_id = :uid
                   AND local_calendar_id = ANY(:cals)
@@ -226,12 +226,14 @@ class LocalCalendar(CalendarProvider):
                     INSERT INTO core.local_events
                       (user_id, local_calendar_id, title, start_at, end_at,
                        all_day, description, location, recurrence,
-                       flexibility, created_by_age)
+                       flexibility, created_by_age, routine_id)
                     VALUES (:uid, :cal, :title, :start, :end, :all_day,
-                            :descr, :loc, :rrule, :flex, :by_age)
+                            :descr, :loc, :rrule, :flex, :by_age,
+                            CAST(:routine AS uuid))
                     RETURNING id, local_calendar_id, title, start_at, end_at,
                               all_day, description, location, recurrence,
-                              flexibility, created_by_age, version
+                              flexibility, created_by_age, version,
+                              routine_id
                     """
                 ),
                 {
@@ -246,6 +248,7 @@ class LocalCalendar(CalendarProvider):
                     "rrule": event.recurrence,
                     "flex": event.flexibility.value,
                     "by_age": event.source == "age",
+                    "routine": event.routine_id,
                 },
             )
         ).first()
@@ -283,7 +286,8 @@ class LocalCalendar(CalendarProvider):
                        OR version = CAST(:expected AS integer))
                     RETURNING id, local_calendar_id, title, start_at, end_at,
                               all_day, description, location, recurrence,
-                              flexibility, created_by_age, version
+                              flexibility, created_by_age, version,
+                              routine_id
                     """
                 ),
                 {
@@ -417,7 +421,7 @@ class LocalCalendar(CalendarProvider):
                 """
                 SELECT id, local_calendar_id, title, start_at, end_at,
                        all_day, description, location, recurrence,
-                       flexibility, created_by_age, version
+                       flexibility, created_by_age, version, routine_id
                 FROM core.local_events
                 WHERE user_id = :uid AND local_calendar_id = :cal
                   AND deleted_at IS NULL
@@ -470,4 +474,9 @@ class LocalCalendar(CalendarProvider):
             flexibility=Flexibility(row[9]),
             source="age" if row[10] else None,
             etag=str(row[11]),
+            # Índice 12 e não um nome: a lista de colunas é a mesma nos
+            # quatro pontos de leitura, e o teste de contrato cobre o
+            # roundtrip. Trocar por nome exigiria `mappings()` em todos
+            # eles, o que é mudança maior do que o M5 precisa.
+            routine_id=str(row[12]) if len(row) > 12 and row[12] else None,
         )

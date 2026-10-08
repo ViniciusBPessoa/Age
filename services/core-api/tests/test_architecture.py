@@ -11,6 +11,7 @@ Documentar não basta. Precisa quebrar o build.
 from __future__ import annotations
 
 import ast
+import sys
 from pathlib import Path
 
 import pytest
@@ -71,6 +72,23 @@ def _py_files(root: Path) -> list[Path]:
     return [p for p in root.rglob("*.py") if "__pycache__" not in p.parts]
 
 
+# Bibliotecas de CÁLCULO PURO que o domínio pode importar. A regra de
+# §3.4 proíbe infraestrutura, não dependência externa: o critério é
+# **fazer I/O**, não ser de terceiros.
+#
+# `dateutil` entra aqui porque expande RRULE (RFC 5545) sem tocar rede,
+# disco ou banco — mesma natureza de `zoneinfo`, que o domínio já usa.
+# E escrever um expansor próprio seria pior que a dependência: a
+# especificação tem casos de borda reais (BYSETPOS, UNTIL em UTC com
+# DTSTART local, virada de horário de verão no meio da série) e errar
+# neles põe a academia de alguém no dia errado.
+ALLOWED_PURE_LIBRARIES = {
+    "dateutil",
+    "zoneinfo",
+    "hypothesis",
+}
+
+
 def test_domain_has_no_infrastructure_imports() -> None:
     """O núcleo não conhece HTTP, SDK de provedor nem ORM.
 
@@ -86,6 +104,41 @@ def test_domain_has_no_infrastructure_imports() -> None:
 
     assert not offenders, "infraestrutura importada no domínio:\n" + "\n".join(
         offenders
+    )
+
+
+def test_domain_third_party_imports_are_declared_pure() -> None:
+    """Nenhuma dependência externa entra no domínio sem ser avaliada.
+
+    A lista negra de `FORBIDDEN_IN_DOMAIN` só pega o que alguém já
+    pensou em proibir. Esta asserção é o complemento: todo import de
+    terceiro no domínio tem de estar em `ALLOWED_PURE_LIBRARIES`, o que
+    força a decisão a ser explícita em vez de passar por omissão.
+
+    Foi o que aconteceu ao adicionar `dateutil` no M5 — a lista negra
+    não reclamou, e sem este teste a pergunta "isso faz I/O?" nunca
+    teria sido feita.
+    """
+    stdlib = set(sys.stdlib_module_names)
+    internal = {"app", "age_contracts", "tests"}
+
+    offenders: list[str] = []
+    for file in _py_files(APP / "domain"):
+        for module in _imports_of(file):
+            if (
+                module in stdlib
+                or module in internal
+                or module in ALLOWED_PURE_LIBRARIES
+                or module.startswith("_")
+            ):
+                continue
+            offenders.append(f"{file.relative_to(SERVICE_ROOT)}: {module}")
+
+    assert not offenders, (
+        "dependencia externa no dominio que nao foi declarada pura:\n"
+        + "\n".join(offenders)
+        + "\n\nSe ela nao faz I/O, acrescente a ALLOWED_PURE_LIBRARIES "
+        "com o motivo. Se faz, ela pertence a um adaptador."
     )
 
 

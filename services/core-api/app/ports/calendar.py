@@ -82,6 +82,12 @@ class Event:
     etag: str | None = None
     # Metadado local, não vem do provedor (§6.3).
     flexibility: Flexibility = Flexibility.FIXED
+    # Ocorrência de uma série recorrente do Age (§5.9.4). Também é
+    # metadado local: o provedor externo tem a própria noção de
+    # recorrência (`recurrence`), que é outra coisa — ela descreve a
+    # repetição no calendário, esta diz a qual rotina do Age o evento
+    # pertence, para a aderência saber onde registrar.
+    routine_id: str | None = None
 
     def __post_init__(self) -> None:
         if self.start.tzinfo is None or self.end.tzinfo is None:

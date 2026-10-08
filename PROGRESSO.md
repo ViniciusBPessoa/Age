@@ -11,7 +11,7 @@ Checklist de execução. A especificação completa está em [ARQUITETURA.md](AR
 | M2 · Agenda | 70–95 h | ✅ **concluído** · 27/27 no smoke |
 | M3 · Estudo | 55–75 h | ✅ **concluído** · 30/30 no smoke |
 | M4 · Tarefas | 50–70 h | ✅ **concluído** · 38/38 no smoke |
-| M5 · Rotinas e relatório | 45–60 h | ⬜ próximo |
+| M5 · Rotinas e relatório | 45–60 h | ✅ **concluído** · 56/56 no smoke |
 
 ---
 
@@ -318,7 +318,7 @@ Checklist de execução. A especificação completa está em [ARQUITETURA.md](AR
 > unidade isolada os pegaria.
 
 ### Planner (24–33 h)
-- [ ] Tabelas `study_subjects`, `study_topics`, `study_sessions` (§6.1)
+- [x] Tabelas `study_subjects`, `study_topics`, `study_sessions` (§6.1)
 - [x] Decomposição em tópicos com estimativa marcada como estimativa (§5.5)
 - [x] Fatiamento em sessões de `session_min..max`
 - [x] Ordenação por pré-requisito
@@ -482,29 +482,130 @@ Checklist de execução. A especificação completa está em [ARQUITETURA.md](AR
 
 **Pronto quando:** "surgiu reunião terça 14h, reorganiza" propõe mover o flexível, e "como foi minha semana?" acha o padrão.
 
+> **✅ Validado em 08/10/2026** — `56 passaram, 0 falharam` em
+> `infra/smoke-m5.sh`, mais 307 testes unitários e de contrato (238 no
+> core-api, 69 no ai-worker). M0 a M4 seguem verdes: 22/22, 34/34,
+> 27/27, 30/30, 38/38.
+>
+> **O cálculo de §5.9.4 funciona como especificado.** A frase do
+> documento — "seg/qua/sex às 19h é o que colide menos, só 2 conflitos
+> no mês, nas duas semanas de prova" — vem do `preview`, não do modelo:
+>
+> ```
+> POST /routines/preview  FREQ=WEEKLY;BYDAY=MO,WE,FR  19h  60min
+>   12 ocorrências em 4 semanas, exatamente seg/qua/sex
+>   2 conflitos · 2 bloqueantes
+>     04/11 19:00 -> Prova de Calculo  (bloqueante: prova é FIXED)
+>     11/11 19:00 -> Prova de Algebra  (bloqueante)
+> ```
+>
+> E a reação a mudança externa (§5.10) sai com o conflito nomeado:
+>
+> ```
+> apareceu: 'Reuniao de orientacao' (ter 17/11 às 14:00)
+>   — bate com 'Algebra Linear - Transformacoes', que a gente marcou
+> ```
+>
+> Reconhecida **uma vez**: a segunda chamada devolve vazio. Sem isso a
+> mesma reunião voltaria em toda mensagem, e §5.10 deixaria de ser
+> reativo para ser o app que persegue o usuário.
+>
+> **Sem streak, por decisão de produto.** `Adherence` não tem campo de
+> ofensiva, e um teste cobra isso explicitamente. Streak transforma uma
+> falta em perda de progresso, e aí um dia ruim faz a pessoa abandonar
+> a série inteira — o oposto do que o produto deveria causar. Pelo
+> mesmo raciocínio, **movida não conta como falta**: quem mudou a
+> academia de terça para quinta e foi, cumpriu.
+>
+> **Três bugs reais nesta etapa, e o terceiro é de segurança:**
+>
+> 1. **Duas opções vinham recomendadas.** `build_overload_options`
+>    marcava `recommended` por empate de carga — e dias livres têm
+>    todos carga zero, que é o caso normal. Duas recomendações é
+>    nenhuma: §5.9.6 pede "recomendar uma, com o motivo" justamente
+>    porque "você decide" devolve a decisão ao usuário. O desempate
+>    agora é a data mais próxima.
+>
+> 2. **A aderência reportava zero para série nova.** A janela ia de
+>    `now - days` até `now + 1 day`, então uma rotina que começa na
+>    semana seguinte dava "0 de 0" — a pessoa criava a série, via zero
+>    e concluía que não funcionou. A janela passou a cobrir o futuro já
+>    materializado, o que também torna `planned` o denominador honesto:
+>    o tamanho do compromisso, não "o que já deveria ter acontecido".
+>
+> 3. **O access token sobrevivia ao encerramento da conta.** Depois de
+>    `POST /privacy/delete-account`, com a conta marcada e o refresh
+>    revogado, o token de 15 min continuava devolvendo 200 em tudo. O
+>    refresh não renovava, então a janela era curta — mas "curta" não é
+>    "nenhuma", e quem acabou de encerrar a conta não espera que o
+>    acesso siga aberto. A checagem entrou em `get_db`, onde a conexão
+>    já existe: custo de uma consulta por chave primária na transação
+>    que ia abrir de todo jeito.
+>
+> **Também corrigido:** data e hora saíam em inglês e em UTC
+> (`Tue 20/10 17:00` para um evento das 14:00). O idioma era descuido
+> visível; o fuso era pior — o usuário concluiria que o sistema está
+> errado sobre a própria agenda dele.
+>
+> **Uma invariante de arquitetura nova.** O M5 precisou de
+> `python-dateutil` para RRULE, e a lista negra de §10.2 não reclamou —
+> ela só pega o que alguém já pensou em proibir. Acrescentei
+> `test_domain_third_party_imports_are_declared_pure`, que exige que
+> todo import de terceiro no domínio esteja numa lista explícita de
+> bibliotecas de cálculo puro. A linha é **fazer I/O**, não
+> procedência. Verifiquei com um canário: o teste pega `boto3`, que a
+> lista negra deixaria passar.
+>
+> Sobre a dependência em si: escrever um expansor de RFC 5545 seria
+> pior. A especificação tem casos de borda reais — `BYSETPOS`, `UNTIL`
+> em UTC com `DTSTART` local, e a virada do horário de verão no meio da
+> série — e um teste cobre justamente esse último, sobre
+> `America/New_York`, que ainda tem DST.
+
 ### Rotinas (12–17 h)
-- [ ] Tabelas `routines`, `routine_occurrences` (§6.1)
-- [ ] `propose_routine` com RRULE (§5.9.4)
-- [ ] Materialização de ocorrências
-- [ ] Painel de aderência, sem streak
-- [ ] Pausar/retomar sem apagar
+- [x] Tabelas `routines`, `routine_occurrences` (§6.1)
+- [x] `propose_routine` com RRULE (§5.9.4)
+- [x] Materialização de ocorrências
+- [x] Painel de aderência, sem streak — **API pronta** (`/routines/{id}/adherence`, sem campo de ofensiva por decisão de §5.9.4), UI pendente
+- [x] Pausar/retomar sem apagar
 
 ### Replanejamento (18–24 h)
-- [ ] `MOVE` de flexíveis com justificativa obrigatória (§5.9.6)
-- [ ] Resolução de sobrecarga com 2–3 opções e recomendação
-- [ ] `get_external_changes` + marca de conflito na timeline (§5.10)
-- [ ] Reconhecimento passivo ao abrir o chat
+- [x] `MOVE` de flexíveis com justificativa — **pronto**: `build_overload_options` exige `cost` sem default e garante exatamente uma recomendação
+- [x] Resolução de sobrecarga com 2–3 opções e recomendação
+- [x] `get_external_changes` + marca de conflito na timeline (§5.10)
+- [x] Reconhecimento passivo ao abrir o chat
 
 ### Relatório e privacidade (12–16 h)
-- [ ] `get_period_summary`: planejado vs. realizado (§5.9.9)
-- [ ] Busca de padrão no relatório
-- [ ] Tela de Privacidade: export, apagar histórico, lixeira (§6.2.5)
-- [ ] Apagar conta com os 3 níveis de exclusão (§9.6)
+- [x] `get_period_summary`: planejado vs. realizado (§5.9.9)
+- [x] Busca de padrão no relatório
+- [x] Privacidade: export, apagar histórico, limites honestos (§6.2.5) — **API pronta** (`/privacy/*`, com os 3 avisos em `/privacy/limits`), UI pendente
+- [x] Apagar conta com os 3 níveis de exclusão (§9.6)
 
 ---
+
+## Estado atual
+
+**Os seis marcos de backend estão concluídos e validados**: 196
+verificações de smoke contra containers reais (22 + 34 + 27 + 30 + 38 +
+56), 307 testes unitários e de contrato, lint limpo nos dois serviços
+Python e `tsc --noEmit` sem erros.
+
+**O que falta é a interface.** O backend cobre o escopo descrito; a UI
+tem só a página de diagnóstico do M0, e tudo foi validado por `curl`.
+Os itens marcados "**API pronta**, UI pendente" acima somam o bloco de
+trabalho restante — vale tratá-lo como um marco próprio, de ~40–50 h,
+em vez de continuar espalhado pelos outros.
+
+**Dois adiamentos deliberados**, ambos com a suíte de contrato já
+escrita e esperando: `GoogleCalendar` (M2.5) e `GoogleTasks`. Nos dois
+casos o motivo é o mesmo — construir OAuth, webhook e sync antes de o
+produto provar que a porta está certa seria investir na parte errada. A
+degradação do provedor pobre já é exercitada contra
+`PoorInMemoryTasks`.
 
 ## Pontos de parada seguros
 
 - **Após M2** (~mês 4): agenda por conversa, Google conectado. Já se usa todo dia.
 - **Após M3** (~mês 6): + planejamento de estudo. Onde eu pararia para uso pessoal.
 - **Após M4** (~mês 8): + tarefas. O escopo completo do que foi descrito.
+- **Após M5** (~mês 10): + rotinas, relatório e privacidade. Backend completo — falta a interface.

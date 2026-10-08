@@ -102,10 +102,20 @@ def test_expected_tools_are_present() -> None:
         "reserve_time_for_task",
     }
 
+    rotina = {
+        "get_routines",
+        "get_routine_adherence",
+        "get_period_report",
+        "get_external_changes",
+        "propose_routine",
+        "mark_routine_occurrence",
+    }
+
     for expected, grupo in (
         (agenda, "agenda"),
         (estudo, "estudo"),
         (tarefa, "tarefa"),
+        (rotina, "rotina"),
     ):
         missing = expected - names
         assert not missing, f"faltam tools de {grupo}: {sorted(missing)}"

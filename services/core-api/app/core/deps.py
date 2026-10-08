@@ -16,6 +16,7 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import Depends, HTTPException, Request, status
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import user_session
@@ -70,8 +71,52 @@ async def get_db(user: CurrentUser) -> AsyncIterator[AsyncSession]:
 
     Depende de `CurrentUser` de propósito: não existe forma de obter
     sessão sem usuário autenticado por este caminho.
+
+    **Também confere se a conta e a sessão ainda valem**, e isso não é
+    zelo excessivo. O JWT de acesso é validado só criptograficamente
+    (`get_current_user`), que é a troca normal de token stateless — mas
+    significa que um token emitido antes de a conta ser encerrada
+    continua abrindo tudo pelos 15 minutos restantes.
+
+    Foi exatamente o que aconteceu: depois de `POST
+    /privacy/delete-account`, com a conta marcada e o refresh revogado,
+    o access token antigo seguia devolvendo 200. O refresh não renova,
+    então a janela é curta — mas "curta" não é "nenhuma", e quem acabou
+    de encerrar a conta não espera que o acesso continue.
+
+    A checagem roda aqui, e não em `get_current_user`, porque aqui a
+    conexão com o banco já existe: o custo é uma consulta por índice
+    primário na transação que ia abrir de todo jeito. Pôr em
+    `get_current_user` exigiria abrir uma sessão só para isso.
     """
     async with user_session(user.id) as session:
+        row = (
+            await session.execute(
+                text(
+                    """
+                    SELECT u.deleted_at, s.revoked_at
+                    FROM core.users u
+                    LEFT JOIN core.sessions s
+                           ON s.id = :sid AND s.user_id = u.id
+                    WHERE u.id = :uid
+                    """
+                ),
+                {"uid": str(user.id), "sid": str(user.session_id)},
+            )
+        ).first()
+
+        if row is None or row[0] is not None:
+            raise _unauthorized(
+                "account_deleted",
+                "Esta conta foi encerrada. Entre de novo para reativar, "
+                "se ainda estiver na janela de 30 dias.",
+            )
+        if row[1] is not None:
+            raise _unauthorized(
+                "session_revoked",
+                "Esta sessão foi revogada. Entre de novo.",
+            )
+
         yield session
 
 

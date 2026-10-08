@@ -83,6 +83,16 @@ class CalendarClient:
                 return await self.list_tasks(**kwargs)
             case "get_task_lists":
                 return await self.get_task_lists()
+            case "list_routines":
+                return await self.list_routines()
+            case "routine_adherence":
+                return await self.routine_adherence(kwargs.get("days", 28))
+            case "period_report":
+                return await self.period_report(kwargs.get("days", 7))
+            case "external_changes":
+                return await self.external_changes()
+            case "mark_routine":
+                return await self.mark_routine(**kwargs)
             case _:
                 raise ValueError(f"operação desconhecida: {operation}")
 
@@ -249,3 +259,57 @@ class CalendarClient:
     async def get_task_lists(self) -> list[dict]:
         data = await self._get_at("/internal/tasks", "/lists", {})
         return data["lists"]
+
+    # -----------------------------------------------------------
+    # Rotinas, relatório e mudança externa (§5.9.4, §5.9.9, §5.10)
+    # -----------------------------------------------------------
+    async def list_routines(self) -> list[dict]:
+        data = await self._get_at("/internal/routines", "/list", {})
+        return data["routines"]
+
+    async def routine_adherence(self, days: int = 28) -> list[dict]:
+        data = await self._get_at(
+            "/internal/routines", "/adherence", {"days": days}
+        )
+        return data["adherence"]
+
+    async def period_report(self, days: int = 7) -> dict:
+        """O relatório de §5.9.9, com números e padrões calculados."""
+        return await self._get_at(
+            "/internal/routines", "/report", {"days": days}
+        )
+
+    async def external_changes(self) -> dict:
+        """O que mudou fora do Age e ainda não foi reconhecido (§5.10).
+
+        Note que o worker LÊ e não reconhece: marcar como visto é da
+        rota pública, chamada pelo front quando o usuário de fato abre
+        o chat. Reconhecer aqui faria a mudança virar "lida" sem
+        ninguém ter lido.
+        """
+        return await self._get_at(
+            "/internal/routines", "/external-changes", {}
+        )
+
+    async def mark_routine(
+        self,
+        routine_id: str,
+        scheduled_start: str,
+        status: str,
+        actual_min: int | None = None,
+        moved_to: str | None = None,
+        notes: str | None = None,
+    ) -> dict:
+        """Registro de fato (§5.2): executa, não propõe."""
+        # `_post` já recebe o caminho completo, então não há `_post_at`:
+        # o prefixo entra aqui mesmo.
+        return await self._post(
+            f"/internal/routines/{routine_id}/mark",
+            {
+                "scheduled_start": scheduled_start,
+                "status": status,
+                "actual_min": actual_min,
+                "moved_to": moved_to,
+                "notes": notes,
+            },
+        )

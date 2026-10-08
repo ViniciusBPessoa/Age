@@ -52,6 +52,7 @@ from app.domain.tools import (
     # `tests/unit/test_tool_registration.py` quebra se faltar.
     calendar_tools,  # noqa: F401
     execute_tool,
+    routine_tools,  # noqa: F401
     study_tools,  # noqa: F401
     task_tools,  # noqa: F401
 )

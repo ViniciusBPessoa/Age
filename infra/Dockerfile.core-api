@@ -24,7 +24,7 @@ RUN uv pip install --system --no-cache -e /packages/age-contracts \
       "pydantic-settings>=2.6" "sqlalchemy[asyncio]>=2.0.36" \
       "asyncpg>=0.30" "alembic>=1.14" "redis>=5.2" "arq>=0.26" \
       "sse-starlette>=2.1" "argon2-cffi>=23.1" "pyjwt>=2.10" \
-      "cryptography>=44.0" "email-validator>=2.2"
+      "cryptography>=44.0" "email-validator>=2.2"       "python-dateutil>=2.9"
 
 # ---------------------------------------------------------------
 FROM deps AS dev

@@ -18,6 +18,11 @@ dependencies = [
     "pyjwt>=2.10",
     "cryptography>=44.0",
     "email-validator>=2.2",
+    # RRULE (RFC 5545) para rotinas recorrentes (§5.9.4). Escrever um
+    # expansor próprio seria um mau negócio: a especificação tem casos
+    # de borda reais (BYSETPOS, horário de verão na virada, UNTIL vs.
+    # COUNT) e errar neles põe a academia de alguém no dia errado.
+    "python-dateutil>=2.9",
     "age-contracts",
 ]
 

@@ -10,17 +10,39 @@ Nada é escrito sem você aprovar.
 - **Especificação completa:** [ARQUITETURA.md](ARQUITETURA.md)
 - **Acompanhamento:** [PROGRESSO.md](PROGRESSO.md)
 
-**Estado atual: M3 concluído** — o caso de uso central funciona.
-Conta multi-usuário com RLS, chat com múltiplos modelos, agenda com
-proposta e aprovação, e planejamento de estudo que decompõe um assunto
-em sessões, respeita pré-requisitos e recalibra as estimativas pelo
-tempo real.
+**Estado atual: os seis marcos de backend estão concluídos** (M0 a M5).
 
-Validado: 22/22 + 34/34 + 27/27 + 30/30 nos smokes, 215 testes
-unitários e de contrato. As tarefas chegam no M4.
+O que funciona, ponta a ponta, contra containers reais:
 
-**Falta a interface.** O backend está completo e testado; a UI tem só a
-página de diagnóstico do M0.
+- **Conta multi-usuário** com RLS imposto pelo Postgres, credencial de
+  LLM cifrada e sessões revogáveis.
+- **Chat com múltiplos modelos**, streaming token a token, troca de
+  provedor no meio da conversa sem perder o histórico.
+- **Agenda** com busca determinística de horário, proposta validada,
+  aprovação granular e desfazer.
+- **Estudo**: decompõe um assunto em sessões, respeita pré-requisitos,
+  distribui com revisão espaçada e recalibra as estimativas pelo tempo
+  real.
+- **Tarefas**, ligadas à agenda: responde "o que vence e não tem tempo
+  reservado", e "encaixa" cria o par bloco + tarefa.
+- **Rotinas** com hora marcada, aderência sem streak, relatório que
+  procura padrão no que foi pulado, e reação passiva a mudança externa.
+- **Privacidade**: export completo, três níveis de exclusão e os
+  limites ditos na cara — o que o provedor de LLM retém não volta.
+
+Validado: **196 verificações de smoke** (22 + 34 + 27 + 30 + 38 + 56) e
+**307 testes** unitários e de contrato. Lint limpo nos dois serviços
+Python, `tsc --noEmit` sem erros.
+
+**Falta a interface.** O backend cobre o escopo descrito e tudo acima
+foi validado por `curl`; a UI tem só a página de diagnóstico do M0. As
+APIs estão em <http://localhost:8000/docs>.
+
+Dois adiamentos deliberados, com a suíte de contrato já escrita e
+esperando: `GoogleCalendar` e `GoogleTasks`. Construir OAuth, webhook e
+sync antes de o produto provar que a porta está certa seria investir na
+parte errada — e a degradação do provedor pobre já é testada contra um
+adaptador que declara as mesmas limitações do Google Tasks.
 
 ---
 
@@ -40,6 +62,8 @@ containers.
 bash infra/smoke-m1.sh   # chat multi-modelo
 bash infra/smoke-m2.sh   # agenda
 bash infra/smoke-m3.sh   # estudo
+bash infra/smoke-m4.sh   # tarefas
+bash infra/smoke-m5.sh   # rotinas e relatório
 ```
 
 **Linux / macOS:**
@@ -51,6 +75,8 @@ make smoke                 # infraestrutura
 bash infra/smoke-m1.sh     # chat
 bash infra/smoke-m2.sh     # agenda
 bash infra/smoke-m3.sh     # estudo
+bash infra/smoke-m4.sh     # tarefas
+bash infra/smoke-m5.sh     # rotinas
 ```
 
 Os dois expõem os mesmos comandos; `.\age.ps1 help` ou `make help` lista

@@ -278,6 +278,46 @@ class StagingBuilder:
             elif str(item.id) == b and a not in item.links:
                 item.links.append(a)
 
+    # -----------------------------------------------------------
+    # Rotina (§5.9.4)
+    # -----------------------------------------------------------
+    def stage_routine(
+        self,
+        *,
+        title: str,
+        rrule: str,
+        first_start: str,
+        duration_min: int,
+        reason: str,
+        flexibility: str = "flexible",
+        target_per_week: int | None = None,
+    ) -> str:
+        """Propõe uma série recorrente.
+
+        `target` é `routine` e não `event`: o core-api cria a linha em
+        `core.routines` e materializa as ocorrências, em vez de gravar
+        N eventos soltos. A diferença importa para o acompanhamento —
+        eventos soltos não têm aderência, e "fui à academia essa
+        semana?" não teria resposta.
+        """
+        item = StagedItem(
+            id=uuid4(),
+            op="CREATE",
+            target="routine",
+            reason=reason,
+            payload={
+                "title": title,
+                "rrule": rrule,
+                "first_start": first_start,
+                "duration_min": duration_min,
+                "flexibility": flexibility,
+                "target_per_week": target_per_week,
+            },
+            sequence=self._next(),
+        )
+        self.items.append(item)
+        return str(item.id)
+
     @property
     def is_empty(self) -> bool:
         return not self.items
@@ -343,6 +383,14 @@ class StagingBuilder:
             if reorders:
                 detail.append("reordenar")
             parts.append("lista: " + ", ".join(detail))
+
+        routines = [i for i in self.items if i.target == "routine"]
+        if routines:
+            parts.append(
+                f"rotina: {len(routines)} nova(s)"
+                if len(routines) > 1
+                else "rotina: 1 nova"
+            )
 
         pairs = sum(1 for i in self.items if i.links) // 2
         if pairs:

@@ -23,6 +23,8 @@ from app.api import (
     llm,
     plans,
     preferences,
+    privacy,
+    routines,
     study,
     tasks,
 )
@@ -70,6 +72,10 @@ v1.include_router(calendar.router)
 v1.include_router(plans.router)
 v1.include_router(study.router)
 v1.include_router(tasks.router)
+v1.include_router(routines.router)
+v1.include_router(routines.reports)
+v1.include_router(routines.changes)
+v1.include_router(privacy.router)
 v1.include_router(conversations.router)
 v1.include_router(conversations.turns)
 # Mantido do M0 para o smoke test continuar valendo como diagnóstico de
@@ -82,6 +88,7 @@ app.include_router(v1)
 app.include_router(calendar.internal)
 app.include_router(study.internal)
 app.include_router(tasks.internal)
+app.include_router(routines.internal)
 
 
 @app.get("/")
