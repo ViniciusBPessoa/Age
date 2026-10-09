@@ -31,6 +31,7 @@ from app.ports.tasks import (
     TaskError,
     TaskNotFound,
 )
+from app.services.plan_store import build_plan_from_items
 from app.services.task_store import (
     LOCAL_TASKS,
     counterpart_of_task,
@@ -500,6 +501,114 @@ async def reorder(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=_user_facing_error(exc),
         ) from exc
+
+
+class ScheduleIn(BaseModel):
+    """O bloco a reservar. §8.1: o botão "reservar tempo" da lista."""
+
+    start: datetime
+    end: datetime
+    title: str | None = Field(default=None, max_length=300)
+
+
+class ScheduleOut(BaseModel):
+    plan_id: UUID
+    message: str
+
+
+@router.post("/{task_id}/schedule", response_model=ScheduleOut)
+async def schedule_task(
+    task_id: str, body: ScheduleIn, user: CurrentUser, db: DbSession
+) -> ScheduleOut:
+    """Reserva tempo para uma tarefa, gerando o par ligado (§5.7.1).
+
+    É o botão **reservar tempo** de §8.1: "chama
+    `POST /api/tasks/{id}/schedule`, que gera o par ligado — mesmo
+    resultado de pedir no chat, sem precisar escrever".
+
+    Duas decisões que esta rota toma, e por quê:
+
+    **Devolve um plano `proposed`, não um fato.** A tentação é escrever
+    direto: a pessoa clicou, escolheu o horário, o que falta aprovar?
+    Falta o que ela não viu — se o bloco colide com algo, se estoura o
+    limite diário (§5.4), se cai numa janela bloqueada. `validate_plan`
+    sabe isso e a UI não. Aplicar sem passar pela revisão criaria um
+    segundo caminho de escrita sem `PlanDiff`, sem motivo registrado e
+    fora do `plan_undo_log` — e aí o "desfazer" do produto deixaria de
+    cobrir tudo.
+
+    **O `reason` diz que foi um clique.** §5.6 exige motivo em todo
+    item, e o motivo honesto aqui não é um cálculo do Scheduler: é "você
+    pediu para reservar". Inventar uma justificativa de otimização que
+    não houve seria pior que a frase simples.
+    """
+    entries = await read_tasks(db, user.id, include_done=False)
+    entry = next((e for e in entries if e.task.id == task_id), None)
+    if entry is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "error": {
+                    "code": "task_not_found",
+                    "message": "Essa tarefa não existe na sua lista.",
+                }
+            },
+        )
+
+    if body.end <= body.start:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "error": {
+                    "code": "invalid_window",
+                    "message": "O fim do bloco tem de vir depois do início.",
+                }
+            },
+        )
+
+    task = entry.task
+    minutes = int((body.end - body.start).total_seconds() // 60)
+    reason = f"você pediu para reservar {minutes}min para esta tarefa"
+
+    # Os dois itens do par, no formato que `_build_item` consome. O
+    # `links` cruzado é o que faz a revisão tratá-los como unidade e o
+    # executor revertê-los junto (§5.7.1).
+    event_draft_id = "ui-event"
+    task_draft_id = "ui-task"
+    raw_items = [
+        {
+            "id": event_draft_id,
+            "op": "CREATE",
+            "target": "event",
+            "reason": reason,
+            "links": [task_draft_id],
+            "payload": {
+                "title": body.title or task.title,
+                "start": body.start.isoformat(),
+                "end": body.end.isoformat(),
+            },
+        },
+        {
+            "id": task_draft_id,
+            "op": "UPDATE",
+            "target": "task",
+            "reason": f"aponta para o bloco reservado em {body.start.isoformat()}",
+            "links": [event_draft_id],
+            "payload": {"task_id": task_id, "due_at": body.start.isoformat()},
+        },
+    ]
+
+    plan_id = await build_plan_from_items(
+        db,
+        user.id,
+        summary=f"Reservar {minutes}min para “{task.title}”",
+        raw_items=raw_items,
+    )
+
+    return ScheduleOut(
+        plan_id=plan_id,
+        message="Montei a reserva. Confira e aprove para entrar na agenda.",
+    )
 
 
 @router.get("/{task_id}/links", response_model=list[ReservedOut])

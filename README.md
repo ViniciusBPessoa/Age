@@ -10,7 +10,7 @@ Nada é escrito sem você aprovar.
 - **Especificação completa:** [ARQUITETURA.md](ARQUITETURA.md)
 - **Acompanhamento:** [PROGRESSO.md](PROGRESSO.md)
 
-**Estado atual: os seis marcos de backend estão concluídos** (M0 a M5).
+**Estado atual: os sete marcos estão concluídos** (M0 a M6).
 
 O que funciona, ponta a ponta, contra containers reais:
 
@@ -29,20 +29,32 @@ O que funciona, ponta a ponta, contra containers reais:
   procura padrão no que foi pulado, e reação passiva a mudança externa.
 - **Privacidade**: export completo, três níveis de exclusão e os
   limites ditos na cara — o que o provedor de LLM retém não volta.
+- **Interface**: onboarding que não deixa ninguém num chat morto,
+  chat com streaming token a token, revisão de plano item por item,
+  timeline com proposto hachurado, e as telas de tarefa, estudo, rotina,
+  relatório e privacidade.
 
-Validado: **196 verificações de smoke** (22 + 34 + 27 + 30 + 38 + 56) e
-**307 testes** unitários e de contrato. Lint limpo nos dois serviços
-Python, `tsc --noEmit` sem erros.
+Validado: **269 verificações de smoke** (22 + 34 + 27 + 30 + 38 + 56 +
+73) contra containers reais, **309 testes** no backend e **99** no
+front. Lint limpo nos três serviços, `tsc --noEmit` e
+`prettier --check` sem erros, `next build` passando.
 
-**Falta a interface.** O backend cobre o escopo descrito e tudo acima
-foi validado por `curl`; a UI tem só a página de diagnóstico do M0. As
-APIs estão em <http://localhost:8000/docs>.
+Abra <http://localhost:3000>. As APIs ficam em
+<http://localhost:8000/docs>.
 
-Dois adiamentos deliberados, com a suíte de contrato já escrita e
-esperando: `GoogleCalendar` e `GoogleTasks`. Construir OAuth, webhook e
-sync antes de o produto provar que a porta está certa seria investir na
-parte errada — e a degradação do provedor pobre já é testada contra um
-adaptador que declara as mesmas limitações do Google Tasks.
+### O que ainda não tem
+
+**Os adaptadores do Google**, adiados de propósito, com a suíte de
+contrato já escrita e esperando: `GoogleCalendar` e `GoogleTasks`.
+Construir OAuth, webhook e sync antes de o produto provar que a porta
+está certa seria investir na parte errada — e a degradação do provedor
+pobre já é testada contra um adaptador que declara as mesmas limitações
+do Google Tasks.
+
+**Arrastar evento na timeline.** A prop existe no componente, mas
+ligá-la a um `PATCH` criaria um caminho de escrita sem `PlanDiff` e
+fora do desfazer. O certo é o drag gerar um plano de um item só, e isso
+precisa de uma rota que ainda não existe.
 
 ---
 
@@ -64,6 +76,7 @@ bash infra/smoke-m2.sh   # agenda
 bash infra/smoke-m3.sh   # estudo
 bash infra/smoke-m4.sh   # tarefas
 bash infra/smoke-m5.sh   # rotinas e relatório
+bash infra/smoke-ui.sh   # interface (fala com o web, não com a API)
 ```
 
 **Linux / macOS:**
@@ -77,6 +90,7 @@ bash infra/smoke-m2.sh     # agenda
 bash infra/smoke-m3.sh     # estudo
 bash infra/smoke-m4.sh     # tarefas
 bash infra/smoke-m5.sh     # rotinas
+bash infra/smoke-ui.sh     # interface
 ```
 
 Os dois expõem os mesmos comandos; `.\age.ps1 help` ou `make help` lista

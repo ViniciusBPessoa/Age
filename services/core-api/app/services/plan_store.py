@@ -96,10 +96,53 @@ async def promote_drafts(db: AsyncSession, user_id: UUID) -> list[UUID]:
     return created
 
 
+async def build_plan_from_items(
+    db: AsyncSession,
+    user_id: UUID,
+    *,
+    summary: str,
+    raw_items: list[dict],
+    conversation_id: UUID | None = None,
+) -> UUID:
+    """Cria um plano a partir de itens montados pela UI, não pelo LLM.
+
+    Existe para os botões que §8.1 descreve como atalhos do chat — o
+    "reservar tempo" da lista de tarefas é o primeiro deles: "chama
+    `POST /api/tasks/{id}/schedule`, que gera o par ligado — mesmo
+    resultado de pedir no chat, sem precisar escrever".
+
+    ## Por que não pela fila, como o worker faz
+
+    O caminho do worker é inserir em `ai.plan_drafts` e deixar o
+    core-api promover. Não serve aqui, e a razão é a fronteira de
+    §2.3.2: o `core_api` tem **SELECT** em `ai`, e um `UPDATE` cirúrgico
+    só nas colunas `promoted` e `promoted_plan_id` (migration 0004 do
+    ai-worker). Ele não pode inserir rascunho, e alargar esse GRANT para
+    acomodar um botão de UI trocaria uma garantia estrutural por
+    conveniência — o schema `ai` deixaria de ser escrito só por quem o
+    possui.
+
+    Passar pelo worker também seria pior em produto: a reserva de tempo
+    aqui não precisa de modelo nenhum. O horário vem do `find_free_slots`
+    (determinístico, §5.3) ou do próprio usuário, e enfileirar um job de
+    LLM para montar um item que a UI já conhece gastaria token e
+    adicionaria a latência da fila a um clique.
+
+    ## O que ela NÃO faz
+
+    Não aplica. Devolve o id de um plano `proposed`, que passa pela
+    mesma revisão granular de §5.8 — inclusive a detecção de conflito,
+    porque `validate_plan` roda igual. Um atalho que escrevesse direto
+    na agenda seria um segundo caminho de escrita sem `PlanDiff`, sem
+    motivo registrado e fora do `plan_undo_log`.
+    """
+    return await _promote_one(db, user_id, conversation_id, summary, raw_items)
+
+
 async def _promote_one(
     db: AsyncSession,
     user_id: UUID,
-    conversation_id: UUID,
+    conversation_id: UUID | None,
     summary: str | None,
     raw_items: list[dict],
 ) -> UUID:

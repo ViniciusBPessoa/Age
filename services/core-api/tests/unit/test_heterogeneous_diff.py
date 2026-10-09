@@ -417,3 +417,88 @@ def test_priority_ranks_are_ordered() -> None:
     assert Priority.LOW.rank < Priority.NORMAL.rank
     assert Priority.NORMAL.rank < Priority.HIGH.rank
     assert Priority.HIGH.rank < Priority.URGENT.rank
+
+# ---------------------------------------------------------------
+# Serialização para a revisão (§8.1)
+# ---------------------------------------------------------------
+def test_plan_serialization_handles_both_targets() -> None:
+    """`GET /plans/{id}` não pode quebrar num item de tarefa.
+
+    O bug que este teste existe para impedir foi real e passou pelo M4
+    inteiro: `_to_out` em `api/plans.py` tinha um `event_dict` que lia
+    `event.start`, e um `Task` não tem `start`. Resultado: **500 em
+    qualquer plano com item de tarefa** — inclusive o par ligado de
+    §5.7.1, que é o caso central do M4.
+
+    Por que a suíte do M4 não pegou: ela monta planos pelo
+    `PlanBuilder`, valida pelo `validate_plan` e aplica pelo
+    `PlanExecutor`, sem passar por esta rota. E o smoke lia o plano
+    direto do banco. A rota de leitura ficou sem cobertura justamente
+    porque todo o resto tinha — quem achou foi a tela de revisão, o
+    primeiro código a buscar o diff pela API.
+
+    O teste chama a função de serialização de verdade, e não uma cópia:
+    a cópia passaria enquanto a original quebrasse.
+    """
+    from app.api.plans import _to_out
+
+    builder = a_builder()
+    event_item = builder.propose_create(an_event(), "bloco para a tarefa")
+    task_item = builder.propose_task_update(
+        a_task(due_date=date(2026, 10, 20)),
+        a_task(
+            due_at=datetime(2026, 10, 15, 14, tzinfo=SP),
+            priority=Priority.HIGH,
+            estimated=timedelta(minutes=180),
+        ),
+        "aponta para o bloco reservado",
+    )
+    # O par ligado: aprovado e revertido como unidade (§5.7.1).
+    builder.link(event_item.id, task_item.id)
+
+    out = _to_out(builder.build())
+
+    assert len(out.items) == 2
+
+    serialized_event = next(i for i in out.items if i.target == "event")
+    assert serialized_event.after is not None
+    assert serialized_event.after["_kind"] == "event"
+    assert serialized_event.after["start"].startswith("2026-10-15T14:00")
+
+    serialized_task = next(i for i in out.items if i.target == "task")
+    assert serialized_task.after is not None
+    assert serialized_task.after["_kind"] == "task"
+    # Tarefa carrega PRAZO, não intervalo: §5.7 é explícito que prazo
+    # não ocupa a agenda, e mandar `start`/`end` faria a UI desenhar
+    # uma ocupação inexistente.
+    assert "start" not in serialized_task.after
+    assert serialized_task.after["due_at"].startswith("2026-10-15T14:00")
+    assert serialized_task.after["estimated_min"] == 180
+    assert serialized_task.after["priority"] == "high"
+    # O `before` também: um item de UPDATE mostra os dois lados, e o
+    # cartão do diff precisa do prazo anterior para dizer o que muda.
+    assert serialized_task.before is not None
+    assert serialized_task.before["due_date"] == "2026-10-20"
+    # O vínculo chega à UI, que é o que permite tratar o par como um.
+    assert serialized_task.links and serialized_event.links
+
+
+def test_plan_serialization_survives_task_without_due() -> None:
+    """Tarefa sem prazo nenhum também serializa.
+
+    "Comprar presente · sem prazo" é um item legítimo de §8.1, e
+    `due_date`/`due_at` nulos não podem virar `AttributeError` no
+    `.isoformat()`.
+    """
+    from app.api.plans import _to_out
+
+    builder = a_builder()
+    builder.propose_task_create(
+        a_task(title="Comprar presente", task_id=None), "você pediu"
+    )
+
+    out = _to_out(builder.build())
+    assert out.items[0].after is not None
+    assert out.items[0].after["due_at"] is None
+    assert out.items[0].after["due_date"] is None
+    assert out.items[0].after["estimated_min"] is None

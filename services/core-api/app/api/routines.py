@@ -580,12 +580,28 @@ class ExternalChangeOut(BaseModel):
     is_conflict: bool
 
 
-@changes.get("/external-changes", response_model=dict)
+class ExternalChangesOut(BaseModel):
+    """O envelope de §5.10, tipado.
+
+    Era `response_model=dict`, e isso tinha um custo concreto: nenhum
+    dos campos aparecia no OpenAPI, então o `ExternalChangeOut` acima
+    existia só como documentação interna. A UI que mostra o
+    reconhecimento no topo do chat ficava ligada a um contrato que
+    nenhuma ferramenta podia verificar — foi o teste de contrato do
+    front que apontou a ausência.
+    """
+
+    changes: list[ExternalChangeOut]
+    conflict_count: int
+    summary_text: str
+
+
+@changes.get("/external-changes", response_model=ExternalChangesOut)
 async def external_changes(
     user: CurrentUser,
     db: DbSession,
     acknowledge: Annotated[bool, Query()] = False,
-) -> dict:
+) -> ExternalChangesOut:
     """Mudanças feitas fora do Age, ainda não reconhecidas (§5.10).
 
     Isto **não** é notificação: o assistente não inicia conversa
@@ -597,8 +613,8 @@ async def external_changes(
     """
     pending = await pending_external_changes(db, user.id)
     policy = await load_policy(db, user.id)
-    payload = {
-        "changes": [
+    payload = ExternalChangesOut(
+        changes=[
             ExternalChangeOut(
                 id=c.id,
                 change_kind=c.change_kind,
@@ -608,14 +624,12 @@ async def external_changes(
                 conflicts_with_title=c.conflicts_with_title,
                 detected_at=c.detected_at,
                 is_conflict=c.is_conflict,
-            ).model_dump()
+            )
             for c in pending
         ],
-        "conflict_count": sum(1 for c in pending if c.is_conflict),
-        "summary_text": describe_changes(
-            pending, timezone_name=policy.timezone
-        ),
-    }
+        conflict_count=sum(1 for c in pending if c.is_conflict),
+        summary_text=describe_changes(pending, timezone_name=policy.timezone),
+    )
 
     if acknowledge and pending:
         await acknowledge_external_changes(

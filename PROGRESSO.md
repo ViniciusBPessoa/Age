@@ -12,6 +12,7 @@ Checklist de execução. A especificação completa está em [ARQUITETURA.md](AR
 | M3 · Estudo | 55–75 h | ✅ **concluído** · 30/30 no smoke |
 | M4 · Tarefas | 50–70 h | ✅ **concluído** · 38/38 no smoke |
 | M5 · Rotinas e relatório | 45–60 h | ✅ **concluído** · 56/56 no smoke |
+| M6 · Interface | 40–50 h | ✅ **concluído** · 73/73 no smoke |
 
 ---
 
@@ -124,13 +125,13 @@ Checklist de execução. A especificação completa está em [ARQUITETURA.md](AR
 - [x] `POST /api/conversations/{id}/fork`
 
 ### Onboarding e segundo provedor (10–14 h)
-- [ ] Onboarding 3 passos (§8.1) — **backend pronto**, UI no M2
+- [x] Onboarding 3 passos (§8.1) — três passos, retomável por `users.onboarding_step`, com verificação imediata da chave
 - [x] `users.onboarding_step` para retomar
-- [ ] Estado vazio do chat com exemplos clicáveis (§8.1) — UI no M2
+- [x] Estado vazio do chat com exemplos clicáveis (§8.1) — quatro exemplos, mais a linha que diz em qual agenda o Age vai escrever
 - [x] Adaptador Gemini **ou** OpenAI (§3.1.1)
 - [x] `history.normalize_for` (§3.1.3)
 - [x] Suíte de contrato de LLM + teste de troca N×N (§10.1)
-- [ ] Seletor de provedor no rodapé do chat — **API pronta**, UI no M2
+- [x] Seletor de provedor no rodapé do chat — com o seletor de destino de §5.7.2 ao lado, e o chip que pisca quando a mensagem sobrepõe o padrão
 
 ---
 
@@ -186,7 +187,7 @@ Checklist de execução. A especificação completa está em [ARQUITETURA.md](AR
 - [x] `LocalCalendar` com `local_calendars` / `local_events` (§3.2.1)
 - [x] `InMemoryCalendar`
 - [x] Suíte de contrato de calendário (§10.1)
-- [ ] `<CalendarTimeline>` encapsulando react-big-calendar (§2.4) — **API pronta**, UI pendente
+- [x] `<CalendarTimeline>` encapsulando react-big-calendar (§2.4) — props de domínio (`events`, `proposals`), e um teste cobra que nenhum outro arquivo importe a lib
 - [x] Visão semana/mês, evento proposto vs. confirmado
 
 ### Núcleo de agendamento (22–31 h)
@@ -201,7 +202,7 @@ Checklist de execução. A especificação completa está em [ARQUITETURA.md](AR
 - [x] Tools de escrita que só acumulam no diff (§5.2)
 
 ### Aplicação (10–14 h)
-- [ ] UI de revisão granular (§8.1) — **API pronta** (`/plans/{id}/apply` com `item_ids`), UI pendente
+- [x] UI de revisão granular (§8.1) — cartão por item, par ligado marcado junto (§5.7.1), confirmação separada para conflito bloqueante
 - [x] `PlanExecutor`: ordenação DELETE→MOVE→UPDATE→CREATE (§5.8)
 - [x] Idempotência por `(plan_id, item_id)`
 - [x] Reversão compensatória + undo de 7 dias
@@ -566,7 +567,7 @@ Checklist de execução. A especificação completa está em [ARQUITETURA.md](AR
 - [x] Tabelas `routines`, `routine_occurrences` (§6.1)
 - [x] `propose_routine` com RRULE (§5.9.4)
 - [x] Materialização de ocorrências
-- [x] Painel de aderência, sem streak — **API pronta** (`/routines/{id}/adherence`, sem campo de ofensiva por decisão de §5.9.4), UI pendente
+- [x] Painel de aderência, sem streak — tela e API, ambas sem campo de ofensiva (§5.9.4), com `moved` contado separado de `skipped`
 - [x] Pausar/retomar sem apagar
 
 ### Replanejamento (18–24 h)
@@ -578,23 +579,85 @@ Checklist de execução. A especificação completa está em [ARQUITETURA.md](AR
 ### Relatório e privacidade (12–16 h)
 - [x] `get_period_summary`: planejado vs. realizado (§5.9.9)
 - [x] Busca de padrão no relatório
-- [x] Privacidade: export, apagar histórico, limites honestos (§6.2.5) — **API pronta** (`/privacy/*`, com os 3 avisos em `/privacy/limits`), UI pendente
+- [x] Privacidade: export, apagar histórico, limites honestos (§6.2.5) — tela própria, com os 3 avisos vindos de `/privacy/limits` em vez de digitados na tela
 - [x] Apagar conta com os 3 níveis de exclusão (§9.6)
+
+---
+
+## M6 · Interface — 40–50 h
+
+**Pronto quando:** você cria conta, cola uma chave, conversa, aprova um
+plano e vê o resultado na timeline — tudo pelo navegador, sem `curl`.
+
+> **✅ Validado em 09/10/2026** — `73 passaram, 0 falharam` em
+> `infra/smoke-ui.sh`, mais 99 testes no `web` (contrato, arquitetura e
+> rótulos de tool) e 309 no backend. Os seis smokes anteriores seguem
+> verdes: 22/22, 34/34, 27/27, 30/30, 38/38, 56/56.
+
+### Telas (§8.1)
+- [x] Onboarding de 3 passos, retomável, com verificação da chave
+- [x] Login e registro
+- [x] Chat: sidebar, streaming token a token, linhas de progresso de
+      tool, estado vazio com exemplos
+- [x] Revisão de plano inline, granular, com o par ligado como unidade
+- [x] Timeline semana/mês/dia, com proposto hachurado e o cadeado de
+      flexibilidade
+- [x] Lista de tarefas com "tem tempo reservado", o `⚠` de prazo sem
+      horário, e o botão **reservar tempo**
+- [x] Painel de estudo com progresso e marcação rápida (feito / pulei)
+- [x] Painel de rotinas com aderência de 4 semanas, pausar e retomar
+- [x] Relatório do período, com os padrões encontrados
+- [x] Configurações: perfil, credenciais, conexões, agendamento,
+      sessões
+- [x] Configurações → Privacidade, em página própria
+
+### A sessão atravessando o BFF (§2.4.1, §4.1.1, §4.1.2)
+- [x] O access token vira cookie `httpOnly` no BFF — **não chega ao
+      JavaScript da página**
+- [x] Renovação com 401 → refresh → repete, uma vez, no servidor
+- [x] O refresh rotacionado é repassado ao browser
+- [x] O catch-all não repassa `Cookie` nem `Authorization` do cliente
+- [x] Streaming SSE através do BFF, em pedaços, com id para retomada
+
+### Acessibilidade e idioma (§8.2)
+- [x] `aria-live="polite"` no streaming
+- [x] Foco visível com `:focus-visible`, nunca `outline: none` sem anel
+- [x] `prefers-reduced-motion` respeitado
+- [x] Contraste AA: `--muted` subiu de `#8b949e` para `#9aa4b0`
+- [x] `<dialog>` nativo (Escape, foco preso, resto inerte)
+- [x] Interface em pt-BR, com o fuso vindo de `users.timezone`
+
+### O que a UI obrigou a mudar no backend
+- [x] `POST /tasks/{id}/schedule` — o botão "reservar tempo" de §8.1
+      não existia como rota; gera o par ligado e devolve plano
+      `proposed`
+- [x] `conversations.applied_events` / `applied_tasks` — o `8📅` da
+      sidebar não tinha fonte de dados
+- [x] `GET /calendar/external-changes` tipado: era `response_model=dict`
+
+### Adiado, de propósito
+- [ ] Arrastar evento na timeline — a prop existe em
+      `<CalendarTimeline>`, mas ligar o drag a um `PATCH` criaria um
+      caminho de escrita sem `PlanDiff` e fora do undo (§5.8). O certo
+      é o drag gerar um plano de um item, e isso precisa de uma rota que
+      ainda não existe
+- [ ] Ramificar pela UI com escolha da mensagem — `POST /fork` é
+      chamado, mas sempre do fim da conversa
+- [ ] `age-types` gerado do OpenAPI (§2.5) — os tipos são escritos à
+      mão, e o que contém a divergência é `tests/contract.test.ts`
 
 ---
 
 ## Estado atual
 
-**Os seis marcos de backend estão concluídos e validados**: 196
-verificações de smoke contra containers reais (22 + 34 + 27 + 30 + 38 +
-56), 307 testes unitários e de contrato, lint limpo nos dois serviços
-Python e `tsc --noEmit` sem erros.
+**Os sete marcos estão concluídos e validados**: 269 verificações de
+smoke contra containers reais (22 + 34 + 27 + 30 + 38 + 56 + 73), 309
+testes no backend e 99 no front, lint limpo nos três serviços,
+`tsc --noEmit` e `prettier --check` sem erros, e `next build` passando.
 
-**O que falta é a interface.** O backend cobre o escopo descrito; a UI
-tem só a página de diagnóstico do M0, e tudo foi validado por `curl`.
-Os itens marcados "**API pronta**, UI pendente" acima somam o bloco de
-trabalho restante — vale tratá-lo como um marco próprio, de ~40–50 h,
-em vez de continuar espalhado pelos outros.
+**O produto funciona ponta a ponta pelo navegador.** O que resta são os
+dois adaptadores do Google, adiados com a suíte de contrato já escrita,
+e a calibração de prompt, que precisa de uso real com chave real.
 
 **Dois adiamentos deliberados**, ambos com a suíte de contrato já
 escrita e esperando: `GoogleCalendar` (M2.5) e `GoogleTasks`. Nos dois
@@ -608,4 +671,5 @@ degradação do provedor pobre já é exercitada contra
 - **Após M2** (~mês 4): agenda por conversa, Google conectado. Já se usa todo dia.
 - **Após M3** (~mês 6): + planejamento de estudo. Onde eu pararia para uso pessoal.
 - **Após M4** (~mês 8): + tarefas. O escopo completo do que foi descrito.
-- **Após M5** (~mês 10): + rotinas, relatório e privacidade. Backend completo — falta a interface.
+- **Após M5** (~mês 10): + rotinas, relatório e privacidade. Backend completo.
+- **Após M6** (~mês 11): + interface. O produto inteiro, pelo navegador.

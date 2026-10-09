@@ -24,6 +24,7 @@ from app.domain.plan_executor import (
     RevalidationFailed,
     apply_plan,
 )
+from app.ports.tasks import Task
 from app.services.plan_store import (
     load_plan,
     mark_applied,
@@ -431,16 +432,58 @@ async def _undo_task(tasks, op: str, snapshot: dict | None, ref: str | None):
 
 # ---------------------------------------------------------------
 def _to_out(plan) -> PlanOut:
+    """Serializa o plano para a revisão granular de §8.1.
 
-    def event_dict(event) -> dict | None:
-        if event is None:
+    O `side_dict` trata evento **e** tarefa, e isso não é zelo: desde o
+    M4 o `PlanDiff` é heterogêneo (§5.7), e `before`/`after` são
+    `Event | Task | None`.
+
+    A primeira versão desta função assumia evento sempre, e o resultado
+    era um `AttributeError: 'Task' object has no attribute 'start'` —
+    **500 em `GET /plans/{id}` para qualquer plano com item de tarefa**.
+    Nenhum teste pegou porque a suíte do M4 monta e aplica planos pelo
+    `plan_store` e pelo executor, sem passar por esta rota; o smoke do
+    M4 lê o plano pelo banco. Quem encontrou foi a tela de revisão, que
+    é o primeiro código a realmente buscar o diff pela API — o par
+    tarefa+evento de §5.7.1 era justamente o caso que não abria.
+
+    O `_kind` é o mesmo discriminador que `plan_store` grava no JSON, e
+    está aqui por consistência com ele: a UI já sabe lê-lo.
+    """
+
+    def side_dict(side) -> dict | None:
+        if side is None:
             return None
+
+        # Tarefa: prazo, não intervalo. §5.7 insiste na diferença —
+        # "ligar pro dentista sexta às 15h" tem hora e NÃO bloqueia a
+        # agenda, então mandar `start`/`end` faria a UI desenhar uma
+        # ocupação que não existe.
+        if isinstance(side, Task):
+            return {
+                "_kind": "task",
+                "id": side.id,
+                "list_id": side.list_id,
+                "title": side.title,
+                "notes": side.notes,
+                "due_date": side.due_date.isoformat() if side.due_date else None,
+                "due_at": side.due_at.isoformat() if side.due_at else None,
+                "status": side.status.value,
+                "priority": side.priority.value if side.priority else None,
+                "estimated_min": (
+                    int(side.estimated.total_seconds() // 60)
+                    if side.estimated
+                    else None
+                ),
+            }
+
         return {
-            "id": event.id,
-            "title": event.title,
-            "start": event.start.isoformat(),
-            "end": event.end.isoformat(),
-            "flexibility": event.flexibility.value,
+            "_kind": "event",
+            "id": side.id,
+            "title": side.title,
+            "start": side.start.isoformat(),
+            "end": side.end.isoformat(),
+            "flexibility": side.flexibility.value,
         }
 
     return PlanOut(
@@ -458,8 +501,8 @@ def _to_out(plan) -> PlanOut:
                 target=i.target.value,
                 op=i.op.value,
                 reason=i.reason,
-                before=event_dict(i.before),
-                after=event_dict(i.after),
+                before=side_dict(i.before),
+                after=side_dict(i.after),
                 conflicts=[
                     ConflictOut(
                         kind=c.kind.value, message=c.message, severity=c.severity

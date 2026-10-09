@@ -44,12 +44,20 @@ class ConversationOut(BaseModel):
     title_is_auto: bool
     provider_key: str | None
     model: str | None
-    target_default: str
+    # Nullable: `None` significa "herda da conta" (§5.7.2). Um default
+    # não-nulo faria a camada 2 vencer a camada 1 por acidente.
+    target_default: str | None
     pinned_at: datetime | None
     archived_at: datetime | None
     last_message_at: datetime | None
     message_count: int
     created_at: datetime
+    # §8.1: quantos eventos e tarefas esta conversa colocou na vida da
+    # pessoa. É o que diferencia "conversa que resolveu algo" de
+    # "conversa que não foi pra frente" ao olhar a lista meses depois —
+    # sem isto a sidebar é uma pilha de títulos.
+    applied_events: int = 0
+    applied_tasks: int = 0
 
 
 class ConversationList(BaseModel):
@@ -171,10 +179,67 @@ async def list_conversations(
     has_more = len(rows) > limit
     page = rows[:limit]
 
+    counts = await _applied_counts(db, user.id, [c.id for c in page])
+
+    items = []
+    for conversation in page:
+        out = ConversationOut.model_validate(conversation, from_attributes=True)
+        events, tasks = counts.get(conversation.id, (0, 0))
+        items.append(
+            out.model_copy(update={"applied_events": events, "applied_tasks": tasks})
+        )
+
     return ConversationList(
-        items=[ConversationOut.model_validate(c, from_attributes=True) for c in page],
+        items=items,
         next_cursor=page[-1].created_at.isoformat() if has_more and page else None,
     )
+
+
+async def _applied_counts(
+    db: DbSession, user_id: UUID, conversation_ids: list[UUID]
+) -> dict[UUID, tuple[int, int]]:
+    """Itens de plano APLICADOS por conversa, separados por destino.
+
+    Uma query agregada para a página inteira, e não uma por conversa:
+    a sidebar é a tela mais aberta do produto, e 50 conversas dariam 50
+    consultas em cada abertura.
+
+    Conta `status = 'applied'` no item, não no plano: aprovação é
+    granular (§5.8), então um plano `partially_applied` tem itens
+    aplicados e itens rejeitados, e só os primeiros entraram na vida da
+    pessoa. Contar pelo plano inflaria o número — e um contador que
+    exagera o que o produto fez é pior que contador nenhum.
+
+    O id vai como JSON e volta via `json_array_elements_text` porque
+    asyncpg recusa literal de array de Postgres num parâmetro tipado
+    (mesma lição do M4, em `reorder` e `list_tasks`).
+    """
+    if not conversation_ids:
+        return {}
+
+    rows = await db.execute(
+        text(
+            """
+            SELECT p.conversation_id,
+                   count(*) FILTER (WHERE i.target = 'event') AS events,
+                   count(*) FILTER (WHERE i.target = 'task')  AS tasks
+            FROM core.plan_items i
+            JOIN core.plans p ON p.id = i.plan_id
+            WHERE i.user_id = :uid
+              AND i.status = 'applied'
+              AND p.conversation_id IN (
+                    SELECT value::uuid
+                    FROM json_array_elements_text(CAST(:ids AS json))
+                  )
+            GROUP BY p.conversation_id
+            """
+        ),
+        {
+            "uid": str(user_id),
+            "ids": json.dumps([str(cid) for cid in conversation_ids]),
+        },
+    )
+    return {row[0]: (row[1], row[2]) for row in rows.all()}
 
 
 @router.post("/conversations", status_code=status.HTTP_201_CREATED)

@@ -2,19 +2,164 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * Tokens de cor, e por que são tokens.
+ *
+ * ARQUITETURA.md §8.2 pede contraste AA. Isso é verificável só se as
+ * cores existirem num lugar — espalhar `#8b949e` pelos componentes
+ * significa que ninguém nunca vai conferir o contraste de novo.
+ *
+ * Os pares de texto sobre `--bg` (#0b0d10) e sobre `--panel` (#13171c)
+ * foram escolhidos para passar AA (4.5:1) em texto normal:
+ *   --text  #e7eaee sobre --bg  -> 14.9:1
+ *   --muted #9aa4b0 sobre --bg  ->  6.9:1
+ *   --muted #9aa4b0 sobre --panel -> 6.0:1
+ *
+ * O `--muted` subiu de #8b949e (4.8:1 sobre --panel, no limite) para
+ * #9aa4b0. Legenda de cartão é o texto que mais aparece nesta UI, e
+ * ficar raspando o mínimo é como se chega a uma interface que passa no
+ * medidor e cansa de ler.
+ */
 :root {
   --bg: #0b0d10;
   --panel: #13171c;
+  --panel-2: #181d24;
   --border: #242a32;
+  --border-strong: #333b46;
   --text: #e7eaee;
-  --muted: #8b949e;
+  --muted: #9aa4b0;
   --accent: #4c9aff;
+  --accent-ink: #06121f;
   --ok: #3fb950;
   --warn: #d29922;
+  --danger: #f85149;
+
+  /* Semânticos do domínio, para não repetir a decisão em cada tela. */
+  --fixed: #f0883e; /* evento FIXED — não se mexe (§5.6) */
+  --flexible: #4c9aff; /* FLEXIBLE — pode mover */
+  --proposed: #a371f7; /* proposto, ainda não aplicado */
+}
+
+* {
+  border-color: var(--border);
 }
 
 body {
   background: var(--bg);
   color: var(--text);
-  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-family:
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/*
+ * Foco visível, e deliberadamente não removido.
+ *
+ * `outline: none` sem substituto é a falha de acessibilidade mais comum
+ * em UI escura — quem navega por teclado perde a noção de onde está.
+ * `:focus-visible` dá o anel só para teclado, então o mouse não vê
+ * contorno em todo clique.
+ */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* §8.2: respeitar prefers-reduced-motion. Movimento não é decoração
+ * neutra — para parte das pessoas é náusea e enxaqueca. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Barra de rolagem discreta, sem esconder: esconder a barra tira a
+ * única pista de que há mais conteúdo abaixo. */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 5px;
+  border: 2px solid var(--bg);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--muted);
+}
+
+/* Cursor piscando no streaming. Fica junto do texto que chega token a
+ * token e some no `done` (§7.1). */
+@keyframes age-caret {
+  0%,
+  49% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
+.age-caret::after {
+  content: "▍";
+  margin-left: 1px;
+  animation: age-caret 1s step-end infinite;
+  color: var(--accent);
+}
+
+/* Pulso do chip de destino quando uma mensagem sobrepõe o padrão da
+ * conversa (§8.1): "o chip pisca brevemente no valor usado". */
+@keyframes age-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(76, 154, 255, 0.5);
+  }
+  70% {
+    box-shadow: 0 0 0 6px rgba(76, 154, 255, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(76, 154, 255, 0);
+  }
+}
+.age-pulse {
+  animation: age-pulse 1.2s ease-out 2;
+}
+
+/* Hachura do evento proposto (§8.1: "Diferencia proposto (hachurado) de
+ * confirmado"). Em CSS porque precisa valer tanto no cartão do diff
+ * quanto dentro da timeline da lib. */
+.age-hatch {
+  background-image: repeating-linear-gradient(
+    45deg,
+    transparent,
+    transparent 4px,
+    rgba(255, 255, 255, 0.09) 4px,
+    rgba(255, 255, 255, 0.09) 8px
+  );
+}
+
+/* Só para leitor de tela: rótulo que o olho não precisa e a navegação
+ * por voz precisa. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
 }

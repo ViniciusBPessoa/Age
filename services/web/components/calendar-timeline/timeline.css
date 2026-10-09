@@ -1,0 +1,165 @@
+/*
+ * Tema escuro para react-big-calendar.
+ *
+ * A lib vem com CSS claro, e não oferece tokens — então sobrescrever é
+ * o caminho previsto. Fica neste diretório, junto do componente que
+ * encapsula a lib, para que trocar a lib apague as duas coisas juntas
+ * (§2.4). Um `globals.css` cheio de `.rbc-*` seria dívida espalhada.
+ *
+ * Tudo usa as variáveis de `globals.css`, nunca hex literal: as cores
+ * do domínio (fixo/flexível/proposto) são decididas num lugar só.
+ */
+
+.age-timeline .rbc-calendar {
+  color: var(--text);
+}
+
+/* Cabeçalho e barra de ferramentas */
+.age-timeline .rbc-toolbar {
+  margin-bottom: 0.75rem;
+  gap: 0.5rem;
+  font-size: 0.8125rem;
+}
+
+.age-timeline .rbc-toolbar button {
+  color: var(--muted);
+  border-color: var(--border-strong);
+  background: transparent;
+  border-radius: 6px;
+  padding: 0.25rem 0.625rem;
+}
+
+.age-timeline .rbc-toolbar button:hover,
+.age-timeline .rbc-toolbar button:focus-visible {
+  background: var(--panel-2);
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+
+.age-timeline .rbc-toolbar button.rbc-active,
+.age-timeline .rbc-toolbar button.rbc-active:hover {
+  background: var(--accent);
+  color: var(--accent-ink);
+  border-color: var(--accent);
+}
+
+.age-timeline .rbc-toolbar-label {
+  font-weight: 600;
+  color: var(--text);
+}
+
+/* Grade */
+.age-timeline .rbc-header,
+.age-timeline .rbc-time-header-content,
+.age-timeline .rbc-time-content,
+.age-timeline .rbc-time-view,
+.age-timeline .rbc-month-view,
+.age-timeline .rbc-day-bg + .rbc-day-bg,
+.age-timeline .rbc-month-row + .rbc-month-row,
+.age-timeline .rbc-time-content > * + * > *,
+.age-timeline .rbc-timeslot-group {
+  border-color: var(--border);
+}
+
+.age-timeline .rbc-header {
+  padding: 0.5rem 0.25rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--muted);
+  border-bottom-color: var(--border);
+}
+
+.age-timeline .rbc-time-view,
+.age-timeline .rbc-month-view {
+  border-radius: 8px;
+  background: var(--panel);
+}
+
+.age-timeline .rbc-label,
+.age-timeline .rbc-time-gutter {
+  font-size: 0.6875rem;
+  color: var(--muted);
+}
+
+/* "Hoje" é destaque sutil: um fundo forte na coluna de hoje compete
+ * com os eventos, que são o conteúdo. */
+.age-timeline .rbc-today {
+  background: rgba(76, 154, 255, 0.06);
+}
+
+.age-timeline .rbc-off-range-bg {
+  background: var(--bg);
+}
+
+.age-timeline .rbc-current-time-indicator {
+  background: var(--danger);
+  height: 2px;
+}
+
+/* ---------------------------------------------------------------
+ * Eventos. As classes vêm do `eventPropGetter` do componente.
+ * --------------------------------------------------------------- */
+.age-timeline .age-ev {
+  border: none;
+  border-left: 3px solid var(--flexible);
+  background: color-mix(in srgb, var(--flexible) 22%, var(--panel));
+  color: var(--text);
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-size: 0.6875rem;
+  line-height: 1.3;
+}
+
+.age-timeline .age-ev-fixed {
+  border-left-color: var(--fixed);
+  background: color-mix(in srgb, var(--fixed) 22%, var(--panel));
+}
+
+.age-timeline .age-ev-semi {
+  border-left-color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 18%, var(--panel));
+}
+
+/* Proposto: hachurado (§8.1). A hachura em si está em `.age-hatch`, em
+ * globals.css, porque o cartão do diff usa a mesma. */
+.age-timeline .age-ev-proposed {
+  border-left-color: var(--proposed);
+  background: color-mix(in srgb, var(--proposed) 20%, var(--panel));
+  /* Tracejado reforça o "ainda não é real" para quem não distingue as
+   * cores — a hachura sozinha é sutil em bloco pequeno. */
+  outline: 1px dashed var(--proposed);
+  outline-offset: -1px;
+}
+
+.age-timeline .rbc-selected {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* Mês: o "+2" de eventos escondidos */
+.age-timeline .rbc-show-more {
+  background: transparent;
+  color: var(--accent);
+  font-size: 0.6875rem;
+}
+
+.age-timeline .rbc-overlay {
+  background: var(--panel-2);
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+}
+
+.age-timeline .rbc-overlay-header {
+  border-bottom-color: var(--border);
+  color: var(--muted);
+}
+
+/* Mobile: a barra de ferramentas quebra em duas linhas em vez de
+ * estourar a largura. */
+@media (max-width: 640px) {
+  .age-timeline .rbc-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
