@@ -26,8 +26,14 @@ import {
   Badge,
   Button,
   Field,
+  IconCalendar,
+  IconChevronRight,
+  IconShield,
+  IconTasks,
+  IconTrash,
   Input,
   LoadError,
+  PageHeader,
   Panel,
   Select,
   Spinner,
@@ -63,12 +69,10 @@ const AUTONOMY_LABEL: Record<AutonomyLevel, string> = {
 
 export function SettingsScreen({ me }: { me: Me }) {
   return (
-    <div className="min-h-dvh pb-14 md:pb-0">
-      <header className="border-b border-[var(--border)] px-4 py-3">
-        <h1 className="text-sm font-semibold">Configurações</h1>
-      </header>
+    <div className="min-h-dvh pb-16 md:pb-0">
+      <PageHeader title="Configurações" width="2xl" />
 
-      <div className="mx-auto max-w-2xl space-y-6 px-4 py-5">
+      <div className="mx-auto max-w-2xl space-y-8 px-4 py-6 md:px-7">
         <ProfileSection me={me} />
         <CredentialsSection />
         <ConnectionsSection />
@@ -91,13 +95,9 @@ function Section({
 }) {
   return (
     <section>
-      <h2 className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">
-        {title}
-      </h2>
+      <h2 className="text-base font-semibold">{title}</h2>
       {description ? (
-        <p className="mt-1 text-xs leading-relaxed text-[var(--muted)]">
-          {description}
-        </p>
+        <p className="mt-1 text-xs leading-relaxed text-muted">{description}</p>
       ) : null}
       <div className="mt-2">{children}</div>
     </section>
@@ -174,7 +174,7 @@ function ProfileSection({ me }: { me: Me }) {
             Salvar
           </Button>
           {saved ? (
-            <span role="status" className="text-xs text-[var(--ok)]">
+            <span role="status" className="text-xs font-medium text-ok">
               salvo
             </span>
           ) : null}
@@ -272,22 +272,18 @@ function CredentialsSection() {
                   <Badge tone="warn">não verificada</Badge>
                 )}
                 {credential.default_model ? (
-                  <span className="text-[11px] text-[var(--muted)]">
-                    {credential.default_model}
-                  </span>
+                  <span className="text-xs text-muted">{credential.default_model}</span>
                 ) : null}
               </div>
 
               {credential.last_error ? (
-                <p className="mt-1 text-xs text-[var(--danger)]">
-                  {credential.last_error}
-                </p>
+                <p className="mt-1 text-xs text-danger">{credential.last_error}</p>
               ) : null}
 
               <div className="mt-2 flex flex-wrap items-center gap-2">
                 <Button
                   size="sm"
-                  variant="ghost"
+                  variant="secondary"
                   loading={verify.isPending && verify.variables === credential.id}
                   onClick={() => verify.mutate(credential.id)}
                 >
@@ -298,17 +294,18 @@ function CredentialsSection() {
                     href={info.keyUrl}
                     target="_blank"
                     rel="noreferrer noopener"
-                    className="text-xs text-[var(--accent)] hover:underline"
+                    className="text-xs font-medium text-brand hover:underline"
                   >
                     gerenciar no provedor →
                   </a>
                 ) : null}
                 <Button
                   size="sm"
-                  variant="quiet"
-                  className="ml-auto text-[var(--danger)]"
+                  variant="ghost"
+                  className="ml-auto text-danger hover:bg-danger/10 hover:text-danger"
                   onClick={() => remove.mutate(credential.id)}
                 >
+                  <IconTrash className="h-3.5 w-3.5" />
                   remover
                 </Button>
               </div>
@@ -353,7 +350,7 @@ function CredentialsSection() {
               >
                 Salvar e verificar
               </Button>
-              <Button variant="quiet" size="sm" onClick={() => setAdding(false)}>
+              <Button variant="ghost" size="sm" onClick={() => setAdding(false)}>
                 Cancelar
               </Button>
             </div>
@@ -388,7 +385,10 @@ function ConnectionsSection() {
             key={calendar.id}
             className="flex flex-wrap items-center gap-2 px-4 py-3"
           >
-            <span className="text-sm">📅 {calendar.name}</span>
+            <span className="flex items-center gap-2 text-sm font-medium">
+              <IconCalendar className="text-muted" />
+              {calendar.name}
+            </span>
             {calendar.is_primary ? <Badge>principal</Badge> : null}
             {calendar.writable ? (
               <Badge tone="ok">leitura e escrita</Badge>
@@ -400,7 +400,10 @@ function ConnectionsSection() {
 
         {(lists.data ?? []).map((list) => (
           <Panel key={list.id} className="flex flex-wrap items-center gap-2 px-4 py-3">
-            <span className="text-sm">📋 {list.name}</span>
+            <span className="flex items-center gap-2 text-sm font-medium">
+              <IconTasks className="text-muted" />
+              {list.name}
+            </span>
             {list.is_default ? <Badge>padrão</Badge> : null}
           </Panel>
         ))}
@@ -573,7 +576,7 @@ function SchedulingSection() {
             onChange={(e) =>
               save.mutate({ spaced_repetition_enabled: e.target.checked })
             }
-            className="accent-[var(--accent)]"
+            className="h-4 w-4 cursor-pointer accent-brand"
           />
           Revisão espaçada nos planos de estudo
         </label>
@@ -583,7 +586,7 @@ function SchedulingSection() {
             type="checkbox"
             checked={current.private_mode}
             onChange={(e) => save.mutate({ private_mode: e.target.checked })}
-            className="mt-1 accent-[var(--accent)]"
+            className="mt-0.5 h-4 w-4 cursor-pointer accent-brand"
           />
           <span>
             Modo privado
@@ -595,7 +598,7 @@ function SchedulingSection() {
         </label>
 
         {saved ? (
-          <p role="status" className="text-xs text-[var(--ok)]">
+          <p role="status" className="text-xs font-medium text-ok">
             salvo
           </p>
         ) : null}
@@ -631,17 +634,17 @@ function SessionsSection() {
               <p className="truncate text-sm">
                 {session.device_label ?? "Dispositivo desconhecido"}
                 {session.is_current ? (
-                  <span className="ml-2 text-xs text-[var(--ok)]">este</span>
+                  <span className="ml-2 text-xs font-medium text-ok">este</span>
                 ) : null}
               </p>
-              <p className="text-[11px] text-[var(--muted)]">
+              <p className="text-xs text-muted">
                 {session.ip ?? "sem IP"} · criada {moment(session.created_at, "UTC")}
               </p>
             </div>
             {!session.is_current ? (
               <Button
                 size="sm"
-                variant="quiet"
+                variant="ghost"
                 onClick={() => revoke.mutate(session.id)}
               >
                 encerrar
@@ -652,7 +655,7 @@ function SessionsSection() {
 
         <Button
           size="sm"
-          variant="ghost"
+          variant="secondary"
           onClick={async () => {
             await auth.logout().catch(() => undefined);
             router.replace("/login");
@@ -670,13 +673,22 @@ function PrivacyLink() {
     <Section title="Privacidade">
       <Link
         href="/settings/privacy"
-        className="block rounded-lg border border-[var(--border)] bg-[var(--panel)] px-4 py-3 transition-colors hover:border-[var(--border-strong)]"
+        className="card card-hover group flex items-center gap-3.5 px-4 py-4"
       >
-        <p className="text-sm">Exportar e apagar dados →</p>
-        <p className="mt-0.5 text-xs text-[var(--muted)]">
-          Export completo, apagar histórico, encerrar a conta — e o que cada uma dessas
-          coisas não alcança.
-        </p>
+        <span
+          aria-hidden
+          className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-surface-2 text-muted ring-1 ring-inset ring-line"
+        >
+          <IconShield className="h-[18px] w-[18px]" />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block text-sm font-medium">Exportar e apagar dados</span>
+          <span className="mt-0.5 block text-xs leading-relaxed text-muted">
+            Export completo, apagar histórico, encerrar a conta — e o que cada uma
+            dessas coisas não alcança.
+          </span>
+        </span>
+        <IconChevronRight className="shrink-0 text-muted transition-transform group-hover:translate-x-0.5" />
       </Link>
     </Section>
   );

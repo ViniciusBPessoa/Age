@@ -3,7 +3,7 @@
  *
  *   ┌──────────────────────────────────────────────────────────┐
  *   │  preciso revisar o capítulo 2 até sexta                  │
- *   │  🤖 DeepSeek ▾    📍 Ambos ▾                      [ ↑ ]  │
+ *   │  DeepSeek ▾    Ambos ▾                            [ ↑ ]  │
  *   └──────────────────────────────────────────────────────────┘
  *
  * O seletor de destino é a camada 2 do seletor de três camadas de
@@ -17,7 +17,7 @@
 
 import { useEffect, useRef, useState } from "react";
 
-import { Badge, Button, Select } from "@/components/ui";
+import { Badge, Button, IconSend, Select, cx } from "@/components/ui";
 import type { Credential, ProviderInfo, Target } from "@/lib/types";
 
 const TARGET_LABEL: Record<Target, string> = {
@@ -88,117 +88,144 @@ export function Composer({
     credentials.some((c) => c.provider_key === p.key && c.is_active),
   );
   const broken = credentials.filter((c) => c.last_error);
+  const canSend = text.trim().length > 0 && !disabled && !sending;
 
   function submit() {
-    const value = text.trim();
-    if (!value || disabled || sending) return;
-    onSend(value);
+    if (!canSend) return;
+    onSend(text.trim());
     setText("");
   }
 
   return (
-    <div className="border-t border-[var(--border)] bg-[var(--panel)] p-3">
-      {broken.length > 0 ? (
-        <p className="mb-2 text-xs text-[var(--warn)]" role="status">
-          ⚠ A chave do {broken[0].provider_key} falhou na última verificação. Dá para
-          corrigir em Configurações.
-        </p>
-      ) : null}
+    <div className="px-4 pb-4 pt-2 md:px-6">
+      <div className="mx-auto max-w-3xl">
+        {broken.length > 0 ? (
+          <p
+            role="status"
+            className="mb-2 flex items-center gap-2 rounded-lg bg-warn/10 px-3 py-2 text-xs text-warn ring-1 ring-inset ring-warn/20"
+          >
+            A chave do {broken[0].provider_key} falhou na última verificação. Dá para
+            corrigir em Configurações.
+          </p>
+        ) : null}
 
-      <div className="rounded-lg border border-[var(--border-strong)] bg-[var(--bg)] focus-within:border-[var(--accent)]">
-        <label htmlFor="composer" className="sr-only">
-          Mensagem
-        </label>
-        <textarea
-          id="composer"
-          ref={area}
-          rows={1}
-          value={text}
-          disabled={disabled}
-          placeholder="O que você quer organizar?"
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => {
-            // Enter envia, Shift+Enter quebra linha — a convenção que
-            // todo chat usa, e contrariá-la custa uma mensagem enviada
-            // por engano.
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              submit();
-            }
-          }}
-          className="w-full resize-none bg-transparent px-3 pt-3 text-sm text-[var(--text)] placeholder:text-[var(--muted)] outline-none disabled:opacity-50"
-        />
-
-        <div className="flex flex-wrap items-center gap-2 px-2 pb-2 pt-1">
-          {/* Seletor de provedor/modelo (§3.1.3: trocar afeta a próxima
-              mensagem, a conversa segue com o mesmo histórico). */}
-          <label htmlFor="provider-select" className="sr-only">
-            Provedor e modelo
+        {/*
+         * A caixa inteira é a superfície de foco, com anel.
+         *
+         * `focus-within` no contêiner em vez de borda no textarea: o
+         * campo e os dois seletores vivem dentro da mesma moldura, e o
+         * anel precisa envolver o conjunto, não só a linha de texto.
+         */}
+        <div
+          className={cx(
+            "rounded-2xl border border-line-strong bg-surface shadow-raised",
+            "transition-all duration-200",
+            "focus-within:border-brand focus-within:ring-[3px] focus-within:ring-brand/20",
+          )}
+        >
+          <label htmlFor="composer" className="sr-only">
+            Mensagem
           </label>
-          <Select
-            id="provider-select"
-            value={`${providerKey ?? ""}::${model ?? ""}`}
-            disabled={usable.length === 0}
-            onChange={(e) => {
-              const [key, chosen] = e.target.value.split("::");
-              onProviderChange(key, chosen);
+          <textarea
+            id="composer"
+            ref={area}
+            rows={1}
+            value={text}
+            disabled={disabled}
+            placeholder="Peça algo, ou conte o que precisa organizar…"
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={(e) => {
+              // Enter envia, Shift+Enter quebra linha — a convenção que
+              // todo chat usa, e contrariá-la custa uma mensagem
+              // enviada por engano.
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                submit();
+              }
             }}
-            className="w-auto border-0 bg-transparent px-1.5 py-1 text-xs text-[var(--muted)] hover:text-[var(--text)]"
-          >
-            {usable.length === 0 ? <option value="::">sem credencial</option> : null}
-            {usable.map((provider) =>
-              provider.models.map((candidate) => (
-                <option
-                  key={`${provider.key}::${candidate}`}
-                  value={`${provider.key}::${candidate}`}
-                >
-                  🤖 {provider.name} · {candidate}
+            className="w-full resize-none bg-transparent px-4 pt-3.5 text-base leading-relaxed text-ink outline-none placeholder:text-faint disabled:opacity-50"
+          />
+
+          <div className="flex flex-wrap items-center gap-1.5 px-2.5 pb-2.5 pt-1">
+            {/* Seletor de provedor/modelo (§3.1.3: trocar afeta a
+                próxima mensagem, a conversa segue com o mesmo
+                histórico). */}
+            <label htmlFor="provider-select" className="sr-only">
+              Provedor e modelo
+            </label>
+            <Select
+              bare
+              id="provider-select"
+              value={`${providerKey ?? ""}::${model ?? ""}`}
+              disabled={usable.length === 0}
+              onChange={(e) => {
+                const [key, chosen] = e.target.value.split("::");
+                onProviderChange(key, chosen);
+              }}
+            >
+              {usable.length === 0 ? <option value="::">sem credencial</option> : null}
+              {usable.map((provider) =>
+                provider.models.map((candidate) => (
+                  <option
+                    key={`${provider.key}::${candidate}`}
+                    value={`${provider.key}::${candidate}`}
+                  >
+                    {provider.name} · {candidate}
+                  </option>
+                )),
+              )}
+            </Select>
+
+            <span aria-hidden className="h-4 w-px bg-line" />
+
+            {/* Seletor de destino (§5.7.2). */}
+            <label htmlFor="target-select" className="sr-only">
+              Para onde vai o que for proposto
+            </label>
+            <Select
+              bare
+              id="target-select"
+              value={target}
+              title={TARGET_HINT[target]}
+              onChange={(e) => onTargetChange(e.target.value as Target)}
+              className={cx(pulse && "age-pulse rounded-lg")}
+            >
+              {(Object.keys(TARGET_LABEL) as Target[]).map((value) => (
+                <option key={value} value={value}>
+                  {TARGET_LABEL[value]}
                 </option>
-              )),
-            )}
-          </Select>
+              ))}
+            </Select>
 
-          {/* Seletor de destino (§5.7.2). */}
-          <label htmlFor="target-select" className="sr-only">
-            Para onde vai o que for proposto
-          </label>
-          <Select
-            id="target-select"
-            value={target}
-            title={TARGET_HINT[target]}
-            onChange={(e) => onTargetChange(e.target.value as Target)}
-            className={`w-auto border-0 bg-transparent px-1.5 py-1 text-xs text-[var(--muted)] hover:text-[var(--text)] ${pulse ? "age-pulse rounded" : ""}`}
-          >
-            {(Object.keys(TARGET_LABEL) as Target[]).map((value) => (
-              <option key={value} value={value}>
-                📍 {TARGET_LABEL[value]}
-              </option>
-            ))}
-          </Select>
+            {/* Quando a mensagem sobrepôs, dizer qual valor valeu. O
+                `aria-live` faz o leitor de tela anunciar — piscar
+                sozinho não comunica nada para quem não vê. */}
+            {overriddenTarget && overriddenTarget !== target ? (
+              <span aria-live="polite">
+                <Badge tone="brand">
+                  esta foi para {TARGET_LABEL[overriddenTarget].toLowerCase()}
+                </Badge>
+              </span>
+            ) : null}
 
-          {/* Quando a mensagem sobrepôs, dizer qual valor valeu. O
-              `aria-live` faz o leitor de tela anunciar — piscar sozinho
-              não comunica nada para quem não vê. */}
-          {overriddenTarget && overriddenTarget !== target ? (
-            <span aria-live="polite">
-              <Badge tone="accent">
-                esta foi para {TARGET_LABEL[overriddenTarget].toLowerCase()}
-              </Badge>
-            </span>
-          ) : null}
-
-          <Button
-            variant="primary"
-            size="sm"
-            className="ml-auto"
-            onClick={submit}
-            loading={sending}
-            disabled={disabled || text.trim().length === 0}
-            aria-label="Enviar mensagem"
-          >
-            ↑
-          </Button>
+            <Button
+              variant="primary"
+              size="icon"
+              className="ml-auto rounded-xl"
+              onClick={submit}
+              loading={sending}
+              disabled={!canSend}
+              aria-label="Enviar mensagem"
+            >
+              {sending ? null : <IconSend />}
+            </Button>
+          </div>
         </div>
+
+        <p className="mt-2 text-center text-2xs text-faint">
+          Enter envia · Shift+Enter quebra linha · nada é escrito na sua agenda sem você
+          aprovar
+        </p>
       </div>
     </div>
   );

@@ -32,10 +32,11 @@ O que funciona, ponta a ponta, contra containers reais:
 - **Interface**: onboarding que não deixa ninguém num chat morto,
   chat com streaming token a token, revisão de plano item por item,
   timeline com proposto hachurado, e as telas de tarefa, estudo, rotina,
-  relatório e privacidade.
+  relatório e privacidade. Tema escuro e claro, tipografia Inter
+  auto-hospedada, ícones próprios e contraste AA verificado.
 
 Validado: **269 verificações de smoke** (22 + 34 + 27 + 30 + 38 + 56 +
-73) contra containers reais, **309 testes** no backend e **99** no
+73) contra containers reais, **240 testes** no backend e **100** no
 front. Lint limpo nos três serviços, `tsc --noEmit` e
 `prettier --check` sem erros, `next build` passando.
 

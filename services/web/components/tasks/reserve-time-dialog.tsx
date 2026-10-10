@@ -21,7 +21,16 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { addDays } from "date-fns";
 import { useMemo, useState } from "react";
 
-import { Button, Dialog, Field, Input, Spinner } from "@/components/ui";
+import {
+  Button,
+  Dialog,
+  Field,
+  IconCheck,
+  IconClock,
+  Input,
+  Spinner,
+  cx,
+} from "@/components/ui";
 import { RequestFailed, api } from "@/lib/api-client";
 import { duration, range } from "@/lib/format";
 import type { Slot, Task } from "@/lib/types";
@@ -93,7 +102,7 @@ export function ReserveTimeDialog({
       title={`Reservar tempo · ${task.title}`}
       footer={
         <>
-          <Button variant="quiet" onClick={onClose}>
+          <Button variant="ghost" onClick={onClose}>
             Cancelar
           </Button>
           <Button
@@ -128,42 +137,68 @@ export function ReserveTimeDialog({
         </Field>
 
         <div>
-          <p className="mb-2 text-xs font-medium">
+          <p className="eyebrow mb-2.5">
             Horários livres
             {window.deadline ? " antes do prazo" : " nos próximos 14 dias"}
           </p>
 
           {!validDuration ? null : slots.isLoading ? (
-            <p className="text-xs text-[var(--muted)]">
-              <Spinner /> procurando…
-            </p>
+            <div className="space-y-1.5" aria-hidden>
+              {Array.from({ length: 3 }).map((_, i) => (
+                <div key={i} className="skeleton h-14 rounded-xl" />
+              ))}
+            </div>
           ) : slots.data && slots.data.slots.length > 0 ? (
-            <ul className="space-y-1.5">
+            <ul className="max-h-64 space-y-1.5 overflow-y-auto pr-0.5">
               {slots.data.slots.map((slot) => {
                 const selected =
                   chosen?.start === slot.start && chosen?.end === slot.end;
                 return (
                   <li key={`${slot.start}-${slot.end}`}>
+                    {/*
+                     * O cartão de horário é a decisão desta tela, e
+                     * agora parece uma escolha: 44px de altura, o
+                     * horário em 13px com números tabulares, e a marca
+                     * de selecionado à direita em vez de só uma borda
+                     * azul de 1px.
+                     */}
                     <button
                       onClick={() => setChosen(slot)}
                       aria-pressed={selected}
-                      className={[
-                        "w-full rounded-md border px-3 py-2 text-left transition-colors",
+                      className={cx(
+                        "flex w-full items-center gap-3 rounded-xl border px-3.5 py-2.5 text-left",
+                        "transition-all duration-150",
                         selected
-                          ? "border-[var(--accent)] bg-[var(--panel-2)]"
-                          : "border-[var(--border)] hover:border-[var(--border-strong)]",
-                      ].join(" ")}
+                          ? "border-brand bg-brand/10 ring-[3px] ring-brand/15"
+                          : "border-line bg-surface-2 hover:border-line-strong hover:bg-surface-3",
+                      )}
                     >
-                      <span className="block text-xs">
-                        {range(slot.start, slot.end, timezone)}
+                      <IconClock
+                        className={cx(
+                          "h-4 w-4 shrink-0",
+                          selected ? "text-brand" : "text-muted",
+                        )}
+                      />
+                      <span className="min-w-0 flex-1">
+                        <span className="tnum block text-sm font-medium">
+                          {range(slot.start, slot.end, timezone)}
+                        </span>
+                        {/* O motivo de cada slot vem do Scheduler
+                            (§5.4). Mostrar "bloco livre mais longo
+                            antes do prazo" é o que torna a escolha
+                            informada em vez de aleatória. */}
+                        {slot.reasons.length > 0 ? (
+                          <span className="mt-0.5 block text-xs leading-relaxed text-muted">
+                            {slot.reasons.join(" · ")}
+                          </span>
+                        ) : null}
                       </span>
-                      {/* O motivo de cada slot vem do Scheduler (§5.4).
-                          Mostrar "bloco livre mais longo antes do prazo"
-                          é o que torna a escolha informada em vez de
-                          aleatória. */}
-                      {slot.reasons.length > 0 ? (
-                        <span className="mt-0.5 block text-[11px] text-[var(--muted)]">
-                          {slot.reasons.join(" · ")}
+                      {selected ? (
+                        <span
+                          aria-hidden
+                          className="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-brand text-brand-ink"
+                        >
+                          <IconCheck className="h-3 w-3" strokeWidth={3} />
                         </span>
                       ) : null}
                     </button>
@@ -172,16 +207,17 @@ export function ReserveTimeDialog({
               })}
             </ul>
           ) : (
-            <p className="text-xs leading-relaxed text-[var(--warn)]">
+            <p className="rounded-xl bg-warn/10 px-3.5 py-3 text-xs leading-relaxed text-warn">
               {slots.data?.hint ??
                 "Nenhum horário livre nessa janela. Tente uma duração menor."}
             </p>
           )}
         </div>
 
-        <p className="text-[11px] leading-relaxed text-[var(--muted)]">
-          Isto monta uma proposta: o bloco e a tarefa ficam ligados, e você aprova os
-          dois juntos. {duration(parsed || 0)} sai da sua agenda só depois disso.
+        <p className="rounded-xl bg-surface-2 px-3.5 py-3 text-xs leading-relaxed text-muted">
+          Isto monta uma <strong className="font-medium text-ink-2">proposta</strong>: o
+          bloco e a tarefa ficam ligados, e você aprova os dois juntos.{" "}
+          {duration(parsed || 0)} sai da sua agenda só depois disso.
         </p>
       </div>
     </Dialog>

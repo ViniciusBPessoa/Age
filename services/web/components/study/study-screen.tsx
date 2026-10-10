@@ -22,11 +22,19 @@ import {
   Dialog,
   Empty,
   Field,
+  IconCheck,
+  IconChevronDown,
+  IconSkip,
+  IconStudy,
   Input,
   LoadError,
+  PageHeader,
   Panel,
+  Progress,
   Select,
+  SkeletonList,
   Spinner,
+  cx,
 } from "@/components/ui";
 import { api } from "@/lib/api-client";
 import { dateOf, duration, percent, range } from "@/lib/format";
@@ -58,68 +66,72 @@ export function StudyScreen({ timezone }: { timezone: string }) {
   }
 
   return (
-    <div className="min-h-dvh pb-14 md:pb-0">
-      <header className="flex items-center gap-2 border-b border-[var(--border)] px-4 py-3">
-        <h1 className="text-sm font-semibold">Estudo</h1>
-        {pending.data && pending.data.length > 0 ? (
-          <Badge tone="warn">{pending.data.length} sem marcar</Badge>
-        ) : null}
-      </header>
+    <div className="min-h-dvh pb-16 md:pb-0">
+      <PageHeader
+        title="Estudo"
+        action={
+          pending.data && pending.data.length > 0 ? (
+            <Badge tone="warn">{pending.data.length} sem marcar</Badge>
+          ) : undefined
+        }
+      />
 
-      <div className="mx-auto max-w-3xl space-y-5 px-4 py-5">
+      <div className="mx-auto max-w-3xl space-y-7 px-4 py-6 md:px-7">
         {/* Marcação rápida (§8.1): "abrir o chat para dizer 'fui à
             academia' é atrito demais". Fica no topo porque é a ação com
             prazo — sessão de ontem não marcada hoje não é marcada
             nunca, e aí a recalibração de §5.9.8 perde o insumo. */}
         {pending.data && pending.data.length > 0 ? (
           <section>
-            <h2 className="px-1 pb-1.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--muted)]">
-              Como foi?
-            </h2>
+            <h2 className="eyebrow px-1 pb-2">Como foi?</h2>
             <ul className="space-y-2">
               {pending.data.map((session) => (
-                <Panel as="li" key={session.id} className="px-4 py-3">
-                  <div className="flex flex-wrap items-center gap-2">
+                <li
+                  key={session.id}
+                  className="card border-brand/25 bg-brand/[0.04] px-4 py-3.5"
+                >
+                  <div className="flex flex-wrap items-center gap-3">
                     <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm">
+                      <p className="truncate text-sm font-medium">
                         {session.topic}
                         {session.of_parts && session.of_parts > 1 ? (
-                          <span className="text-[var(--muted)]">
+                          <span className="font-normal text-muted">
                             {" "}
                             · parte {session.part}/{session.of_parts}
                           </span>
                         ) : null}
                       </p>
-                      <p className="mt-0.5 text-xs text-[var(--muted)]">
+                      <p className="mt-1 text-xs text-muted">
                         {session.subject} ·{" "}
-                        {range(
-                          session.scheduled_start,
-                          session.scheduled_end,
-                          timezone,
-                        )}
+                        <span className="tnum">
+                          {range(
+                            session.scheduled_start,
+                            session.scheduled_end,
+                            timezone,
+                          )}
+                        </span>
                       </p>
                     </div>
-                    <div className="flex gap-1.5">
+                    <div className="flex gap-2">
                       <Button
                         size="sm"
                         variant="primary"
                         onClick={() => setMarking(session)}
                       >
+                        <IconCheck className="h-3.5 w-3.5" />
                         feito
                       </Button>
                       <MarkSkipped session={session} onDone={refresh} />
                     </div>
                   </div>
-                </Panel>
+                </li>
               ))}
             </ul>
           </section>
         ) : null}
 
         <section>
-          <h2 className="px-1 pb-1.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--muted)]">
-            Assuntos
-          </h2>
+          <h2 className="eyebrow px-1 pb-2">Assuntos</h2>
 
           {subjects.isError ? (
             <LoadError
@@ -127,11 +139,12 @@ export function StudyScreen({ timezone }: { timezone: string }) {
               onRetry={() => void subjects.refetch()}
             />
           ) : subjects.isLoading ? (
-            <p className="px-2 py-4 text-xs text-[var(--muted)]">
-              <Spinner /> carregando…
-            </p>
+            <SkeletonList rows={3} />
           ) : (subjects.data?.length ?? 0) === 0 ? (
-            <Empty title="Nenhum plano de estudo ainda.">
+            <Empty
+              title="Nenhum plano de estudo ainda."
+              icon={<IconStudy className="h-5 w-5" />}
+            >
               Peça no chat: &ldquo;preciso estudar cálculo II, prova dia 20&rdquo;. O
               Age decompõe em sessões, respeita pré-requisitos e distribui com revisão
               espaçada.
@@ -183,49 +196,52 @@ function SubjectCard({
   progress?: SubjectProgress;
   onToggle: () => void;
 }) {
-  const ratio =
-    subject.sessions_planned > 0 ? subject.sessions_done / subject.sessions_planned : 0;
-
   return (
-    <Panel as="li">
+    <Panel as="li" hover className="overflow-hidden">
       <button
         onClick={onToggle}
         aria-expanded={expanded}
-        className="w-full px-4 py-3 text-left"
+        className="w-full px-4 py-4 text-left md:px-5"
       >
         <div className="flex flex-wrap items-center gap-2">
-          <span className="min-w-0 flex-1 truncate text-sm font-medium">
+          <span className="min-w-0 flex-1 truncate text-base font-semibold">
             {subject.name}
           </span>
           {subject.deadline ? (
             <Badge tone="warn">prova {dateOf(subject.deadline, timezone)}</Badge>
           ) : null}
-          <span className="text-xs text-[var(--muted)]">
-            {subject.sessions_done}/{subject.sessions_planned}
-          </span>
-        </div>
-
-        {/* Barra de progresso com `role="progressbar"`: sem os atributos
-            ARIA, para quem usa leitor de tela a barra não existe. */}
-        <div
-          role="progressbar"
-          aria-valuenow={subject.sessions_done}
-          aria-valuemin={0}
-          aria-valuemax={subject.sessions_planned}
-          aria-label={`Progresso de ${subject.name}`}
-          className="mt-2 h-1.5 overflow-hidden rounded-full bg-[var(--bg)]"
-        >
-          <div
-            className="h-full rounded-full bg-[var(--accent)] transition-[width]"
-            style={{ width: `${Math.round(ratio * 100)}%` }}
+          <IconChevronDown
+            className={cx(
+              "h-4 w-4 text-muted transition-transform duration-200",
+              expanded && "rotate-180",
+            )}
           />
         </div>
+
+        {/* O número grande é o progresso: era 12px cinza ao lado do
+            título, e é a informação que a tela existe para dar. */}
+        <div className="mt-3 flex items-end justify-between gap-3">
+          <span className="tnum text-2xl font-semibold leading-none">
+            {subject.sessions_done}
+            <span className="text-base font-normal text-muted">
+              /{subject.sessions_planned}
+            </span>
+          </span>
+          <span className="text-xs text-muted">sessões feitas</span>
+        </div>
+
+        <Progress
+          value={subject.sessions_done}
+          max={subject.sessions_planned}
+          label={`Progresso de ${subject.name}`}
+          className="mt-2"
+        />
       </button>
 
       {expanded ? (
-        <div className="border-t border-[var(--border)] px-4 py-3">
+        <div className="animate-fade-in border-t border-line bg-surface-2/40 px-4 py-4 md:px-5">
           {progress ? (
-            <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs sm:grid-cols-4">
+            <dl className="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-4">
               <Stat
                 label="Tópicos"
                 value={`${progress.topics_completed}/${progress.topics_total}`}
@@ -238,7 +254,7 @@ function SubjectCard({
               <Stat label="Concluído" value={percent(progress.completion)} />
             </dl>
           ) : (
-            <p className="text-xs text-[var(--muted)]">
+            <p className="flex items-center gap-2 text-xs text-muted">
               <Spinner /> carregando…
             </p>
           )}
@@ -251,10 +267,8 @@ function SubjectCard({
 function Stat({ label, value }: { label: string; value: string }) {
   return (
     <div>
-      <dt className="text-[10px] uppercase tracking-wide text-[var(--muted)]">
-        {label}
-      </dt>
-      <dd className="mt-0.5 text-sm">{value}</dd>
+      <dt className="eyebrow">{label}</dt>
+      <dd className="tnum mt-1 text-base font-semibold">{value}</dd>
     </div>
   );
 }
@@ -276,10 +290,11 @@ function MarkSkipped({
   return (
     <Button
       size="sm"
-      variant="ghost"
+      variant="secondary"
       loading={mark.isPending}
       onClick={() => mark.mutate()}
     >
+      {mark.isPending ? null : <IconSkip className="h-3.5 w-3.5" />}
       pulei
     </Button>
   );
@@ -319,7 +334,7 @@ function MarkDoneDialog({
       title={`Feito · ${session.topic}`}
       footer={
         <>
-          <Button variant="quiet" onClick={onClose}>
+          <Button variant="ghost" onClick={onClose}>
             Cancelar
           </Button>
           <Button

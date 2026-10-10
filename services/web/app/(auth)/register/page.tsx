@@ -51,8 +51,8 @@ export default function RegisterPage() {
   }
 
   return (
-    <Panel className="p-6">
-      <h1 className="mb-5 text-base font-semibold">Criar conta</h1>
+    <Panel className="p-6 shadow-raised">
+      <h1 className="mb-5 text-lg font-semibold">Criar conta</h1>
 
       <form onSubmit={submit} noValidate className="space-y-4">
         <Field label="Nome" htmlFor="name" hint="Opcional.">
@@ -100,17 +100,21 @@ export default function RegisterPage() {
         <Button
           type="submit"
           variant="primary"
+          size="lg"
           loading={busy}
-          className="w-full"
+          full
           disabled={!email.trim() || password.length < MIN_PASSWORD}
         >
           Criar conta
         </Button>
       </form>
 
-      <p className="mt-5 text-xs text-[var(--muted)]">
+      <p className="mt-6 border-t border-line pt-5 text-center text-sm text-muted">
         Já tem conta?{" "}
-        <Link href="/login" className="text-[var(--accent)] hover:underline">
+        <Link
+          href="/login"
+          className="font-medium text-brand transition-opacity hover:opacity-80"
+        >
           Entrar
         </Link>
       </p>

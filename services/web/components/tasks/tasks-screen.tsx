@@ -17,16 +17,18 @@ import { PlanReview } from "@/components/plan-review/plan-review";
 import { ReserveTimeDialog } from "@/components/tasks/reserve-time-dialog";
 import { TaskRow } from "@/components/tasks/task-list";
 import {
-  Badge,
   Button,
   Dialog,
   Empty,
   Field,
+  IconAlert,
+  IconPlus,
+  IconTasks,
   Input,
   LoadError,
-  Panel,
+  PageHeader,
   Select,
-  Spinner,
+  SkeletonList,
 } from "@/components/ui";
 import { api } from "@/lib/api-client";
 import { duration } from "@/lib/format";
@@ -127,45 +129,62 @@ export function TasksScreen({ timezone }: { timezone: string }) {
   );
 
   return (
-    <div className="min-h-dvh pb-14 md:pb-0">
-      <header className="flex flex-wrap items-center gap-2 border-b border-[var(--border)] px-4 py-3">
-        <h1 className="text-sm font-semibold">Tarefas</h1>
-        {overview.data ? <Badge>{overview.data.total_open} abertas</Badge> : null}
+    <div className="min-h-dvh pb-16 md:pb-0">
+      <PageHeader
+        title="Tarefas"
+        subtitle={
+          overview.data
+            ? `${overview.data.total_open} ${
+                overview.data.total_open === 1 ? "aberta" : "abertas"
+              }`
+            : undefined
+        }
+        action={
+          <div className="flex items-center gap-2">
+            <label htmlFor="group-by" className="sr-only">
+              Agrupar por
+            </label>
+            <Select
+              bare
+              id="group-by"
+              value={groupBy}
+              onChange={(e) => setGroupBy(e.target.value as GroupBy)}
+            >
+              <option value="due">por prazo</option>
+              <option value="list">por lista</option>
+              <option value="priority">por prioridade</option>
+            </Select>
+            <Button variant="primary" onClick={() => setCreating(true)}>
+              <IconPlus />
+              Tarefa
+            </Button>
+          </div>
+        }
+      />
 
-        <div className="ml-auto flex items-center gap-2">
-          <label htmlFor="group-by" className="sr-only">
-            Agrupar por
-          </label>
-          <Select
-            id="group-by"
-            value={groupBy}
-            onChange={(e) => setGroupBy(e.target.value as GroupBy)}
-            className="w-auto py-1 text-xs"
-          >
-            <option value="due">por prazo</option>
-            <option value="list">por lista</option>
-            <option value="priority">por prioridade</option>
-          </Select>
-          <Button size="sm" variant="primary" onClick={() => setCreating(true)}>
-            + Tarefa
-          </Button>
-        </div>
-      </header>
-
-      <div className="mx-auto max-w-3xl space-y-4 px-4 py-5">
+      <div className="mx-auto max-w-3xl space-y-5 px-4 py-6 md:px-7">
         {/* §5.9.5: o cruzamento que as duas portas habilitam. */}
         {overview.data && overview.data.total_open > 0 ? (
-          <Panel className="px-4 py-3">
-            <p className="whitespace-pre-wrap text-sm leading-relaxed">
-              {overview.data.summary_text}
-            </p>
+          <div className="card overflow-hidden">
+            <div className="flex items-start gap-3 px-4 py-4 md:px-5">
+              <span
+                aria-hidden
+                className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-brand/12 text-brand"
+              >
+                <IconTasks className="h-[18px] w-[18px]" />
+              </span>
+              <p className="min-w-0 whitespace-pre-wrap text-sm leading-relaxed text-ink-2">
+                {overview.data.summary_text}
+              </p>
+            </div>
             {overview.data.estimated_minutes_unscheduled > 0 ? (
-              <p className="mt-2 text-xs text-[var(--warn)]">
+              <p className="flex items-center gap-2 border-t border-warn/20 bg-warn/8 px-4 py-2.5 text-xs font-medium text-warn md:px-5">
+                <IconAlert className="h-3.5 w-3.5 shrink-0" />
                 {duration(overview.data.estimated_minutes_unscheduled)} de trabalho
                 estimado sem horário marcado.
               </p>
             ) : null}
-          </Panel>
+          </div>
         ) : null}
 
         {/* §5.8: a reserva vira proposta, e a proposta é revisada aqui
@@ -184,7 +203,11 @@ export function TasksScreen({ timezone }: { timezone: string }) {
         ) : null}
 
         {applyError ? (
-          <p role="alert" className="text-xs text-[var(--danger)]">
+          <p
+            role="alert"
+            className="flex items-start gap-2 rounded-xl bg-danger/10 px-3.5 py-2.5 text-xs leading-relaxed text-danger ring-1 ring-inset ring-danger/25"
+          >
+            <IconAlert className="mt-px h-3.5 w-3.5 shrink-0" />
             {applyError}
           </p>
         ) : null}
@@ -195,14 +218,14 @@ export function TasksScreen({ timezone }: { timezone: string }) {
             onRetry={() => void tasks.refetch()}
           />
         ) : tasks.isLoading ? (
-          <p className="px-2 py-6 text-xs text-[var(--muted)]">
-            <Spinner /> carregando…
-          </p>
+          <SkeletonList rows={4} />
         ) : (tasks.data?.length ?? 0) === 0 ? (
           <Empty
             title="Nada na lista."
+            icon={<IconTasks className="h-5 w-5" />}
             action={
-              <Button variant="primary" size="sm" onClick={() => setCreating(true)}>
+              <Button variant="primary" onClick={() => setCreating(true)}>
+                <IconPlus />
                 Criar a primeira
               </Button>
             }
@@ -213,8 +236,9 @@ export function TasksScreen({ timezone }: { timezone: string }) {
         ) : (
           groups.map((group) => (
             <section key={group.label}>
-              <h2 className="px-1 pb-1.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--muted)]">
+              <h2 className="eyebrow flex items-center gap-2 px-1 pb-2">
                 {group.label}
+                <span className="tnum text-faint">{group.tasks.length}</span>
               </h2>
               <ul className="space-y-2">
                 {group.tasks.map((task) => (
@@ -233,12 +257,12 @@ export function TasksScreen({ timezone }: { timezone: string }) {
           ))
         )}
 
-        <label className="flex items-center gap-2 px-1 text-xs text-[var(--muted)]">
+        <label className="flex w-fit cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-xs text-muted transition-colors hover:bg-surface-2 hover:text-ink">
           <input
             type="checkbox"
             checked={showDone}
             onChange={(e) => setShowDone(e.target.checked)}
-            className="accent-[var(--muted)]"
+            className="h-3.5 w-3.5 cursor-pointer accent-brand"
           />
           mostrar concluídas
         </label>
@@ -369,7 +393,7 @@ function CreateTaskDialog({
       title="Nova tarefa"
       footer={
         <>
-          <Button variant="quiet" onClick={onClose}>
+          <Button variant="ghost" onClick={onClose}>
             Cancelar
           </Button>
           <Button

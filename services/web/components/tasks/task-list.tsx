@@ -9,19 +9,33 @@
  *   ☐  Revisar capítulo 2            vence 10/10  ⚠
  *      sem tempo reservado            [reservar tempo]
  *
- * O `⚠` em tarefa com prazo próximo e sem tempo reservado "é o sinal
+ * O aviso em tarefa com prazo próximo e sem tempo reservado "é o sinal
  * que o produto existe para dar". Sem ele a lista é uma lista, e o
  * cruzamento das duas portas (§3.2 e §3.3) não aparece em lugar nenhum
  * da tela.
+ *
+ * Esse sinal era um `⚠` solto no meio do título. Agora o cartão inteiro
+ * ganha borda âmbar e o botão **reservar tempo** fica visível na linha
+ * de baixo: o aviso que o produto existe para dar não pode depender de
+ * notar um glifo de 13px.
  */
 
 "use client";
 
-import { Badge, Button, Panel } from "@/components/ui";
+import {
+  Badge,
+  Button,
+  IconAlert,
+  IconCheck,
+  IconClock,
+  IconPlus,
+  IconTrash,
+  cx,
+} from "@/components/ui";
 import { daysUntil, dueLabel, duration, range } from "@/lib/format";
 import type { Priority, Task } from "@/lib/types";
 
-const PRIORITY_TONE: Record<Priority, "neutral" | "accent" | "warn" | "danger"> = {
+const PRIORITY_TONE: Record<Priority, "neutral" | "brand" | "warn" | "danger"> = {
   low: "neutral",
   normal: "neutral",
   high: "warn",
@@ -54,7 +68,8 @@ export function TaskRow({
   const hasReserved = task.reserved.length > 0;
 
   /**
-   * O `⚠` de §8.1: prazo próximo (ou passado) e nenhum tempo reservado.
+   * O aviso de §8.1: prazo próximo (ou passado) e nenhum tempo
+   * reservado.
    *
    * `is_overdue` vem do backend porque depende do fuso e do "prazo só
    * com data vale até o fim do dia" — regra de domínio, não de
@@ -64,21 +79,64 @@ export function TaskRow({
     !done && !hasReserved && (task.is_overdue || isSoon(task, timezone));
 
   return (
-    <Panel as="li" className="px-4 py-3">
-      <div className="flex items-start gap-3">
-        <input
-          type="checkbox"
-          checked={done}
-          disabled={busy}
-          onChange={() => onToggle(task)}
-          aria-label={done ? `Reabrir ${task.title}` : `Concluir ${task.title}`}
-          className="mt-1 accent-[var(--ok)]"
+    <li
+      className={cx(
+        "group card card-hover relative overflow-hidden px-4 py-3.5",
+        done && "opacity-60",
+        needsTime && "border-warn/35",
+      )}
+    >
+      {/* A faixa lateral: quem varre a lista encontra o que precisa de
+          atenção sem ler nada. */}
+      {needsTime ? (
+        <span
+          aria-hidden
+          className={cx(
+            "absolute left-0 top-0 h-full w-[3px]",
+            task.is_overdue ? "bg-danger" : "bg-warn",
+          )}
         />
+      ) : null}
+
+      <div className="flex items-start gap-3">
+        {/*
+         * Caixa de marcação desenhada, não a nativa.
+         *
+         * A nativa tem ~13px e desenho do sistema; esta tem 20px, a cor
+         * do tema e a marca de "feito" como ícone. Continua sendo
+         * `<input type="checkbox">` por baixo (`peer` + `sr-only`),
+         * então teclado, foco e leitor de tela seguem iguais.
+         */}
+        <label className="relative mt-0.5 flex shrink-0 cursor-pointer items-center">
+          <input
+            type="checkbox"
+            checked={done}
+            disabled={busy}
+            onChange={() => onToggle(task)}
+            aria-label={done ? `Reabrir ${task.title}` : `Concluir ${task.title}`}
+            className="peer sr-only"
+          />
+          <span
+            aria-hidden
+            className={cx(
+              "grid h-5 w-5 place-items-center rounded-md border-2 transition-all duration-150",
+              "peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-brand",
+              done
+                ? "border-ok bg-ok text-canvas"
+                : "border-line-strong text-transparent hover:border-muted",
+            )}
+          >
+            <IconCheck className="h-3 w-3" strokeWidth={3} />
+          </span>
+        </label>
 
         <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
             <span
-              className={`text-sm ${done ? "text-[var(--muted)] line-through" : ""}`}
+              className={cx(
+                "text-sm font-medium",
+                done ? "text-muted line-through" : "text-ink",
+              )}
             >
               {task.title}
             </span>
@@ -92,46 +150,62 @@ export function TaskRow({
             {task.labels.map((label) => (
               <Badge key={label}>{label}</Badge>
             ))}
-
-            {needsTime ? (
-              <span
-                className="text-[var(--warn)]"
-                title="prazo chegando e sem tempo reservado"
-                aria-label="prazo chegando e sem tempo reservado"
-              >
-                ⚠
-              </span>
-            ) : null}
           </div>
 
-          <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[var(--muted)]">
+          <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
             {(task.due_at ?? task.due_date) ? (
-              <span className={task.is_overdue && !done ? "text-[var(--danger)]" : ""}>
+              <span
+                className={cx(
+                  "tnum font-medium",
+                  task.is_overdue && !done ? "text-danger" : "text-muted",
+                )}
+              >
                 {dueLabel(task.due_at ?? `${task.due_date}T23:59:59Z`, timezone)}
               </span>
             ) : (
-              <span>sem prazo</span>
+              <span className="text-faint">sem prazo</span>
             )}
 
-            {task.estimated_min ? <span>{duration(task.estimated_min)}</span> : null}
+            {task.estimated_min ? (
+              <span className="text-muted">{duration(task.estimated_min)}</span>
+            ) : null}
           </div>
 
           {/* A linha que é o ponto desta tela. */}
-          <div className="mt-1.5">
+          <div className="mt-2">
             {hasReserved ? (
-              <div className="space-y-0.5">
+              <div className="space-y-1">
                 {task.reserved.map((block) => (
-                  <p key={block.event_ref_id} className="text-xs text-[var(--accent)]">
-                    🕐 {duration(block.minutes)} reservad
-                    {block.minutes === 60 ? "a" : "as"} ·{" "}
-                    {range(block.start, block.end, timezone)}
+                  <p
+                    key={block.event_ref_id}
+                    className="flex items-center gap-1.5 text-xs font-medium text-brand"
+                  >
+                    <IconClock className="h-3.5 w-3.5 shrink-0" />
+                    <span className="tnum">
+                      {duration(block.minutes)} reservad
+                      {block.minutes === 60 ? "a" : "as"} ·{" "}
+                      {range(block.start, block.end, timezone)}
+                    </span>
                   </p>
                 ))}
               </div>
             ) : done ? null : (
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-[var(--muted)]">sem tempo reservado</span>
-                <Button size="sm" variant="ghost" onClick={() => onSchedule(task)}>
+              <div className="flex flex-wrap items-center gap-2">
+                <span
+                  className={cx(
+                    "flex items-center gap-1.5 text-xs",
+                    needsTime ? "font-medium text-warn" : "text-muted",
+                  )}
+                >
+                  {needsTime ? <IconAlert className="h-3.5 w-3.5 shrink-0" /> : null}
+                  sem tempo reservado
+                </span>
+                <Button
+                  size="sm"
+                  variant={needsTime ? "primary" : "secondary"}
+                  onClick={() => onSchedule(task)}
+                >
+                  <IconPlus className="h-3.5 w-3.5" />
                   reservar tempo
                 </Button>
               </div>
@@ -141,9 +215,12 @@ export function TaskRow({
           {/* §3.3.2: a degradação aparece NO ITEM, não só na tela de
               conexão — "o usuário precisa saber ao olhar a tarefa". */}
           {task.dropped_fields.length > 0 ? (
-            <p className="mt-1.5 text-[11px] leading-relaxed text-[var(--warn)]">
-              ⚠ O {task.provider_name ?? "provedor"} não guarda{" "}
-              {task.dropped_fields.join(", ")} — isso fica só aqui no Age.
+            <p className="mt-2 flex items-start gap-1.5 rounded-lg bg-warn/10 px-2 py-1.5 text-xs leading-relaxed text-warn">
+              <IconAlert className="mt-px h-3 w-3 shrink-0" />
+              <span>
+                O {task.provider_name ?? "provedor"} não guarda{" "}
+                {task.dropped_fields.join(", ")} — isso fica só aqui no Age.
+              </span>
             </p>
           ) : null}
         </div>
@@ -151,12 +228,12 @@ export function TaskRow({
         <button
           onClick={() => onDelete(task)}
           aria-label={`Apagar ${task.title}`}
-          className="rounded px-1.5 py-0.5 text-xs text-[var(--muted)] hover:bg-[var(--panel-2)] hover:text-[var(--danger)]"
+          className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-muted opacity-0 transition-all hover:bg-danger/10 hover:text-danger focus-visible:opacity-100 group-hover:opacity-100"
         >
-          ✕
+          <IconTrash className="h-3.5 w-3.5" />
         </button>
       </div>
-    </Panel>
+    </li>
   );
 }
 
@@ -166,7 +243,7 @@ export function TaskRow({
  * Calcula sobre data, e não sobre o texto de `dueLabel`. A primeira
  * versão fazia regex no rótulo ("vence em \d+ dias"), o que acopla uma
  * decisão a uma string de interface: mudar "vence em 3 dias" para "em 3
- * dias" apagaria o `⚠` de toda a lista sem erro nenhum, e o aviso que
+ * dias" apagaria o aviso de toda a lista sem erro nenhum, e o sinal que
  * §8.1 chama de "o sinal que o produto existe para dar" desapareceria
  * em silêncio.
  */

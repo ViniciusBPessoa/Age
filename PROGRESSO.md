@@ -589,9 +589,9 @@ Checklist de execução. A especificação completa está em [ARQUITETURA.md](AR
 **Pronto quando:** você cria conta, cola uma chave, conversa, aprova um
 plano e vê o resultado na timeline — tudo pelo navegador, sem `curl`.
 
-> **✅ Validado em 09/10/2026** — `73 passaram, 0 falharam` em
-> `infra/smoke-ui.sh`, mais 99 testes no `web` (contrato, arquitetura e
-> rótulos de tool) e 309 no backend. Os seis smokes anteriores seguem
+> **✅ Validado em 10/10/2026** — `73 passaram, 0 falharam` em
+> `infra/smoke-ui.sh`, mais 100 testes no `web` (contrato, arquitetura
+> e rótulos de tool) e 240 no backend. Os seis smokes anteriores seguem
 > verdes: 22/22, 34/34, 27/27, 30/30, 38/38, 56/56.
 
 ### Telas (§8.1)
@@ -635,6 +635,55 @@ plano e vê o resultado na timeline — tudo pelo navegador, sem `curl`.
       sidebar não tinha fonte de dados
 - [x] `GET /calendar/external-changes` tipado: era `response_model=dict`
 
+### O redesenho — e o que ele revelou
+
+A primeira versão passava nos testes e era desagradável de usar: tudo
+entre 11px e 14px, emoji no lugar de ícone, fundo chapado, e nenhuma
+resposta ao toque. O retorno foi direto, e procede.
+
+- [x] Escala tipográfica de 11px→34px, com tracking negativo no texto
+      grande — antes título, legenda e rótulo tinham o mesmo peso, e
+      nada guiava o olho
+- [x] Inter pelo `next/font` (auto-hospedada: nenhuma requisição a
+      terceiro em runtime, num produto cujo discurso é privacidade)
+- [x] ~40 ícones de traço em `components/ui/icons.tsx`, substituindo
+      emoji — emoji renderiza com o estilo do SISTEMA, não herda
+      `currentColor`, e muda de desenho por plataforma
+- [x] Quatro superfícies que se separam por luminância, não por borda
+- [x] **Tema claro**, que não existia — um app de agenda é usado de
+      dia, perto de uma janela
+- [x] Alvos de toque de 40–44px (eram ~32px), `active:scale` como
+      retorno tátil, e elevação no hover dos cartões
+- [x] Esqueletos de carregamento no lugar de "carregando…"
+
+**Três defeitos que só a captura de tela mostrou**, e que nenhum teste
+pegaria:
+
+- [x] O `PageHeader` tinha `max-w-5xl` fixo e os corpos `3xl`/`2xl`:
+      o título começava ~200px à esquerda do conteúdo que encabeça
+- [x] O estado vazio do chat não olhava `streaming`, então os quatro
+      exemplos ficavam na tela durante todo o turno — quem mandava a
+      primeira mensagem não via nada acontecer
+- [x] As mensagens ficavam coladas no topo, com 600px de vazio até o
+      compositor. Agora a conversa é ancorada embaixo
+
+**E dois bugs de verdade, nenhum deles de estilo:**
+
+- [x] `PlanItem.op` — o tipo declarava `"create" | "move"`, a API
+      devolve `"CREATE"` / `"MOVE"`. **Toda** comparação
+      `item.op === "move"` era falsa, em silêncio: o diff de
+      movimentação de §5.7 e o aviso "evento semi-flexível" de §8.1
+      nunca renderizaram. `contract.test.ts` não pegava porque compara
+      nomes de campo, e o campo existe nos dois lados; o OpenAPI expõe
+      `op` como `str` livre, sem `enum`. Agora há um teste que lê o
+      `StrEnum` do Python e cobra a caixa — verificado reintroduzindo
+      o bug
+- [x] `POST /tasks/{id}/schedule` escrevia o motivo com
+      `body.start.isoformat()`: ISO cru **em UTC**. Um bloco das 21:15
+      aparecia como "00:15" do dia seguinte, violando §9.5. O vizinho
+      em `plan_diff.py` já formatava certo; foi esta rota, escrita
+      depois, que saiu crua
+
 ### Adiado, de propósito
 - [ ] Arrastar evento na timeline — a prop existe em
       `<CalendarTimeline>`, mas ligar o drag a um `PATCH` criaria um
@@ -651,9 +700,13 @@ plano e vê o resultado na timeline — tudo pelo navegador, sem `curl`.
 ## Estado atual
 
 **Os sete marcos estão concluídos e validados**: 269 verificações de
-smoke contra containers reais (22 + 34 + 27 + 30 + 38 + 56 + 73), 309
-testes no backend e 99 no front, lint limpo nos três serviços,
+smoke contra containers reais (22 + 34 + 27 + 30 + 38 + 56 + 73), 240
+testes no backend e 100 no front, lint limpo nos três serviços,
 `tsc --noEmit` e `prettier --check` sem erros, e `next build` passando.
+
+As telas foram conferidas no navegador, não só no código — foi assim
+que apareceram o desalinhamento do cabeçalho, o estado vazio que não
+saía durante o turno e a divergência de caixa em `PlanItem.op`.
 
 **O produto funciona ponta a ponta pelo navegador.** O que resta são os
 dois adaptadores do Google, adiados com a suíte de contrato já escrita,

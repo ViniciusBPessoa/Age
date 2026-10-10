@@ -2,27 +2,46 @@
  * Navegação principal.
  *
  * Coluna à esquerda no desktop, barra inferior no mobile. A barra
- * inferior em vez de um menu hambúrguer porque as cinco áreas são
- * usadas em sequência — marcar uma sessão, ver a agenda, voltar ao chat
- * — e esconder isso atrás de dois toques é atrito em cima do caminho
- * mais comum.
+ * inferior em vez de um menu hambúrguer porque as seis áreas são usadas
+ * em sequência — marcar uma sessão, ver a agenda, voltar ao chat — e
+ * esconder isso atrás de dois toques é atrito em cima do caminho mais
+ * comum.
+ *
+ * O item ativo tem uma BARRA à esquerda, não só fundo mais claro. Fundo
+ * sozinho é fraco demais em tema escuro: o olho não acha a página atual
+ * numa varredura rápida, que é exatamente o que uma navegação deve
+ * responder sem esforço.
  */
 
 "use client";
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
 
+import {
+  IconCalendar,
+  IconChat,
+  IconLogout,
+  IconMoon,
+  IconReport,
+  IconRoutine,
+  IconSettings,
+  IconStudy,
+  IconSun,
+  IconTasks,
+  cx,
+} from "@/components/ui";
 import { auth } from "@/lib/api-client";
 import type { Me } from "@/lib/types";
 
 const AREAS = [
-  { href: "/chat", label: "Conversa", icon: "💬" },
-  { href: "/calendar", label: "Agenda", icon: "📅" },
-  { href: "/tasks", label: "Tarefas", icon: "📋" },
-  { href: "/study", label: "Estudo", icon: "📚" },
-  { href: "/routines", label: "Rotinas", icon: "🔁" },
-  { href: "/report", label: "Relatório", icon: "📊" },
+  { href: "/chat", label: "Conversa", Icon: IconChat },
+  { href: "/calendar", label: "Agenda", Icon: IconCalendar },
+  { href: "/tasks", label: "Tarefas", Icon: IconTasks },
+  { href: "/study", label: "Estudo", Icon: IconStudy },
+  { href: "/routines", label: "Rotinas", Icon: IconRoutine },
+  { href: "/report", label: "Relatório", Icon: IconReport },
 ] as const;
 
 export function AppNav({ me }: { me: Me }) {
@@ -37,101 +56,208 @@ export function AppNav({ me }: { me: Me }) {
     router.replace("/login");
   }
 
+  const initial = (me.name ?? me.email).trim().charAt(0).toUpperCase() || "?";
+
   return (
     <>
-      {/* Desktop */}
+      {/* ---------------- Desktop ---------------- */}
       <nav
         aria-label="Áreas do Age"
-        className="hidden w-52 shrink-0 flex-col border-r border-[var(--border)] bg-[var(--panel)] px-3 py-4 md:flex"
+        className="hidden w-60 shrink-0 flex-col border-r border-line bg-surface px-3 py-5 md:flex"
       >
-        <Link href="/chat" className="mb-5 flex items-center gap-2 px-2">
-          <span
-            aria-hidden
-            className="grid h-7 w-7 place-items-center rounded-lg bg-[var(--accent)] text-xs font-bold text-[var(--accent-ink)]"
-          >
-            A
-          </span>
-          <span className="text-sm font-semibold">Age</span>
+        <Link
+          href="/chat"
+          className="mb-6 flex items-center gap-2.5 rounded-lg px-2 py-1"
+        >
+          <Logo />
+          <span className="text-base font-semibold tracking-[-0.02em]">Age</span>
         </Link>
 
-        <ul className="flex-1 space-y-0.5">
-          {AREAS.map((area) => (
-            <li key={area.href}>
-              <Link
-                href={area.href}
-                aria-current={isActive(area.href) ? "page" : undefined}
-                className={[
-                  "flex items-center gap-2.5 rounded-md px-2.5 py-2 text-sm transition-colors",
-                  isActive(area.href)
-                    ? "bg-[var(--panel-2)] text-[var(--text)]"
-                    : "text-[var(--muted)] hover:bg-[var(--panel-2)] hover:text-[var(--text)]",
-                ].join(" ")}
-              >
-                <span aria-hidden>{area.icon}</span>
-                {area.label}
-              </Link>
-            </li>
-          ))}
+        <ul className="flex-1 space-y-1">
+          {AREAS.map(({ href, label, Icon }) => {
+            const active = isActive(href);
+            return (
+              <li key={href} className="relative">
+                {active ? (
+                  <span
+                    aria-hidden
+                    className="absolute left-0 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-r-full bg-brand"
+                  />
+                ) : null}
+                <Link
+                  href={href}
+                  aria-current={active ? "page" : undefined}
+                  className={cx(
+                    "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors duration-150",
+                    active
+                      ? "bg-surface-2 font-medium text-ink"
+                      : "text-muted hover:bg-surface-2/60 hover:text-ink",
+                  )}
+                >
+                  <Icon className={cx("h-[18px] w-[18px]", active && "text-brand")} />
+                  {label}
+                </Link>
+              </li>
+            );
+          })}
         </ul>
 
-        <div className="mt-4 border-t border-[var(--border)] pt-3">
+        <div className="mt-4 space-y-1 border-t border-line pt-3">
+          <ThemeToggle />
           <Link
             href="/settings"
             aria-current={isActive("/settings") ? "page" : undefined}
-            className={[
-              "block truncate rounded-md px-2.5 py-2 text-xs transition-colors",
+            className={cx(
+              "flex items-center gap-2.5 rounded-lg px-2.5 py-2 transition-colors",
               isActive("/settings")
-                ? "bg-[var(--panel-2)] text-[var(--text)]"
-                : "text-[var(--muted)] hover:bg-[var(--panel-2)] hover:text-[var(--text)]",
-            ].join(" ")}
+                ? "bg-surface-2 text-ink"
+                : "text-muted hover:bg-surface-2/60 hover:text-ink",
+            )}
           >
-            ⚙ {me.name ?? me.email}
+            <span
+              aria-hidden
+              className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-brand-soft text-xs font-semibold text-ink"
+            >
+              {initial}
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-xs font-medium text-ink">
+                {me.name ?? me.email.split("@")[0]}
+              </span>
+              <span className="block truncate text-2xs normal-case tracking-normal text-muted">
+                Configurações
+              </span>
+            </span>
+            <IconSettings className="h-3.5 w-3.5 opacity-60" />
           </Link>
           <button
             onClick={logout}
-            className="mt-0.5 block w-full rounded-md px-2.5 py-2 text-left text-xs text-[var(--muted)] transition-colors hover:bg-[var(--panel-2)] hover:text-[var(--text)]"
+            className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-xs text-muted transition-colors hover:bg-surface-2/60 hover:text-ink"
           >
+            <IconLogout className="h-[18px] w-[18px]" />
             Sair
           </button>
         </div>
       </nav>
 
-      {/* Mobile: barra inferior, fixa. `pb-[env(safe-area-inset-bottom)]`
-          para não ficar debaixo da barra de gestos do iOS. */}
+      {/* ---------------- Mobile ----------------
+          Barra inferior fixa. `pb-[env(safe-area-inset-bottom)]` para
+          não ficar debaixo da barra de gestos do iOS. */}
       <nav
         aria-label="Áreas do Age"
-        className="fixed bottom-0 left-0 right-0 z-40 flex border-t border-[var(--border)] bg-[var(--panel)] pb-[env(safe-area-inset-bottom)] md:hidden"
+        className="glass fixed bottom-0 left-0 right-0 z-40 flex border-t border-line pb-[env(safe-area-inset-bottom)] md:hidden"
       >
-        {AREAS.map((area) => (
-          <Link
-            key={area.href}
-            href={area.href}
-            aria-current={isActive(area.href) ? "page" : undefined}
-            className={[
-              "flex flex-1 flex-col items-center gap-0.5 py-2 text-[10px]",
-              isActive(area.href) ? "text-[var(--accent)]" : "text-[var(--muted)]",
-            ].join(" ")}
-          >
-            <span aria-hidden className="text-base">
-              {area.icon}
-            </span>
-            {area.label}
-          </Link>
-        ))}
+        {AREAS.map(({ href, label, Icon }) => {
+          const active = isActive(href);
+          return (
+            <Link
+              key={href}
+              href={href}
+              aria-current={active ? "page" : undefined}
+              className={cx(
+                "flex flex-1 flex-col items-center gap-1 pb-2 pt-2.5 text-[10px] font-medium transition-colors",
+                active ? "text-brand" : "text-muted",
+              )}
+            >
+              {/* O fundo tingido no ativo dá área de toque visível, que
+                  é o que falta numa barra só de cor de texto. */}
+              <span
+                className={cx(
+                  "grid h-7 w-9 place-items-center rounded-lg transition-colors",
+                  active && "bg-brand/12",
+                )}
+              >
+                <Icon className="h-[18px] w-[18px]" />
+              </span>
+              {label}
+            </Link>
+          );
+        })}
         <Link
           href="/settings"
           aria-current={isActive("/settings") ? "page" : undefined}
-          className={[
-            "flex flex-1 flex-col items-center gap-0.5 py-2 text-[10px]",
-            isActive("/settings") ? "text-[var(--accent)]" : "text-[var(--muted)]",
-          ].join(" ")}
+          className={cx(
+            "flex flex-1 flex-col items-center gap-1 pb-2 pt-2.5 text-[10px] font-medium transition-colors",
+            isActive("/settings") ? "text-brand" : "text-muted",
+          )}
         >
-          <span aria-hidden className="text-base">
-            ⚙
+          <span
+            className={cx(
+              "grid h-7 w-9 place-items-center rounded-lg transition-colors",
+              isActive("/settings") && "bg-brand/12",
+            )}
+          >
+            <IconSettings className="h-[18px] w-[18px]" />
           </span>
           Ajustes
         </Link>
       </nav>
     </>
+  );
+}
+
+export function Logo({ className }: { className?: string }) {
+  return (
+    <span
+      aria-hidden
+      className={cx(
+        "grid h-8 w-8 shrink-0 place-items-center rounded-[10px]",
+        "bg-gradient-to-br from-brand to-proposed text-sm font-bold text-white",
+        "shadow-brand",
+        className,
+      )}
+    >
+      A
+    </span>
+  );
+}
+
+/**
+ * Alternador de tema.
+ *
+ * Escreve `data-theme` no `<html>` e guarda em `localStorage`. O estado
+ * inicial vem de ler o atributo no efeito, não na renderização: o
+ * servidor não sabe o tema, e ler `localStorage` no corpo do componente
+ * daria divergência de hidratação.
+ */
+function ThemeToggle() {
+  const [theme, setTheme] = useState<"dark" | "light" | null>(null);
+
+  useEffect(() => {
+    const stored = localStorage.getItem("age-theme");
+    if (stored === "dark" || stored === "light") {
+      document.documentElement.dataset.theme = stored;
+      setTheme(stored);
+    } else {
+      setTheme(
+        window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark",
+      );
+    }
+  }, []);
+
+  function toggle() {
+    const next = theme === "light" ? "dark" : "light";
+    document.documentElement.dataset.theme = next;
+    try {
+      localStorage.setItem("age-theme", next);
+    } catch {
+      // Navegação privada pode recusar a escrita. O tema da sessão
+      // ainda vale; só não é lembrado.
+    }
+    setTheme(next);
+  }
+
+  return (
+    <button
+      onClick={toggle}
+      className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-xs text-muted transition-colors hover:bg-surface-2/60 hover:text-ink"
+    >
+      {theme === "light" ? (
+        <IconMoon className="h-[18px] w-[18px]" />
+      ) : (
+        <IconSun className="h-[18px] w-[18px]" />
+      )}
+      {theme === "light" ? "Tema escuro" : "Tema claro"}
+    </button>
   );
 }

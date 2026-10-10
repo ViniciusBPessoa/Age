@@ -47,6 +47,7 @@ import { ptBR } from "date-fns/locale";
 
 import { TZDate } from "@date-fns/tz";
 
+import { IconLock, IconSparkle } from "@/components/ui/icons";
 import type { AgeEvent, Flexibility } from "@/lib/types";
 
 import "react-big-calendar/lib/css/react-big-calendar.css";
@@ -171,18 +172,31 @@ export function CalendarTimeline({
       event: ({ event }) => (
         <span className="flex items-center gap-1 truncate">
           {event.payload.createdByAge && event.payload.kind === "event" ? (
-            <span aria-label="criado pelo Age" title="criado pelo Age">
-              ✦
-            </span>
+            <IconSparkle
+              aria-hidden={false}
+              aria-label="criado pelo Age"
+              className="h-3 w-3 shrink-0 opacity-80"
+            />
           ) : null}
           {event.payload.flexibility === "fixed" ? (
-            <span aria-label="fixo" title="fixo — o Age não move">
-              🔒
-            </span>
+            <IconLock
+              aria-hidden={false}
+              aria-label="fixo — o Age não move"
+              className="h-3 w-3 shrink-0 opacity-80"
+            />
           ) : null}
           <span className="truncate">{event.title as string}</span>
         </span>
       ),
+      /*
+       * A barra da lib sai de cena.
+       *
+       * A tela de agenda já tem a sua própria — com o título do
+       * período, os botões de navegação e o seletor de visão — e
+       * manter as duas deixava dois conjuntos de controles para a
+       * mesma coisa, um deles sem o estilo do produto.
+       */
+      toolbar: () => null,
     }),
     [],
   );

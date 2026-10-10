@@ -48,8 +48,23 @@ export type PlanStatus =
   | "rejected"
   | "expired";
 
-/** §5.7: as operações que um item de plano pode carregar. */
-export type PlanOp = "create" | "move" | "resize" | "delete" | "complete" | "reorder";
+/**
+ * §5.7: as operações que um item de plano pode carregar.
+ *
+ * **Em MAIÚSCULAS**, que é como a API devolve (`"CREATE"`, `"MOVE"`).
+ * A primeira versão deste tipo declarava minúsculas, e o custo foi
+ * invisível: `item.op === "move"` nunca era verdade, então o diff de
+ * movimentação e o aviso de evento semi-flexível jamais renderizaram.
+ * O TypeScript não reclamava — o tipo é que estava errado.
+ */
+export type PlanOp =
+  | "CREATE"
+  | "MOVE"
+  | "RESIZE"
+  | "DELETE"
+  | "COMPLETE"
+  | "REORDER"
+  | "UPDATE";
 
 export interface ApiError {
   error: { code: string; message: string; retryable?: boolean };

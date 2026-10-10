@@ -23,7 +23,17 @@ import { useQuery } from "@tanstack/react-query";
 import { subDays } from "date-fns";
 import { useMemo, useState } from "react";
 
-import { Badge, LoadError, Panel, Select, Spinner } from "@/components/ui";
+import {
+  Badge,
+  IconChevronRight,
+  IconReport,
+  LoadError,
+  PageHeader,
+  Panel,
+  Progress,
+  Select,
+  SkeletonList,
+} from "@/components/ui";
 import { api } from "@/lib/api-client";
 import { dateOf, duration, percent } from "@/lib/format";
 import type { PeriodReport } from "@/lib/types";
@@ -52,45 +62,53 @@ export function ReportScreen({ timezone }: { timezone: string }) {
   });
 
   return (
-    <div className="min-h-dvh pb-14 md:pb-0">
-      <header className="flex flex-wrap items-center gap-2 border-b border-[var(--border)] px-4 py-3">
-        <h1 className="text-sm font-semibold">Relatório</h1>
-        <label htmlFor="range" className="sr-only">
-          Período
-        </label>
-        <Select
-          id="range"
-          value={days}
-          onChange={(e) => setDays(Number(e.target.value))}
-          className="ml-auto w-auto py-1 text-xs"
-        >
-          {RANGES.map((option) => (
-            <option key={option.days} value={option.days}>
-              {option.label}
-            </option>
-          ))}
-        </Select>
-      </header>
+    <div className="min-h-dvh pb-16 md:pb-0">
+      <PageHeader
+        title="Relatório"
+        subtitle={
+          report.data
+            ? `${dateOf(report.data.period_start, timezone)} a ${dateOf(
+                report.data.period_end,
+                timezone,
+              )}`
+            : undefined
+        }
+        action={
+          <>
+            <label htmlFor="range" className="sr-only">
+              Período
+            </label>
+            <Select
+              id="range"
+              value={days}
+              onChange={(e) => setDays(Number(e.target.value))}
+              className="h-9 w-auto text-xs"
+            >
+              {RANGES.map((option) => (
+                <option key={option.days} value={option.days}>
+                  {option.label}
+                </option>
+              ))}
+            </Select>
+          </>
+        }
+      />
 
-      <div className="mx-auto max-w-3xl space-y-4 px-4 py-5">
+      <div className="mx-auto max-w-3xl space-y-5 px-4 py-6 md:px-7">
         {report.isError ? (
           <LoadError
             message="Não consegui montar o relatório."
             onRetry={() => void report.refetch()}
           />
         ) : report.isLoading ? (
-          <p className="px-2 py-6 text-xs text-[var(--muted)]">
-            <Spinner /> levantando os números…
-          </p>
+          <SkeletonList rows={3} />
         ) : report.data ? (
           <>
-            <Panel className="px-4 py-4">
-              <p className="text-[11px] text-[var(--muted)]">
-                {dateOf(report.data.period_start, timezone)} a{" "}
-                {dateOf(report.data.period_end, timezone)}
-              </p>
-              {/* A frase do domínio. Sem elogio por desenho. */}
-              <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed">
+            {/* A frase do domínio, no tamanho que ela merece: é a
+                leitura do período, e vinha em 13px cinza acima de três
+                caixas. Sem elogio, por desenho (§5.9.9). */}
+            <Panel className="px-5 py-5">
+              <p className="whitespace-pre-wrap text-md leading-[1.65] text-ink">
                 {report.data.summary_text}
               </p>
             </Panel>
@@ -104,16 +122,27 @@ export function ReportScreen({ timezone }: { timezone: string }) {
                     ? percent(report.data.study_completion)
                     : "nada planejado"
                 }
+                ratio={
+                  report.data.study_planned > 0
+                    ? report.data.study_done / report.data.study_planned
+                    : null
+                }
               />
               <Metric
                 label="Tempo estudado"
                 value={duration(report.data.study_done_minutes)}
                 note={`de ${duration(report.data.study_planned_minutes)} planejados`}
+                ratio={
+                  report.data.study_planned_minutes > 0
+                    ? report.data.study_done_minutes / report.data.study_planned_minutes
+                    : null
+                }
               />
               <Metric
                 label="Eventos na agenda"
                 value={String(report.data.events_total)}
                 note="no período"
+                ratio={null}
               />
             </div>
 
@@ -121,14 +150,17 @@ export function ReportScreen({ timezone }: { timezone: string }) {
                 é a parte acionável — número sozinho descreve, padrão
                 sugere o que mudar. */}
             {report.data.patterns.length > 0 ? (
-              <Panel className="px-4 py-3">
-                <h2 className="text-xs font-semibold">O que chamou atenção</h2>
-                <ul className="mt-2 space-y-1.5">
+              <Panel className="overflow-hidden">
+                <h2 className="eyebrow border-b border-line px-5 py-3">
+                  O que chamou atenção
+                </h2>
+                <ul className="divide-y divide-line">
                   {report.data.patterns.map((pattern) => (
-                    <li key={pattern} className="text-sm leading-relaxed">
-                      <span aria-hidden className="mr-1.5 text-[var(--accent)]">
-                        →
-                      </span>
+                    <li
+                      key={pattern}
+                      className="flex items-start gap-2.5 px-5 py-3.5 text-sm leading-relaxed text-ink-2"
+                    >
+                      <IconChevronRight className="mt-0.5 h-3.5 w-3.5 shrink-0 text-brand" />
                       {pattern}
                     </li>
                   ))}
@@ -138,26 +170,25 @@ export function ReportScreen({ timezone }: { timezone: string }) {
 
             {report.data.routines.length > 0 ? (
               <section>
-                <h2 className="px-1 pb-1.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--muted)]">
-                  Rotinas
-                </h2>
+                <h2 className="eyebrow px-1 pb-2">Rotinas</h2>
                 <ul className="space-y-2">
                   {report.data.routines.map((adherence) => (
                     <Panel
                       as="li"
                       key={adherence.routine_id ?? adherence.routine_title}
-                      className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-3 text-sm"
+                      className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-4 py-3.5 md:px-5"
                     >
-                      <span className="min-w-0 flex-1 truncate">
+                      <span className="min-w-0 flex-1 truncate text-sm font-medium">
                         {adherence.routine_title}
                       </span>
-                      <span>
-                        <strong>
-                          {adherence.done}/{adherence.planned}
-                        </strong>
+                      <span className="tnum text-base font-semibold">
+                        {adherence.done}
+                        <span className="text-sm font-normal text-muted">
+                          /{adherence.planned}
+                        </span>
                       </span>
                       {adherence.moved > 0 ? (
-                        <span className="text-xs text-[var(--muted)]">
+                        <span className="text-xs text-muted">
                           {adherence.moved} movida
                           {adherence.moved === 1 ? "" : "s"}
                         </span>
@@ -186,20 +217,38 @@ export function ReportScreen({ timezone }: { timezone: string }) {
   );
 }
 
+/**
+ * Um número do período.
+ *
+ * O valor é 28px: era 18px, e num relatório o número É o conteúdo. A
+ * barra só aparece quando a razão faz sentido (sessões feitas sobre
+ * planejadas); para "eventos na agenda" não há denominador, e desenhar
+ * uma barra cheia ali sugeriria uma meta que não existe.
+ */
 function Metric({
   label,
   value,
   note,
+  ratio,
 }: {
   label: string;
   value: string;
   note: string;
+  ratio: number | null;
 }) {
   return (
-    <Panel className="px-4 py-3">
-      <p className="text-[10px] uppercase tracking-wide text-[var(--muted)]">{label}</p>
-      <p className="mt-1 text-lg font-semibold">{value}</p>
-      <p className="text-[11px] text-[var(--muted)]">{note}</p>
+    <Panel className="px-4 py-4">
+      <p className="eyebrow">{label}</p>
+      <p className="tnum mt-2 text-2xl font-semibold leading-none">{value}</p>
+      <p className="mt-1.5 text-xs text-muted">{note}</p>
+      {ratio !== null ? (
+        <Progress
+          value={Math.round(ratio * 100)}
+          tone={ratio >= 0.8 ? "ok" : ratio >= 0.5 ? "brand" : "warn"}
+          label={label}
+          className="mt-3"
+        />
+      ) : null}
     </Panel>
   );
 }

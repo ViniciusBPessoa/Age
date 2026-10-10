@@ -31,7 +31,7 @@ import {
 import { Composer } from "@/components/chat/composer";
 import { ConversationSidebar } from "@/components/conversation-list/sidebar";
 import { PlanReview } from "@/components/plan-review/plan-review";
-import { Button, LoadError } from "@/components/ui";
+import { Button, IconAlert, IconInfo, IconX, LoadError, cx } from "@/components/ui";
 import { RequestFailed, api } from "@/lib/api-client";
 import { subscribeToTurn, toolLabel, type StreamEvent } from "@/lib/sse";
 import type {
@@ -325,16 +325,34 @@ export function ChatScreen({
         {changes.data && changes.data.changes.length > 0 ? (
           <div
             role="status"
-            className="border-b border-[var(--border)] bg-[var(--panel-2)] px-4 py-2.5 text-xs leading-relaxed"
+            className={cx(
+              "flex items-start gap-2.5 border-b px-4 py-3 text-sm leading-relaxed md:px-6",
+              changes.data.conflict_count > 0
+                ? "border-warn/25 bg-warn/8 text-warn"
+                : "border-line bg-surface-2 text-ink-2",
+            )}
           >
-            <span aria-hidden className="mr-1">
-              {changes.data.conflict_count > 0 ? "⚠" : "ℹ"}
-            </span>
-            {changes.data.summary_text}
+            {changes.data.conflict_count > 0 ? (
+              <IconAlert className="mt-0.5 h-4 w-4 shrink-0" />
+            ) : (
+              <IconInfo className="mt-0.5 h-4 w-4 shrink-0 text-muted" />
+            )}
+            <span className="min-w-0">{changes.data.summary_text}</span>
           </div>
         ) : null}
 
-        {conversationId === null || (messages.data?.items.length ?? 0) === 0 ? (
+        {/*
+         * O estado vazio sai de cena assim que o turno comeca.
+         *
+         * A condicao so olhava a lista de mensagens, que so e
+         * recarregada quando o turno termina — entao quem mandava a
+         * primeira mensagem via os quatro exemplos continuarem ali
+         * durante os segundos de espera, como se o envio nao tivesse
+         * acontecido.
+         */}
+        {(conversationId === null || (messages.data?.items.length ?? 0) === 0) &&
+        !streaming &&
+        !streamingText ? (
           <ChatEmptyState
             calendarName={primaryCalendar}
             onPick={(text) => void send(text)}
@@ -368,14 +386,25 @@ export function ChatScreen({
         )}
 
         {turnError ? (
-          <div
-            role="alert"
-            className="mx-4 mb-2 flex items-center gap-3 rounded-md border border-[var(--danger)] px-3 py-2 text-xs"
-          >
-            <span className="flex-1">{turnError}</span>
-            <Button size="sm" variant="quiet" onClick={() => setTurnError(null)}>
-              fechar
-            </Button>
+          <div className="px-4 md:px-6">
+            <div
+              role="alert"
+              className="mx-auto mb-2 flex max-w-3xl items-start gap-2.5 rounded-xl bg-danger/10 px-3.5 py-2.5 text-sm ring-1 ring-inset ring-danger/25"
+            >
+              <IconAlert className="mt-0.5 h-4 w-4 shrink-0 text-danger" />
+              <span className="min-w-0 flex-1 leading-relaxed text-ink-2">
+                {turnError}
+              </span>
+              <Button
+                size="icon"
+                variant="quiet"
+                className="-my-1 h-7 w-7 shrink-0"
+                onClick={() => setTurnError(null)}
+                aria-label="Fechar aviso"
+              >
+                <IconX className="h-3.5 w-3.5" />
+              </Button>
+            </div>
           </div>
         ) : null}
 

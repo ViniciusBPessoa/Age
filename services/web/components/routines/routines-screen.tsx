@@ -27,13 +27,21 @@ import { useState } from "react";
 import {
   Badge,
   Button,
-  Dialog,
+  IconCheck,
+  IconChevronDown,
+  IconClock,
+  IconLock,
+  IconPause,
+  IconPlay,
+  IconRoutine,
+  IconSkip,
   Empty,
-  Field,
   LoadError,
+  PageHeader,
   Panel,
-  Select,
+  SkeletonList,
   Spinner,
+  cx,
 } from "@/components/ui";
 import { api } from "@/lib/api-client";
 import { duration, moment, percent, range } from "@/lib/format";
@@ -41,11 +49,13 @@ import type { Adherence, Flexibility, Occurrence, Routine } from "@/lib/types";
 
 const FLEX_BADGE: Record<
   Flexibility,
-  { label: string; tone: "warn" | "accent" | "neutral" }
+  { label: string; tone: "fixed" | "brand" | "neutral"; lock?: boolean }
 > = {
-  fixed: { label: "🔒 fixa", tone: "warn" },
+  // O cadeado é ícone, não emoji: §5.6 usa a mesma marca na timeline, e
+  // as duas precisam ser a mesma coisa para a pessoa ligar uma à outra.
+  fixed: { label: "fixa", tone: "fixed", lock: true },
   semi_flexible: { label: "semi-flexível", tone: "neutral" },
-  flexible: { label: "flexível", tone: "accent" },
+  flexible: { label: "flexível", tone: "brand" },
 };
 
 export function RoutinesScreen({ timezone }: { timezone: string }) {
@@ -66,23 +76,25 @@ export function RoutinesScreen({ timezone }: { timezone: string }) {
   }
 
   return (
-    <div className="min-h-dvh pb-14 md:pb-0">
-      <header className="flex items-center gap-2 border-b border-[var(--border)] px-4 py-3">
-        <h1 className="text-sm font-semibold">Rotinas</h1>
-      </header>
+    <div className="min-h-dvh pb-16 md:pb-0">
+      <PageHeader
+        title="Rotinas"
+        subtitle="Sem ofensiva e sem medalha, de propósito: o painel mostra o fato."
+      />
 
-      <div className="mx-auto max-w-3xl space-y-3 px-4 py-5">
+      <div className="mx-auto max-w-3xl space-y-3 px-4 py-6 md:px-7">
         {routines.isError ? (
           <LoadError
             message="Não consegui carregar suas rotinas."
             onRetry={() => void routines.refetch()}
           />
         ) : routines.isLoading ? (
-          <p className="px-2 py-4 text-xs text-[var(--muted)]">
-            <Spinner /> carregando…
-          </p>
+          <SkeletonList rows={2} />
         ) : (routines.data?.length ?? 0) === 0 ? (
-          <Empty title="Nenhuma rotina ainda.">
+          <Empty
+            title="Nenhuma rotina ainda."
+            icon={<IconRoutine className="h-5 w-5" />}
+          >
             Peça no chat: &ldquo;quero academia 3x por semana&rdquo;. O Age simula a
             série, mostra onde ela bate com prova e deixa você escolher o horário antes
             de criar nada.
@@ -155,17 +167,21 @@ function RoutineCard({
   });
 
   return (
-    <Panel as="li">
-      <div className="px-4 py-3">
+    <Panel as="li" className={cx("overflow-hidden", paused && "opacity-75")}>
+      <div className="px-4 py-4 md:px-5">
         <div className="flex flex-wrap items-center gap-2">
-          <span className="min-w-0 flex-1 truncate text-sm font-medium">
+          <span className="min-w-0 flex-1 truncate text-base font-semibold">
             {routine.title}
           </span>
-          <Badge tone={flex.tone}>{flex.label}</Badge>
+          <Badge tone={flex.tone}>
+            {flex.lock ? <IconLock className="h-2.5 w-2.5" /> : null}
+            {flex.label}
+          </Badge>
           {paused ? <Badge tone="neutral">pausada</Badge> : null}
         </div>
 
-        <p className="mt-1 text-xs text-[var(--muted)]">
+        <p className="mt-1.5 flex flex-wrap items-center gap-x-1.5 text-xs text-muted">
+          <IconClock className="h-3.5 w-3.5 shrink-0" />
           {describeRule(routine.rrule)} · {duration(routine.duration_min)}
           {routine.next_occurrence && !paused ? (
             <> · próxima {moment(routine.next_occurrence, timezone)}</>
@@ -175,69 +191,101 @@ function RoutineCard({
         {/* A aderência. `3/3` e `2/3` como §8.1 escreve — número puro,
             sem ofensiva, sem medalha, sem cor de reprovação. */}
         {adherence.data ? (
-          <div className="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
-            <span>
-              <strong>
-                {adherence.data.done}/{adherence.data.planned}
-              </strong>{" "}
-              <span className="text-[var(--muted)]">nas últimas 4 semanas</span>
-            </span>
+          <div className="mt-4 rounded-xl bg-surface-2 px-3.5 py-3">
+            <div className="flex flex-wrap items-end gap-x-5 gap-y-2">
+              <div>
+                <span className="tnum text-2xl font-semibold leading-none">
+                  {adherence.data.done}
+                  <span className="text-base font-normal text-muted">
+                    /{adherence.data.planned}
+                  </span>
+                </span>
+                <p className="mt-1 text-2xs text-muted">nas últimas 4 semanas</p>
+              </div>
 
-            {adherence.data.moved > 0 ? (
-              // Separado de `skipped` de propósito: adaptar não é
-              // falhar (§5.9.4).
-              <span className="text-[var(--muted)]">
-                {adherence.data.moved} movida
-                {adherence.data.moved === 1 ? "" : "s"}
-              </span>
-            ) : null}
+              {/* `moved` separado de `skipped` de propósito: adaptar
+                  não é falhar (§5.9.4). Ter colunas próprias é o que
+                  deixa isso visível em vez de escrito. */}
+              {adherence.data.moved > 0 ? (
+                <div>
+                  <span className="tnum text-base font-semibold text-brand">
+                    {adherence.data.moved}
+                  </span>
+                  <p className="mt-0.5 text-2xs text-muted">
+                    movida{adherence.data.moved === 1 ? "" : "s"}
+                  </p>
+                </div>
+              ) : null}
 
-            {adherence.data.skipped > 0 ? (
-              <span className="text-[var(--muted)]">
-                {adherence.data.skipped} pulada
-                {adherence.data.skipped === 1 ? "" : "s"}
-              </span>
-            ) : null}
+              {adherence.data.skipped > 0 ? (
+                <div>
+                  <span className="tnum text-base font-semibold text-ink-2">
+                    {adherence.data.skipped}
+                  </span>
+                  <p className="mt-0.5 text-2xs text-muted">
+                    pulada{adherence.data.skipped === 1 ? "" : "s"}
+                  </p>
+                </div>
+              ) : null}
 
-            {adherence.data.target_per_week ? (
-              <span className="text-[var(--muted)]">
-                meta {adherence.data.target_per_week}x/semana · indo a{" "}
-                {adherence.data.per_week.toFixed(1)}x
-              </span>
-            ) : null}
+              {adherence.data.target_per_week ? (
+                <div className="ml-auto text-right">
+                  <span className="tnum text-base font-semibold">
+                    {adherence.data.per_week.toFixed(1)}x
+                  </span>
+                  <p className="mt-0.5 text-2xs text-muted">
+                    meta {adherence.data.target_per_week}x/semana
+                  </p>
+                </div>
+              ) : null}
+            </div>
           </div>
         ) : null}
 
-        <div className="mt-3 flex items-center gap-2">
-          <Button size="sm" variant="ghost" onClick={onToggle} aria-expanded={expanded}>
+        <div className="mt-3.5 flex flex-wrap items-center gap-2">
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={onToggle}
+            aria-expanded={expanded}
+          >
             {expanded ? "esconder" : "ver ocorrências"}
+            <IconChevronDown
+              className={cx(
+                "h-3.5 w-3.5 transition-transform duration-200",
+                expanded && "rotate-180",
+              )}
+            />
           </Button>
           <Button
             size="sm"
-            variant="quiet"
+            variant="ghost"
             loading={togglePause.isPending}
             onClick={() => togglePause.mutate()}
           >
+            {togglePause.isPending ? null : paused ? (
+              <IconPlay className="h-3.5 w-3.5" />
+            ) : (
+              <IconPause className="h-3.5 w-3.5" />
+            )}
             {paused ? "retomar" : "pausar"}
           </Button>
           {!paused ? (
-            <span className="text-[11px] text-[var(--muted)]">
-              pausar não apaga o histórico
-            </span>
+            <span className="text-2xs text-faint">pausar não apaga o histórico</span>
           ) : null}
         </div>
       </div>
 
       {expanded ? (
-        <div className="border-t border-[var(--border)] px-4 py-3">
+        <div className="animate-fade-in border-t border-line bg-surface-2/40 px-4 py-3.5 md:px-5">
           {occurrences.isLoading ? (
-            <p className="text-xs text-[var(--muted)]">
+            <p className="flex items-center gap-2 text-xs text-muted">
               <Spinner /> carregando…
             </p>
           ) : (occurrences.data?.length ?? 0) === 0 ? (
-            <p className="text-xs text-[var(--muted)]">Nenhuma ocorrência ainda.</p>
+            <p className="text-xs text-muted">Nenhuma ocorrência ainda.</p>
           ) : (
-            <ul className="space-y-1">
+            <ul className="divide-y divide-line/60">
               {occurrences.data?.map((occurrence) => (
                 <OccurrenceRow
                   key={`${occurrence.routine_id}-${occurrence.start}`}
@@ -259,13 +307,17 @@ function RoutineCard({
 }
 
 // ---------------------------------------------------------------
-const STATUS_STYLE: Record<Occurrence["status"], { label: string; className: string }> =
-  {
-    planned: { label: "planejada", className: "text-[var(--muted)]" },
-    done: { label: "feita", className: "text-[var(--ok)]" },
-    skipped: { label: "pulada", className: "text-[var(--muted)]" },
-    moved: { label: "movida", className: "text-[var(--accent)]" },
-  };
+const STATUS_STYLE: Record<
+  Occurrence["status"],
+  { label: string; tone: "neutral" | "ok" | "brand" }
+> = {
+  planned: { label: "planejada", tone: "neutral" },
+  done: { label: "feita", tone: "ok" },
+  // Pulada em tom neutro, não em vermelho: §5.9.4 mostra o fato, e
+  // pintar a falta de vermelho é a repreensão que o produto evita.
+  skipped: { label: "pulada", tone: "neutral" },
+  moved: { label: "movida", tone: "brand" },
+};
 
 function OccurrenceRow({
   occurrence,
@@ -291,21 +343,19 @@ function OccurrenceRow({
   });
 
   return (
-    <li className="flex flex-wrap items-center gap-2 py-0.5 text-xs">
-      <span className="min-w-0 flex-1 truncate text-[var(--muted)]">
+    <li className="flex flex-wrap items-center gap-2 py-2 text-xs">
+      <span className="tnum min-w-0 flex-1 truncate text-muted">
         {range(occurrence.start, occurrence.end, timezone)}
       </span>
 
-      <span className={style.className}>{style.label}</span>
+      <Badge tone={style.tone}>{style.label}</Badge>
 
       {occurrence.actual_min ? (
-        <span className="text-[var(--muted)]">{duration(occurrence.actual_min)}</span>
+        <span className="tnum text-muted">{duration(occurrence.actual_min)}</span>
       ) : null}
 
       {occurrence.moved_to ? (
-        <span className="text-[var(--accent)]">
-          → {moment(occurrence.moved_to, timezone)}
-        </span>
+        <span className="text-brand">→ {moment(occurrence.moved_to, timezone)}</span>
       ) : null}
 
       {/* Marcação rápida (§8.1): só para o que já passou. Oferecer
@@ -316,15 +366,19 @@ function OccurrenceRow({
           <button
             onClick={() => mark.mutate("done")}
             disabled={mark.isPending}
-            className="rounded px-1.5 py-0.5 text-[var(--ok)] hover:bg-[var(--panel-2)] disabled:opacity-40"
+            aria-label="Marcar como feita"
+            className="flex items-center gap-1 rounded-md px-2 py-1 font-medium text-ok transition-colors hover:bg-ok/12 disabled:opacity-40"
           >
+            <IconCheck className="h-3 w-3" />
             feito
           </button>
           <button
             onClick={() => mark.mutate("skipped")}
             disabled={mark.isPending}
-            className="rounded px-1.5 py-0.5 text-[var(--muted)] hover:bg-[var(--panel-2)] disabled:opacity-40"
+            aria-label="Marcar como pulada"
+            className="flex items-center gap-1 rounded-md px-2 py-1 text-muted transition-colors hover:bg-surface-3 hover:text-ink disabled:opacity-40"
           >
+            <IconSkip className="h-3 w-3" />
             pulei
           </button>
         </span>

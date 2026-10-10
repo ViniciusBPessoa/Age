@@ -13,23 +13,51 @@
  * backend recusa sem `confirm_blocking`, e a tela precisa dizer o que
  * está em jogo antes de oferecer a caixa — "confirmar" sem saber o que
  * é bloqueado é consentimento vazio.
+ *
+ * Sobre a aparência, que é o que mudou aqui: esta é a tela onde se
+ * autoriza escrita na agenda, e a versão anterior a desenhava como uma
+ * lista de caixas de 13px com texto cinza. Agora o item selecionado
+ * fica visivelmente selecionado (fundo tingido e anel), a caixa de
+ * marcação tem tamanho de alvo de toque, e o cartão inteiro é
+ * clicável — porque a decisão item por item é a ação central do
+ * produto, não um detalhe de formulário.
  */
 
 "use client";
 
 import { useMemo, useState } from "react";
 
-import { Badge, Button, Panel } from "@/components/ui";
+import {
+  Badge,
+  Button,
+  IconAlert,
+  IconCalendar,
+  IconCheck,
+  IconClock,
+  IconLink,
+  IconSparkle,
+  IconTasks,
+  cx,
+} from "@/components/ui";
 import { duration, range } from "@/lib/format";
 import type { Plan, PlanItem, PlanOp } from "@/lib/types";
 
-const OP_LABEL: Record<PlanOp, { icon: string; label: string }> = {
-  create: { icon: "✦", label: "CRIAR" },
-  move: { icon: "⇄", label: "MOVER" },
-  resize: { icon: "⇔", label: "AJUSTAR" },
-  delete: { icon: "✕", label: "REMOVER" },
-  complete: { icon: "✓", label: "CONCLUIR" },
-  reorder: { icon: "↕", label: "REORDENAR" },
+/**
+ * O rótulo de cada operação, em português.
+ *
+ * As chaves são MAIÚSCULAS porque é assim que a API manda. A versão
+ * anterior usava minúsculas e o mapa nunca acertava — a tela mostrava
+ * `CREATE` e `MOVE` crus, e pior, as comparações de `op` espalhadas
+ * por este arquivo também falhavam.
+ */
+const OP_LABEL: Record<PlanOp, string> = {
+  CREATE: "Criar",
+  MOVE: "Mover",
+  RESIZE: "Ajustar",
+  DELETE: "Remover",
+  COMPLETE: "Concluir",
+  REORDER: "Reordenar",
+  UPDATE: "Atualizar",
 };
 
 interface Payload {
@@ -91,8 +119,8 @@ export function PlanReview({
    *
    * "Reservar tempo para uma tarefa cria DOIS itens ligados; aprovado,
    * aplicado e revertido como unidade." Deixar marcar só o evento
-   * produziria um bloco de tempo sem tarefa nenhuma — o oposto do que
-   * a pessoa pediu.
+   * produziria um bloco de tempo sem tarefa nenhuma — o oposto do que a
+   * pessoa pediu.
    */
   function toggle(item: PlanItem) {
     setSelected((previous) => {
@@ -115,28 +143,67 @@ export function PlanReview({
   const needsConfirm = blockingSelected.length > 0;
   const canApply =
     selected.size > 0 && (!needsConfirm || confirmBlocking) && !plan.is_expired;
+  const allSelected = selected.size === pending.length;
 
   if (plan.is_expired) {
     return (
-      <Panel className="p-4">
-        <p className="text-sm text-[var(--muted)]">
+      <div className="card flex items-start gap-3 p-4">
+        <IconClock className="mt-0.5 h-4 w-4 shrink-0 text-muted" />
+        <p className="text-sm leading-relaxed text-muted">
           Esta proposta expirou. A agenda pode ter mudado desde que ela foi feita, então
           aplicá-la agora poderia criar conflito — peça de novo e eu recalculo.
         </p>
-      </Panel>
+      </div>
     );
   }
 
   return (
-    <Panel className="overflow-hidden">
-      <div className="border-b border-[var(--border)] px-4 py-3">
-        <h3 className="text-sm font-semibold">{plan.summary}</h3>
-        {plan.origin_note ? (
-          <p className="mt-0.5 text-xs text-[var(--muted)]">{plan.origin_note}</p>
-        ) : null}
+    <div className="overflow-hidden rounded-2xl border border-proposed/30 bg-surface shadow-raised">
+      {/* O cabeçalho usa a cor de "proposto" (§5.6): esta é a faixa que
+          diz, antes de ler qualquer item, que nada disso está na agenda
+          ainda. */}
+      <div className="border-b border-line bg-proposed/8 px-4 py-3.5 md:px-5">
+        <div className="flex items-start gap-3">
+          <span
+            aria-hidden
+            className="mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-proposed/15 text-proposed"
+          >
+            <IconSparkle className="h-4 w-4" />
+          </span>
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 className="text-base font-semibold">{plan.summary}</h3>
+              <Badge tone="proposed">proposta</Badge>
+            </div>
+            {plan.origin_note ? (
+              <p className="mt-1 text-xs leading-relaxed text-muted">
+                {plan.origin_note}
+              </p>
+            ) : null}
+          </div>
+        </div>
+
+        <div className="mt-3 flex items-center justify-between gap-3 text-xs">
+          <span className="text-muted">
+            {pending.length === 1 ? "1 item" : `${pending.length} itens`} ·{" "}
+            <span className="font-medium text-ink-2">
+              {selected.size} {selected.size === 1 ? "marcado" : "marcados"}
+            </span>
+          </span>
+          <button
+            onClick={() =>
+              setSelected(
+                allSelected ? new Set() : new Set(pending.map((item) => item.id)),
+              )
+            }
+            className="font-medium text-brand transition-opacity hover:opacity-80"
+          >
+            {allSelected ? "Desmarcar tudo" : "Marcar tudo"}
+          </button>
+        </div>
       </div>
 
-      <ul className="divide-y divide-[var(--border)]">
+      <ul className="divide-y divide-line">
         {pending.map((item) => (
           <ItemCard
             key={item.id}
@@ -150,16 +217,16 @@ export function PlanReview({
       </ul>
 
       {needsConfirm ? (
-        <div className="border-t border-[var(--border)] bg-[var(--panel-2)] px-4 py-3">
-          <label className="flex cursor-pointer items-start gap-2 text-xs leading-relaxed">
+        <div className="border-t border-warn/25 bg-warn/8 px-4 py-3.5 md:px-5">
+          <label className="flex cursor-pointer items-start gap-3 text-xs leading-relaxed">
             <input
               type="checkbox"
               checked={confirmBlocking}
               onChange={(e) => setConfirmBlocking(e.target.checked)}
-              className="mt-0.5 accent-[var(--warn)]"
+              className="mt-0.5 h-4 w-4 shrink-0 cursor-pointer accent-warn"
             />
-            <span>
-              <strong className="text-[var(--warn)]">
+            <span className="text-ink-2">
+              <strong className="font-semibold text-warn">
                 {blockingSelected.length === 1
                   ? "Um item escolhido tem conflito sério."
                   : `${blockingSelected.length} itens escolhidos têm conflito sério.`}
@@ -174,25 +241,26 @@ export function PlanReview({
         </div>
       ) : null}
 
-      <div className="flex flex-wrap items-center gap-2 border-t border-[var(--border)] px-4 py-3">
+      <div className="flex flex-wrap items-center gap-2 border-t border-line bg-surface-2/40 px-4 py-3.5 md:px-5">
         <Button
           variant="primary"
           loading={applying}
           disabled={!canApply}
           onClick={() => onApply([...selected], confirmBlocking)}
         >
+          {applying ? null : <IconCheck />}
           {applyLabel(selected.size, pending.length)}
         </Button>
-        <Button variant="quiet" onClick={onReject} disabled={applying}>
+        <Button variant="ghost" onClick={onReject} disabled={applying}>
           Rejeitar tudo
         </Button>
         {selected.size < pending.length && selected.size > 0 ? (
-          <span className="text-xs text-[var(--muted)]">
+          <span className="text-xs text-muted">
             {pending.length - selected.size} fora — dá para pedir um recálculo depois.
           </span>
         ) : null}
       </div>
-    </Panel>
+    </div>
   );
 }
 
@@ -209,102 +277,143 @@ function ItemCard({
   linked: boolean;
   onToggle: () => void;
 }) {
-  const op = OP_LABEL[item.op] ?? { icon: "•", label: item.op.toUpperCase() };
   const before = payload(item.before);
   const after = payload(item.after);
   const isTask = item.target === "task";
   const subject = after ?? before;
+  const blocking = item.conflicts.some((c) => c.severity === "blocking");
+  // Normaliza uma vez. Comparar `item.op` direto em sete lugares foi
+  // como a divergência de caixa passou despercebida por tanto tempo.
+  const op = item.op.toUpperCase() as PlanOp;
 
   return (
-    <li className="px-4 py-3">
-      <label className="flex cursor-pointer items-start gap-3">
+    <li
+      className={cx(
+        "relative transition-colors duration-150",
+        checked ? "bg-brand/[0.055]" : "opacity-65 hover:opacity-100",
+      )}
+    >
+      {/* A barra lateral no item marcado: dá para varrer a lista e ver
+          o que entra sem reler cada caixa de marcação. */}
+      {checked ? (
+        <span aria-hidden className="absolute left-0 top-0 h-full w-[3px] bg-brand" />
+      ) : null}
+
+      <label className="flex cursor-pointer items-start gap-3 px-4 py-3.5 md:px-5">
         <input
           type="checkbox"
           checked={checked}
           onChange={onToggle}
-          className="mt-1 accent-[var(--accent)]"
+          className="mt-0.5 h-[18px] w-[18px] shrink-0 cursor-pointer rounded accent-brand"
           aria-describedby={`reason-${item.id}`}
         />
 
         <span className="min-w-0 flex-1">
-          <span className="flex flex-wrap items-center gap-2">
+          <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
             <span
-              aria-hidden
-              className="text-xs"
-              style={{
-                color: isTask ? "var(--accent)" : "var(--proposed)",
-              }}
+              className={cx(
+                "rounded-md px-1.5 py-0.5 text-2xs font-semibold uppercase tracking-[0.04em]",
+                op === "DELETE"
+                  ? "bg-danger/12 text-danger"
+                  : op === "MOVE" || op === "RESIZE"
+                    ? "bg-warn/12 text-warn"
+                    : "bg-brand/12 text-brand",
+              )}
             >
-              {op.icon}
+              {OP_LABEL[op] ?? item.op}
             </span>
-            <span className="text-[10px] font-semibold tracking-wide text-[var(--muted)]">
-              {op.label}
-            </span>
-            <span className="text-sm font-medium">
+            <span className="text-sm font-semibold text-ink">
               {subject?.title ?? "(sem título)"}
             </span>
-            {isTask ? <Badge>📋 lista</Badge> : null}
+            {/* Agenda ou lista: §5.7 insiste que são coisas diferentes,
+                e o ícone é a pista mais rápida de qual é qual. */}
+            <span className="inline-flex items-center gap-1 text-2xs text-muted">
+              {isTask ? (
+                <>
+                  <IconTasks className="h-3 w-3" />
+                  lista
+                </>
+              ) : (
+                <>
+                  <IconCalendar className="h-3 w-3" />
+                  agenda
+                </>
+              )}
+            </span>
             {linked ? (
               // §5.7.1: o par se aprova junto, e dizer isso evita a
               // surpresa de marcar um e ver o outro mudar.
-              <Badge tone="accent">par ligado</Badge>
+              <Badge tone="brand">
+                <IconLink className="h-2.5 w-2.5" />
+                par ligado
+              </Badge>
             ) : null}
           </span>
 
           {/* O quando. Tarefa mostra prazo; evento mostra o intervalo —
               são coisas diferentes, e §5.7 insiste nisso: prazo não
               ocupa a agenda. */}
-          <span className="mt-1 block text-xs text-[var(--muted)]">
-            {item.op === "move" && before?.start && after?.start ? (
-              <>
-                {range(before.start, before.end ?? before.start, timezone)}
-                {" → "}
-                {range(after.start, after.end ?? after.start, timezone)}
-              </>
-            ) : subject?.start && subject.end ? (
-              range(subject.start, subject.end, timezone)
-            ) : subject?.due_at ? (
-              <>prazo {range(subject.due_at, subject.due_at, timezone)}</>
-            ) : subject?.due_date ? (
-              <>prazo {subject.due_date.split("-").reverse().join("/")}</>
-            ) : isTask ? (
-              "sem prazo"
+          <span className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-ink-2">
+            <IconClock className="h-3 w-3 shrink-0 text-muted" />
+            <span className="tnum">
+              {op === "MOVE" && before?.start && after?.start ? (
+                <>
+                  <span className="text-muted line-through">
+                    {range(before.start, before.end ?? before.start, timezone)}
+                  </span>
+                  {" → "}
+                  {range(after.start, after.end ?? after.start, timezone)}
+                </>
+              ) : subject?.start && subject.end ? (
+                range(subject.start, subject.end, timezone)
+              ) : subject?.due_at ? (
+                <>prazo {range(subject.due_at, subject.due_at, timezone)}</>
+              ) : subject?.due_date ? (
+                <>prazo {subject.due_date.split("-").reverse().join("/")}</>
+              ) : isTask ? (
+                "sem prazo"
+              ) : null}
+            </span>
+            {subject?.estimated_min ? (
+              <span className="text-muted">· {duration(subject.estimated_min)}</span>
             ) : null}
-            {subject?.estimated_min ? ` · ${duration(subject.estimated_min)}` : null}
           </span>
 
           {/* O motivo. §5.7 exige que todo item carregue um — "porque o
               assistente disse" não é justificativa. */}
           <span
             id={`reason-${item.id}`}
-            className="mt-1 block text-xs leading-relaxed text-[var(--muted)]"
+            className="mt-1.5 block text-xs leading-relaxed text-muted"
           >
             {item.reason}
           </span>
 
           {item.conflicts.length > 0 ? (
-            <span className="mt-1.5 block space-y-1">
+            <span className="mt-2 block space-y-1">
               {item.conflicts.map((conflict, index) => (
                 <span
                   key={index}
-                  className={`block text-xs ${
+                  className={cx(
+                    "flex items-start gap-1.5 rounded-lg px-2 py-1.5 text-xs leading-relaxed",
                     conflict.severity === "blocking"
-                      ? "text-[var(--danger)]"
-                      : "text-[var(--warn)]"
-                  }`}
+                      ? "bg-danger/10 text-danger"
+                      : "bg-warn/10 text-warn",
+                  )}
                 >
-                  ⚠ {conflict.message}
+                  <IconAlert className="mt-px h-3 w-3 shrink-0" />
+                  <span>{conflict.message}</span>
                 </span>
               ))}
             </span>
           ) : null}
 
-          {/* Flexibilidade semi do que está sendo movido: §8.1 mostra
-              "⚠ evento semi-flexível" porque mover algo que a pessoa
-              marcou como quase-fixo merece aviso. */}
-          {item.op === "move" && before?.flexibility === "semi_flexible" ? (
-            <span className="mt-1 block text-xs text-[var(--warn)]">
-              ⚠ evento semi-flexível
+          {/* Flexibilidade semi do que está sendo movido: §8.1 mostra o
+              aviso porque mover algo que a pessoa marcou como
+              quase-fixo merece ser dito. */}
+          {op === "MOVE" && before?.flexibility === "semi_flexible" && !blocking ? (
+            <span className="mt-1.5 flex items-center gap-1.5 text-xs text-warn">
+              <IconAlert className="h-3 w-3 shrink-0" />
+              evento semi-flexível
             </span>
           ) : null}
         </span>

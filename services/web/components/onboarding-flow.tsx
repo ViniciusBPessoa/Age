@@ -25,7 +25,21 @@
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 
-import { Badge, Button, Field, Input, Panel, Select } from "@/components/ui";
+import { Logo } from "@/components/app-nav";
+import {
+  Badge,
+  Button,
+  Field,
+  IconCalendar,
+  IconCheck,
+  IconChevronLeft,
+  IconKey,
+  IconTasks,
+  Input,
+  Panel,
+  Select,
+  cx,
+} from "@/components/ui";
 import { RequestFailed, api } from "@/lib/api-client";
 import { brl } from "@/lib/format";
 import {
@@ -82,7 +96,12 @@ export function OnboardingFlow({
   }
 
   return (
-    <main className="mx-auto w-full max-w-xl px-5 py-10">
+    <main className="aurora mx-auto w-full max-w-xl px-5 py-10 md:py-14">
+      <div className="mb-8 flex items-center gap-2.5">
+        <Logo />
+        <span className="text-base font-semibold tracking-[-0.02em]">Age</span>
+      </div>
+
       <Stepper current={step} />
 
       {step === 0 ? (
@@ -119,29 +138,36 @@ function Stepper({ current }: { current: number }) {
         const done = index < current;
         const active = index === current;
         return (
-          <li key={label} className="flex flex-1 items-center gap-2">
+          <li key={label} className="flex flex-1 items-center gap-2.5">
             <span
               aria-current={active ? "step" : undefined}
-              className={[
-                "grid h-6 w-6 shrink-0 place-items-center rounded-full text-[11px] font-semibold",
+              className={cx(
+                "grid h-7 w-7 shrink-0 place-items-center rounded-full text-xs font-semibold",
+                "transition-all duration-300",
                 active
-                  ? "bg-[var(--accent)] text-[var(--accent-ink)]"
+                  ? "bg-brand text-brand-ink shadow-brand"
                   : done
-                    ? "bg-[var(--ok)] text-[var(--accent-ink)]"
-                    : "border border-[var(--border-strong)] text-[var(--muted)]",
-              ].join(" ")}
+                    ? "bg-ok text-canvas"
+                    : "bg-surface-2 text-muted ring-1 ring-inset ring-line-strong",
+              )}
             >
-              {done ? "✓" : index + 1}
+              {done ? <IconCheck className="h-3.5 w-3.5" strokeWidth={3} /> : index + 1}
             </span>
             <span
-              className={`text-xs ${active ? "text-[var(--text)]" : "text-[var(--muted)]"}`}
+              className={cx(
+                "text-xs font-medium transition-colors",
+                active ? "text-ink" : "text-muted",
+              )}
             >
               {label}
             </span>
             {index < STEPS.length - 1 ? (
               <span
                 aria-hidden
-                className={`h-px flex-1 ${done ? "bg-[var(--ok)]" : "bg-[var(--border)]"}`}
+                className={cx(
+                  "h-0.5 flex-1 rounded-full transition-colors duration-300",
+                  done ? "bg-ok" : "bg-line",
+                )}
               />
             ) : null}
           </li>
@@ -229,13 +255,16 @@ function StepModel({
 
   if (providers === null) {
     return (
-      <Panel className="p-6">
-        <h1 className="text-base font-semibold">Escolha de onde vem a inteligência</h1>
-        <p className="mt-3 text-sm text-[var(--danger)]" role="alert">
+      <Panel className="p-6 shadow-raised">
+        <h1 className="text-xl font-semibold">Escolha de onde vem a inteligência</h1>
+        <p
+          className="mt-4 rounded-xl bg-danger/10 px-3.5 py-3 text-sm leading-relaxed text-danger"
+          role="alert"
+        >
           Não consegui carregar a lista de provedores — o serviço de IA pode estar
           subindo ainda.
         </p>
-        <Button className="mt-4" onClick={() => location.reload()}>
+        <Button variant="secondary" className="mt-4" onClick={() => location.reload()}>
           Tentar de novo
         </Button>
       </Panel>
@@ -243,20 +272,25 @@ function StepModel({
   }
 
   return (
-    <Panel className="p-6">
-      <h1 className="text-base font-semibold">Escolha de onde vem a inteligência</h1>
-      <p className="mt-2 text-sm leading-relaxed text-[var(--muted)]">
+    <Panel className="p-6 shadow-raised">
+      <h1 className="text-xl font-semibold">Escolha de onde vem a inteligência</h1>
+      <p className="mt-2.5 text-sm leading-relaxed text-muted">
         O Age usa sua própria chave de API. Você paga só pelo que usar, direto no
         provedor — nós não cobramos nada e não vemos suas conversas.
       </p>
 
       {verified ? (
-        <div className="mt-5 rounded-md border border-[var(--ok)] bg-[var(--panel-2)] px-4 py-3">
-          <p className="text-sm">
-            <span className="text-[var(--ok)]">✓</span> Você já configurou{" "}
-            <strong>{verified.provider_key}</strong>.
+        <div className="mt-5 flex flex-wrap items-center gap-3 rounded-xl bg-ok/10 px-4 py-3.5 ring-1 ring-inset ring-ok/25">
+          <span
+            aria-hidden
+            className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-ok text-canvas"
+          >
+            <IconCheck className="h-4 w-4" strokeWidth={3} />
+          </span>
+          <p className="min-w-0 flex-1 text-sm">
+            Você já configurou <strong>{verified.provider_key}</strong>.
           </p>
-          <Button variant="primary" size="sm" className="mt-3" onClick={onDone}>
+          <Button variant="primary" size="sm" onClick={onDone}>
             Continuar
           </Button>
         </div>
@@ -270,12 +304,12 @@ function StepModel({
           return (
             <label
               key={p.key}
-              className={[
-                "flex cursor-pointer gap-3 rounded-md border px-4 py-3 transition-colors",
+              className={cx(
+                "flex cursor-pointer gap-3 rounded-xl border px-4 py-3.5 transition-all duration-150",
                 checked
-                  ? "border-[var(--accent)] bg-[var(--panel-2)]"
-                  : "border-[var(--border)] hover:border-[var(--border-strong)]",
-              ].join(" ")}
+                  ? "border-brand bg-brand/[0.07] ring-[3px] ring-brand/15"
+                  : "border-line bg-surface-2 hover:border-line-strong hover:bg-surface-3",
+              )}
             >
               <input
                 type="radio"
@@ -287,24 +321,24 @@ function StepModel({
                   setModel("");
                   setError(null);
                 }}
-                className="mt-1 accent-[var(--accent)]"
+                className="mt-0.5 h-4 w-4 shrink-0 cursor-pointer accent-brand"
               />
               <span className="flex-1">
                 <span className="flex flex-wrap items-center gap-2">
-                  <span className="text-sm font-medium">{p.name}</span>
+                  <span className="text-sm font-semibold">{p.name}</span>
                   {info.highlight ? (
-                    <Badge tone={info.highlight === "free_tier" ? "ok" : "accent"}>
+                    <Badge tone={info.highlight === "free_tier" ? "ok" : "brand"}>
                       {HIGHLIGHT_LABEL[info.highlight]}
                     </Badge>
                   ) : null}
                   {info.costPerConversation ? (
-                    <span className="text-[11px] text-[var(--muted)]">
+                    <span className="tnum text-xs text-muted">
                       ~{brl(info.costPerConversation)} por conversa
                     </span>
                   ) : null}
                 </span>
                 {info.note ? (
-                  <span className="mt-0.5 block text-xs text-[var(--muted)]">
+                  <span className="mt-1 block text-xs leading-relaxed text-muted">
                     {info.note}
                   </span>
                 ) : null}
@@ -321,9 +355,10 @@ function StepModel({
               href={presentation.keyUrl}
               target="_blank"
               rel="noreferrer noopener"
-              className="inline-flex items-center gap-1 text-sm text-[var(--accent)] hover:underline"
+              className="inline-flex items-center gap-1.5 rounded-lg bg-surface-2 px-3 py-2 text-sm font-medium text-brand transition-colors hover:bg-surface-3"
             >
-              Criar chave no {provider.name} →
+              <IconKey className="h-4 w-4" />
+              Criar chave no {provider.name}
             </a>
           ) : null}
 
@@ -365,11 +400,13 @@ function StepModel({
 
           <Button
             variant="primary"
+            size="lg"
+            full
             loading={busy}
             disabled={needsKey && apiKey.trim().length < 8}
             onClick={saveAndVerify}
           >
-            Verificar e continuar
+            {busy ? "Verificando com o provedor…" : "Verificar e continuar"}
           </Button>
         </div>
       ) : null}
@@ -392,9 +429,9 @@ function StepCalendar({
   onDone: () => void;
 }) {
   return (
-    <Panel className="p-6">
-      <h1 className="text-base font-semibold">Onde o Age vai escrever</h1>
-      <p className="mt-2 text-sm leading-relaxed text-[var(--muted)]">
+    <Panel className="p-6 shadow-raised">
+      <h1 className="text-xl font-semibold">Onde o Age vai escrever</h1>
+      <p className="mt-2.5 text-sm leading-relaxed text-muted">
         Já existe uma agenda e uma lista aqui dentro, prontas para usar. Dá para
         conectar o Google depois, sem perder nada do que você criar agora.
       </p>
@@ -403,12 +440,18 @@ function StepCalendar({
         {calendars.map((c) => (
           <li
             key={c.id}
-            className="flex items-center justify-between rounded-md border border-[var(--border)] px-4 py-3"
+            className="flex items-center gap-3 rounded-xl bg-surface-2 px-4 py-3"
           >
-            <span className="text-sm">
-              📅 {c.name}
+            <span
+              aria-hidden
+              className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-brand/12 text-brand"
+            >
+              <IconCalendar className="h-4 w-4" />
+            </span>
+            <span className="min-w-0 flex-1 text-sm font-medium">
+              {c.name}
               {c.is_primary ? (
-                <span className="ml-2 text-[11px] text-[var(--muted)]">principal</span>
+                <span className="ml-2 text-xs font-normal text-muted">principal</span>
               ) : null}
             </span>
             <Badge tone="ok">conectada</Badge>
@@ -417,32 +460,39 @@ function StepCalendar({
         {taskLists.map((l) => (
           <li
             key={l.id}
-            className="flex items-center justify-between rounded-md border border-[var(--border)] px-4 py-3"
+            className="flex items-center gap-3 rounded-xl bg-surface-2 px-4 py-3"
           >
-            <span className="text-sm">📋 {l.name}</span>
+            <span
+              aria-hidden
+              className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-brand/12 text-brand"
+            >
+              <IconTasks className="h-4 w-4" />
+            </span>
+            <span className="min-w-0 flex-1 text-sm font-medium">{l.name}</span>
             <Badge tone="ok">conectada</Badge>
           </li>
         ))}
       </ul>
 
-      <div className="mt-5 rounded-md border border-[var(--border)] bg-[var(--panel-2)] px-4 py-3">
-        <p className="text-sm font-medium">Google Calendar</p>
-        <p className="mt-1 text-xs leading-relaxed text-[var(--muted)]">
+      <div className="mt-4 rounded-xl border border-dashed border-line-strong px-4 py-3.5">
+        <p className="text-sm font-medium text-ink-2">Google Calendar</p>
+        <p className="mt-1 text-xs leading-relaxed text-muted">
           Ainda não disponível nesta versão. Quando estiver, aparece em Configurações →
           Conexões, e o que você já tiver criado continua onde está.
         </p>
       </div>
 
-      <div className="mt-6 flex items-center gap-2">
-        <Button variant="primary" onClick={onDone}>
+      <div className="mt-6 flex flex-wrap items-center gap-2">
+        <Button variant="primary" size="lg" onClick={onDone}>
           Usar a agenda do Age
         </Button>
         {/* "Depois", não "pular": a decisão é reversível, e dizer
             "pular" sugere que a pessoa está perdendo algo (§8.1). */}
-        <Button variant="quiet" onClick={onDone}>
+        <Button variant="ghost" onClick={onDone}>
           Decidir depois
         </Button>
         <Button variant="quiet" size="sm" className="ml-auto" onClick={onBack}>
+          <IconChevronLeft className="h-3.5 w-3.5" />
           Voltar
         </Button>
       </div>
@@ -468,25 +518,27 @@ const EXAMPLES = [
 
 function StepReady({ onFinish }: { onFinish: () => void }) {
   return (
-    <Panel className="p-6">
-      <h1 className="text-base font-semibold">Pronto.</h1>
-      <p className="mt-2 text-sm leading-relaxed text-[var(--muted)]">
+    <Panel className="p-6 shadow-raised">
+      <h1 className="text-2xl font-semibold">Pronto.</h1>
+      <p className="mt-2.5 text-sm leading-relaxed text-muted">
         O Age conversa — você escreve o que precisa organizar, ele propõe, e nada entra
         na sua agenda sem você aprovar.
       </p>
 
-      <ul className="mt-5 space-y-2">
-        {EXAMPLES.map((example) => (
+      <p className="eyebrow mt-6">Experimente dizer</p>
+      <ul className="stagger mt-2 space-y-2">
+        {EXAMPLES.map((example, i) => (
           <li
             key={example}
-            className="rounded-md border border-[var(--border)] px-4 py-2.5 text-sm text-[var(--muted)]"
+            style={{ ["--i" as string]: i }}
+            className="rounded-xl bg-surface-2 px-4 py-3 text-sm text-ink-2"
           >
             &ldquo;{example}&rdquo;
           </li>
         ))}
       </ul>
 
-      <Button variant="primary" className="mt-6 w-full" onClick={onFinish}>
+      <Button variant="primary" size="lg" full className="mt-6" onClick={onFinish}>
         Começar
       </Button>
     </Panel>

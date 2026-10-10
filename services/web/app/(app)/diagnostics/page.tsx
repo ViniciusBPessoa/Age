@@ -15,6 +15,8 @@
 
 "use client";
 
+import { Button, Input, Panel } from "@/components/ui";
+
 import { useEffect, useRef, useState } from "react";
 
 import { subscribeToTurn, type StreamEvent } from "@/lib/sse";
@@ -113,71 +115,56 @@ export default function Page() {
   }
 
   return (
-    <main className="mx-auto max-w-2xl px-4 py-12">
+    <main className="mx-auto max-w-2xl px-4 py-12 md:px-7">
       <header className="mb-8">
         <h1 className="text-2xl font-semibold">Age · diagnóstico</h1>
-        <p className="mt-1 text-sm text-[var(--muted)]">
+        <p className="mt-2 text-sm leading-relaxed text-muted">
           Diagnóstico da plumbing distribuída. Um POST deve atravessar os três serviços
           e voltar por SSE.
         </p>
       </header>
 
-      <section
-        className="mb-6 rounded-lg border p-4"
-        style={{ borderColor: "var(--border)", background: "var(--panel)" }}
-      >
-        <label htmlFor="msg" className="block text-sm text-[var(--muted)]">
+      <Panel className="mb-4 p-4">
+        <label htmlFor="msg" className="block text-sm font-medium text-ink-2">
           Mensagem
         </label>
         <div className="mt-2 flex gap-2">
-          <input
+          <Input
             id="msg"
             value={message}
             onChange={(e) => setMessage(e.target.value)}
-            className="flex-1 rounded border bg-transparent px-3 py-2 text-sm outline-none focus:border-[var(--accent)]"
-            style={{ borderColor: "var(--border)" }}
           />
-          <button
+          <Button
+            variant="primary"
+            loading={running}
             onClick={run}
-            disabled={running || message.trim().length === 0}
-            className="rounded px-4 py-2 text-sm font-medium disabled:opacity-40"
-            style={{ background: "var(--accent)", color: "#06121f" }}
+            disabled={message.trim().length === 0}
           >
-            {running ? "rodando…" : "enviar"}
-          </button>
+            {running ? "rodando" : "enviar"}
+          </Button>
         </div>
-      </section>
+      </Panel>
 
       {text && (
-        <section
-          className="mb-6 rounded-lg border p-4"
-          style={{ borderColor: "var(--border)", background: "var(--panel)" }}
-        >
-          <h2 className="mb-2 text-xs uppercase tracking-wide text-[var(--muted)]">
-            Resposta (streaming)
-          </h2>
-          <p className="text-sm">{text}</p>
-        </section>
+        <Panel className="mb-4 p-4">
+          <h2 className="eyebrow mb-2">Resposta (streaming)</h2>
+          <p className="text-sm leading-relaxed">{text}</p>
+        </Panel>
       )}
 
-      <section
-        className="rounded-lg border p-4"
-        style={{ borderColor: "var(--border)", background: "var(--panel)" }}
-      >
-        <h2 className="mb-2 text-xs uppercase tracking-wide text-[var(--muted)]">
-          Eventos
-        </h2>
+      <Panel className="p-4">
+        <h2 className="eyebrow mb-2">Eventos</h2>
         {log.length === 0 ? (
-          <p className="text-sm text-[var(--muted)]">Nada ainda. Clique em enviar.</p>
+          <p className="text-sm text-muted">Nada ainda. Clique em enviar.</p>
         ) : (
-          <pre className="whitespace-pre-wrap text-xs leading-relaxed text-[var(--muted)]">
+          <pre className="whitespace-pre-wrap font-mono text-xs leading-relaxed text-muted">
             {log.join("\n")}
           </pre>
         )}
-      </section>
+      </Panel>
 
       {health && (
-        <p className="mt-6 text-xs text-[var(--muted)]">
+        <p className="mt-6 text-xs text-muted">
           core-api: {health.ready ? "pronto" : "indisponível"} ·{" "}
           {Object.entries(health.checks)
             .map(([k, v]) => `${k}=${v}`)

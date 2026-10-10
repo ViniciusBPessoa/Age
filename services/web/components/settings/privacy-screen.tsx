@@ -38,8 +38,12 @@ import {
   Button,
   Dialog,
   Field,
+  IconAlert,
+  IconCheck,
+  IconDownload,
   Input,
   LoadError,
+  PageHeader,
   Panel,
   Spinner,
 } from "@/components/ui";
@@ -108,33 +112,37 @@ export function PrivacyScreen({
   });
 
   return (
-    <div className="min-h-dvh pb-14 md:pb-0">
-      <header className="border-b border-[var(--border)] px-4 py-3">
-        <h1 className="text-sm font-semibold">Privacidade</h1>
-      </header>
+    <div className="min-h-dvh pb-16 md:pb-0">
+      <PageHeader
+        title="Privacidade"
+        subtitle="O que sai, o que fica, e o que não volta."
+        width="2xl"
+      />
 
-      <div className="mx-auto max-w-2xl space-y-6 px-4 py-5">
+      <div className="mx-auto max-w-2xl space-y-8 px-4 py-6 md:px-7">
         {notice ? (
-          <Panel className="border-[var(--ok)] px-4 py-3">
-            <p role="status" className="text-sm">
-              {notice}
-            </p>
-          </Panel>
+          <p
+            role="status"
+            className="flex items-start gap-2.5 rounded-xl bg-ok/10 px-4 py-3 text-sm leading-relaxed ring-1 ring-inset ring-ok/25"
+          >
+            <IconCheck className="mt-0.5 h-4 w-4 shrink-0 text-ok" />
+            {notice}
+          </p>
         ) : null}
 
         {error ? (
-          <Panel className="border-[var(--danger)] px-4 py-3">
-            <p role="alert" className="text-sm text-[var(--danger)]">
-              {error}
-            </p>
-          </Panel>
+          <p
+            role="alert"
+            className="flex items-start gap-2.5 rounded-xl bg-danger/10 px-4 py-3 text-sm leading-relaxed text-danger ring-1 ring-inset ring-danger/25"
+          >
+            <IconAlert className="mt-0.5 h-4 w-4 shrink-0" />
+            {error}
+          </p>
         ) : null}
 
         {/* --- Histórico --- */}
         <section>
-          <h2 className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">
-            Histórico de conversas
-          </h2>
+          <h2 className="text-base font-semibold">Histórico de conversas</h2>
 
           <Panel className="mt-2 space-y-4 px-4 py-4">
             {preview.isError ? (
@@ -143,15 +151,27 @@ export function PrivacyScreen({
                 onRetry={() => void preview.refetch()}
               />
             ) : preview.isLoading ? (
-              <p className="text-xs text-[var(--muted)]">
+              <p className="flex items-center gap-2 text-xs text-muted">
                 <Spinner /> contando…
               </p>
             ) : preview.data ? (
               <>
-                <p className="text-sm">
-                  {preview.data.will_delete.conversations} conversas ·{" "}
-                  {preview.data.will_delete.messages} mensagens
-                </p>
+                {/* Os números grandes: é o que a pessoa confere antes
+                    de apertar um botão irreversível. */}
+                <div className="flex gap-8">
+                  <span>
+                    <span className="tnum block text-2xl font-semibold leading-none">
+                      {preview.data.will_delete.conversations}
+                    </span>
+                    <span className="mt-1 block text-xs text-muted">conversas</span>
+                  </span>
+                  <span>
+                    <span className="tnum block text-2xl font-semibold leading-none">
+                      {preview.data.will_delete.messages}
+                    </span>
+                    <span className="mt-1 block text-xs text-muted">mensagens</span>
+                  </span>
+                </div>
 
                 <div className="flex flex-wrap gap-2">
                   {/* Download direto, não `fetch` + blob: o navegador
@@ -161,8 +181,9 @@ export function PrivacyScreen({
                   <a
                     href="/api/privacy/export"
                     download="age-export.json"
-                    className="inline-flex items-center rounded-md border border-[var(--border-strong)] px-3.5 py-2 text-sm hover:bg-[var(--panel-2)]"
+                    className="inline-flex h-10 items-center gap-2 rounded-lg border border-line-strong bg-surface-2 px-4 text-sm font-medium shadow-ring transition-colors hover:border-muted/50 hover:bg-surface-3"
                   >
+                    <IconDownload />
                     Exportar tudo (JSON)
                   </a>
                   <Button variant="danger" onClick={() => setConfirmHistory(true)}>
@@ -172,16 +193,20 @@ export function PrivacyScreen({
 
                 {/* O que FICA. É a informação que a pessoa procura antes
                     de apertar o botão. */}
-                <div className="rounded-md border border-[var(--border)] bg-[var(--panel-2)] px-3 py-2.5">
-                  <p className="text-xs font-medium">Apagar conversas NÃO apaga:</p>
-                  <ul className="mt-1 space-y-0.5">
+                <div className="rounded-xl bg-surface-2 px-4 py-3.5">
+                  <p className="text-xs font-semibold">Apagar conversas NÃO apaga:</p>
+                  <ul className="mt-2 space-y-1">
                     {preview.data.will_preserve.map((item) => (
-                      <li key={item} className="text-xs text-[var(--muted)]">
-                        · {item}
+                      <li
+                        key={item}
+                        className="flex items-start gap-2 text-xs leading-relaxed text-muted"
+                      >
+                        <IconCheck className="mt-0.5 h-3 w-3 shrink-0 text-ok" />
+                        {item}
                       </li>
                     ))}
                   </ul>
-                  <p className="mt-1.5 text-xs text-[var(--muted)]">
+                  <p className="mt-2.5 border-t border-line pt-2.5 text-xs leading-relaxed text-muted">
                     Só o diálogo sai. Dá para desfazer até{" "}
                     {dateOf(preview.data.undo_until, timezone)}.
                   </p>
@@ -193,9 +218,7 @@ export function PrivacyScreen({
 
         {/* --- Os limites honestos --- */}
         <section>
-          <h2 className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">
-            O que apagar aqui não alcança
-          </h2>
+          <h2 className="text-base font-semibold">O que apagar aqui não alcança</h2>
 
           {limits.data ? (
             <ul className="mt-2 space-y-2">
@@ -204,7 +227,7 @@ export function PrivacyScreen({
                   <Panel as="li" key={text} className="px-4 py-3">
                     <p className="text-xs leading-relaxed">
                       <span aria-hidden className="mr-1.5 text-[var(--warn)]">
-                        ⚠
+                        <IconAlert className="h-3.5 w-3.5 shrink-0" />
                       </span>
                       {text}
                     </p>
@@ -213,7 +236,7 @@ export function PrivacyScreen({
               )}
             </ul>
           ) : (
-            <p className="mt-2 text-xs text-[var(--muted)]">
+            <p className="mt-2 text-xs text-muted">
               <Spinner /> carregando…
             </p>
           )}
@@ -221,9 +244,7 @@ export function PrivacyScreen({
 
         {/* --- Conta --- */}
         <section>
-          <h2 className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">
-            Conta
-          </h2>
+          <h2 className="text-base font-semibold">Conta</h2>
 
           <Panel className="mt-2 space-y-3 px-4 py-4">
             <p className="text-xs leading-relaxed text-[var(--muted)]">
@@ -233,7 +254,7 @@ export function PrivacyScreen({
             </p>
 
             {accountPreview.data ? (
-              <p className="text-xs text-[var(--muted)]">
+              <p className="text-xs text-muted">
                 Sai tudo: {accountPreview.data.will_delete.conversations} conversas,{" "}
                 {accountPreview.data.will_delete.events} eventos,{" "}
                 {accountPreview.data.will_delete.tasks} tarefas,{" "}
@@ -262,7 +283,7 @@ export function PrivacyScreen({
         title="Apagar todo o histórico de conversas?"
         footer={
           <>
-            <Button variant="quiet" onClick={() => setConfirmHistory(false)}>
+            <Button variant="ghost" onClick={() => setConfirmHistory(false)}>
               Cancelar
             </Button>
             <Button
@@ -294,7 +315,7 @@ export function PrivacyScreen({
         footer={
           <>
             <Button
-              variant="quiet"
+              variant="ghost"
               onClick={() => {
                 setConfirmAccount(false);
                 setTypedEmail("");

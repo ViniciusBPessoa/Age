@@ -34,8 +34,8 @@ export default function LoginPage() {
   }
 
   return (
-    <Panel className="p-6">
-      <h1 className="mb-5 text-base font-semibold">Entrar</h1>
+    <Panel className="p-6 shadow-raised">
+      <h1 className="mb-5 text-lg font-semibold">Entrar</h1>
 
       {/* `noValidate` deixa a validação para a mensagem do servidor: a
           do browser aparece num balão que o leitor de tela não anuncia
@@ -68,17 +68,21 @@ export default function LoginPage() {
         <Button
           type="submit"
           variant="primary"
+          size="lg"
           loading={busy}
-          className="w-full"
+          full
           disabled={!email.trim() || !password}
         >
           Entrar
         </Button>
       </form>
 
-      <p className="mt-5 text-xs text-[var(--muted)]">
+      <p className="mt-6 border-t border-line pt-5 text-center text-sm text-muted">
         Ainda não tem conta?{" "}
-        <Link href="/register" className="text-[var(--accent)] hover:underline">
+        <Link
+          href="/register"
+          className="font-medium text-brand transition-opacity hover:opacity-80"
+        >
           Criar uma
         </Link>
       </p>

@@ -16,10 +16,12 @@
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  addDays,
   addMonths,
   addWeeks,
   endOfMonth,
   endOfWeek,
+  format,
   startOfMonth,
   startOfWeek,
 } from "date-fns";
@@ -31,10 +33,27 @@ import {
   type Proposal,
   type TimelineView,
 } from "@/components/calendar-timeline/calendar-timeline";
-import { Badge, Button, Dialog, LoadError, Select } from "@/components/ui";
+import {
+  Badge,
+  Button,
+  Dialog,
+  IconChevronLeft,
+  IconChevronRight,
+  IconLock,
+  IconSparkle,
+  LoadError,
+  Select,
+  cx,
+} from "@/components/ui";
 import { api } from "@/lib/api-client";
 import { range } from "@/lib/format";
 import type { AgeEvent, Flexibility, Plan } from "@/lib/types";
+
+const VIEWS = [
+  { value: "day" as const, label: "dia" },
+  { value: "week" as const, label: "semana" },
+  { value: "month" as const, label: "mês" },
+];
 
 const FLEX_LABEL: Record<Flexibility, string> = {
   fixed: "Fixo — não movo",
@@ -125,6 +144,25 @@ export function CalendarScreen({ timezone }: { timezone: string }) {
     setSelected(null);
   }
 
+  /**
+   * O título do período, que a barra da lib dava e agora é nosso.
+   *
+   * Na semana, o intervalo pode atravessar dois meses ("29 set – 5 out")
+   * e é isso que a pessoa precisa ler; repetir o mês nas duas pontas
+   * quando é o mesmo seria ruído.
+   */
+  const periodLabel = useMemo(() => {
+    if (view === "month") return format(cursor, "MMMM yyyy", { locale: ptBR });
+    if (view === "day") return format(cursor, "EEEE, d 'de' MMMM", { locale: ptBR });
+    const from = startOfWeek(cursor, { locale: ptBR });
+    const to = addDays(from, 6);
+    return from.getMonth() === to.getMonth()
+      ? `${format(from, "d")} – ${format(to, "d 'de' MMMM", { locale: ptBR })}`
+      : `${format(from, "d 'de' MMM", { locale: ptBR })} – ${format(to, "d 'de' MMM", {
+          locale: ptBR,
+        })}`;
+  }, [cursor, view]);
+
   function shift(direction: -1 | 1) {
     setCursor((current) =>
       view === "month"
@@ -134,38 +172,82 @@ export function CalendarScreen({ timezone }: { timezone: string }) {
   }
 
   return (
-    <div className="flex h-dvh flex-col pb-14 md:pb-0">
-      <header className="flex flex-wrap items-center gap-2 border-b border-[var(--border)] px-4 py-3">
-        <h1 className="text-sm font-semibold">Agenda</h1>
-        {proposals.length > 0 ? (
-          <Badge tone="proposed">
-            {proposals.length} proposto{proposals.length === 1 ? "" : "s"}
-          </Badge>
-        ) : null}
-        <div className="ml-auto flex items-center gap-1">
-          <Button
-            size="sm"
-            variant="quiet"
-            onClick={() => shift(-1)}
-            aria-label="Anterior"
-          >
-            ‹
-          </Button>
-          <Button size="sm" variant="quiet" onClick={() => setCursor(new Date())}>
-            hoje
-          </Button>
-          <Button
-            size="sm"
-            variant="quiet"
-            onClick={() => shift(1)}
-            aria-label="Próximo"
-          >
-            ›
-          </Button>
+    <div className="flex h-dvh flex-col pb-16 md:pb-0">
+      {/*
+       * A barra da agenda é a nossa, e a da lib foi desligada
+       * (`toolbar: () => null`). Antes as duas apareciam: dois botões
+       * de "hoje", duas formas de trocar a visão, e só uma delas com o
+       * estilo do produto.
+       */}
+      <header className="glass sticky top-0 z-20 border-b border-line">
+        <div className="mx-auto flex w-full max-w-6xl flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3.5 md:px-6">
+          <div className="min-w-0">
+            <h1 className="flex items-center gap-2 text-xl font-semibold">
+              {/* `first-letter:uppercase`, não `capitalize`: este último
+                  põe maiúscula em cada palavra e produz "4 – 10 De
+                  Outubro". Só a primeira letra é que deve subir. */}
+              <span className="inline-block truncate first-letter:uppercase">
+                {periodLabel}
+              </span>
+              {proposals.length > 0 ? (
+                <Badge tone="proposed">
+                  {proposals.length} proposto{proposals.length === 1 ? "" : "s"}
+                </Badge>
+              ) : null}
+            </h1>
+          </div>
+
+          <div className="ml-auto flex items-center gap-2">
+            {/* Grupo segmentado para a visão: três opções que se
+                excluem, e o estado atual visível sem abrir nada. */}
+            <div
+              role="group"
+              aria-label="Visão"
+              className="flex rounded-lg bg-surface-2 p-0.5 ring-1 ring-inset ring-line"
+            >
+              {VIEWS.map((option) => (
+                <button
+                  key={option.value}
+                  onClick={() => setView(option.value)}
+                  aria-pressed={view === option.value}
+                  className={cx(
+                    "rounded-md px-2.5 py-1 text-xs font-medium transition-colors",
+                    view === option.value
+                      ? "bg-surface text-ink shadow-ring"
+                      : "text-muted hover:text-ink",
+                  )}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+
+            <div className="flex items-center gap-0.5">
+              <Button
+                size="icon"
+                variant="ghost"
+                onClick={() => shift(-1)}
+                aria-label="Período anterior"
+              >
+                <IconChevronLeft />
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => setCursor(new Date())}>
+                hoje
+              </Button>
+              <Button
+                size="icon"
+                variant="ghost"
+                onClick={() => shift(1)}
+                aria-label="Próximo período"
+              >
+                <IconChevronRight />
+              </Button>
+            </div>
+          </div>
         </div>
       </header>
 
-      <div className="min-h-0 flex-1 px-2 py-2 md:px-4 md:py-3">
+      <div className="mx-auto min-h-0 w-full max-w-6xl flex-1 px-3 py-3 md:px-6 md:py-4">
         {events.isError ? (
           <LoadError
             message="Não consegui carregar sua agenda."
@@ -192,18 +274,17 @@ export function CalendarScreen({ timezone }: { timezone: string }) {
         open={selected !== null}
         onClose={() => setSelected(null)}
         title={selected?.title ?? ""}
+        description={
+          selected ? range(selected.start, selected.end, timezone) : undefined
+        }
         footer={
           selected ? (
             <>
-              <Button
-                variant="danger"
-                size="sm"
-                onClick={() => void remove(selected.id)}
-              >
-                Apagar
-              </Button>
-              <Button variant="quiet" size="sm" onClick={() => setSelected(null)}>
+              <Button variant="ghost" onClick={() => setSelected(null)}>
                 Fechar
+              </Button>
+              <Button variant="danger" onClick={() => void remove(selected.id)}>
+                Apagar
               </Button>
             </>
           ) : null
@@ -211,27 +292,29 @@ export function CalendarScreen({ timezone }: { timezone: string }) {
       >
         {selected ? (
           <div className="space-y-4">
-            <p className="text-xs text-[var(--muted)]">
-              {range(selected.start, selected.end, timezone)}
-            </p>
-
-            {selected.location ? (
-              <p className="text-xs text-[var(--muted)]">📍 {selected.location}</p>
-            ) : null}
-
-            {selected.created_by_age ? (
-              <Badge tone="accent">✦ criado pelo Age</Badge>
+            {selected.location || selected.created_by_age ? (
+              <div className="flex flex-wrap items-center gap-2">
+                {selected.location ? (
+                  <span className="text-xs text-muted">{selected.location}</span>
+                ) : null}
+                {selected.created_by_age ? (
+                  <Badge tone="brand">
+                    <IconSparkle className="h-2.5 w-2.5" />
+                    criado pelo Age
+                  </Badge>
+                ) : null}
+              </div>
             ) : null}
 
             {/* O cadeado de §8.1. Fica num `<Select>` em vez de num
                 ícone de duas posições porque são TRÊS estados (§5.6), e
                 um cadeado aberto/fechado não representa o meio. */}
-            <div className="space-y-1.5">
+            <div className="rounded-xl bg-surface-2 p-4">
               <label
                 htmlFor="flex"
-                className="block text-xs font-medium text-[var(--text)]"
+                className="flex items-center gap-2 text-sm font-medium"
               >
-                🔒 O Age pode mover este evento?
+                <IconLock className="h-4 w-4 text-muted" />O Age pode mover este evento?
               </label>
               <Select
                 id="flex"
@@ -239,6 +322,7 @@ export function CalendarScreen({ timezone }: { timezone: string }) {
                 onChange={(e) =>
                   void setFlexibility(selected.id, e.target.value as Flexibility)
                 }
+                className="mt-2.5"
               >
                 {(Object.keys(FLEX_LABEL) as Flexibility[]).map((value) => (
                   <option key={value} value={value}>
@@ -246,7 +330,7 @@ export function CalendarScreen({ timezone }: { timezone: string }) {
                   </option>
                 ))}
               </Select>
-              <p className="text-[11px] leading-relaxed text-[var(--muted)]">
+              <p className="mt-2.5 text-xs leading-relaxed text-muted">
                 A classificação automática tende para o rígido de propósito: mover algo
                 que não podia ser movido é pior que deixar de mover algo que podia.
               </p>
@@ -268,17 +352,18 @@ export function CalendarScreen({ timezone }: { timezone: string }) {
  */
 function Legend() {
   const items = [
-    { className: "age-ev age-ev-flexible", label: "flexível" },
-    { className: "age-ev age-ev-semi", label: "semi-flexível" },
-    { className: "age-ev age-ev-fixed", label: "fixo 🔒" },
-    { className: "age-ev age-ev-proposed age-hatch", label: "proposto" },
+    { className: "age-ev age-ev-flexible", label: "flexível", lock: false },
+    { className: "age-ev age-ev-semi", label: "semi-flexível", lock: false },
+    { className: "age-ev age-ev-fixed", label: "fixo", lock: true },
+    { className: "age-ev age-ev-proposed age-hatch", label: "proposto", lock: false },
   ];
   return (
-    <div className="age-timeline flex flex-wrap items-center gap-3 border-t border-[var(--border)] px-4 py-2 text-[11px] text-[var(--muted)]">
+    <div className="age-timeline flex flex-wrap items-center justify-center gap-x-4 gap-y-2 border-t border-line bg-surface px-4 py-2.5 text-xs text-muted md:px-6">
       {items.map((item) => (
         <span key={item.label} className="flex items-center gap-1.5">
-          <span aria-hidden className={`${item.className} h-3 w-5 rounded`} />
+          <span aria-hidden className={`${item.className} h-3 w-6 rounded`} />
           {item.label}
+          {item.lock ? <IconLock className="h-3 w-3" /> : null}
         </span>
       ))}
     </div>

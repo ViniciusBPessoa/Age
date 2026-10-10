@@ -18,6 +18,7 @@ import logging
 from datetime import UTC, date, datetime, timedelta
 from typing import Annotated, Literal
 from uuid import UUID
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, HTTPException, Query, status
 from pydantic import BaseModel, Field
@@ -31,6 +32,7 @@ from app.ports.tasks import (
     TaskError,
     TaskNotFound,
 )
+from app.services.calendar_access import load_policy
 from app.services.plan_store import build_plan_from_items
 from app.services.task_store import (
     LOCAL_TASKS,
@@ -196,9 +198,7 @@ def _user_facing_error(exc: Exception) -> str:
 # Listas
 # ---------------------------------------------------------------
 @router.get("/lists", response_model=list[TaskListOut])
-async def list_task_lists(
-    user: CurrentUser, db: DbSession
-) -> list[TaskListOut]:
+async def list_task_lists(user: CurrentUser, db: DbSession) -> list[TaskListOut]:
     provider = _provider(db, user.id)
     # Garante a lista nativa na primeira visita, não no registro: o
     # cadastro não deve falhar por causa de algo secundário.
@@ -215,9 +215,7 @@ async def list_task_lists(
     ]
 
 
-@router.post(
-    "/lists", response_model=TaskListOut, status_code=status.HTTP_201_CREATED
-)
+@router.post("/lists", response_model=TaskListOut, status_code=status.HTTP_201_CREATED)
 async def create_task_list(
     payload: Annotated[dict, Field()], user: CurrentUser, db: DbSession
 ) -> TaskListOut:
@@ -291,17 +289,13 @@ async def overview(
         overdue=[_to_out(e) for e in data.overdue],
         due_soon=[_to_out(e) for e in data.due_soon],
         without_due_count=len(data.without_due),
-        unscheduled_due_soon=[
-            _to_out(e) for e in data.unscheduled_due_soon
-        ],
+        unscheduled_due_soon=[_to_out(e) for e in data.unscheduled_due_soon],
         estimated_minutes_unscheduled=data.estimated_minutes_unscheduled,
         summary_text=describe_overview(data),
     )
 
 
-@router.post(
-    "", response_model=TaskOut, status_code=status.HTTP_201_CREATED
-)
+@router.post("", response_model=TaskOut, status_code=status.HTTP_201_CREATED)
 async def create_task(
     payload: TaskCreateIn, user: CurrentUser, db: DbSession
 ) -> TaskOut:
@@ -322,9 +316,7 @@ async def create_task(
                 notes=payload.notes,
                 due_date=payload.due_date,
                 due_at=payload.due_at,
-                priority=(
-                    Priority(payload.priority) if payload.priority else None
-                ),
+                priority=(Priority(payload.priority) if payload.priority else None),
                 labels=tuple(payload.labels),
                 estimated=(
                     timedelta(minutes=payload.estimated_min)
@@ -409,9 +401,7 @@ async def patch_task(
 
 
 @router.post("/{task_id}/complete", response_model=dict)
-async def complete_task(
-    task_id: str, user: CurrentUser, db: DbSession
-) -> dict:
+async def complete_task(task_id: str, user: CurrentUser, db: DbSession) -> dict:
     """Conclui, e propõe concluir o par ligado (§5.7.1, razão 2).
 
     Não conclui o outro lado automaticamente: o vínculo é informado, e
@@ -429,34 +419,23 @@ async def complete_task(
             detail="Essa tarefa não existe.",
         ) from exc
 
-    linked = await counterpart_of_task(
-        db, user.id, LOCAL_TASKS, task_id
-    )
+    linked = await counterpart_of_task(db, user.id, LOCAL_TASKS, task_id)
 
     message = f"'{done.title}' marcada como feita."
     if linked:
-        message += (
-            " Ela tem tempo reservado na agenda — quer que eu libere "
-            "o bloco?"
-        )
+        message += " Ela tem tempo reservado na agenda — quer que eu libere o bloco?"
 
     return {
         "id": done.id,
         "status": done.status.value,
-        "completed_at": (
-            done.completed_at.isoformat() if done.completed_at else None
-        ),
-        "linked_events": [
-            {"kind": kind, "id": ref} for kind, ref in linked
-        ],
+        "completed_at": (done.completed_at.isoformat() if done.completed_at else None),
+        "linked_events": [{"kind": kind, "id": ref} for kind, ref in linked],
         "message": message,
     }
 
 
 @router.post("/{task_id}/reopen", response_model=dict)
-async def reopen_task(
-    task_id: str, user: CurrentUser, db: DbSession
-) -> dict:
+async def reopen_task(task_id: str, user: CurrentUser, db: DbSession) -> dict:
     provider = _provider(db, user.id)
     try:
         current = await provider.get_task(task_id)
@@ -470,9 +449,7 @@ async def reopen_task(
 
 
 @router.delete("/{task_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_task(
-    task_id: str, user: CurrentUser, db: DbSession
-) -> None:
+async def delete_task(task_id: str, user: CurrentUser, db: DbSession) -> None:
     provider = _provider(db, user.id)
     try:
         current = await provider.get_task(task_id)
@@ -483,9 +460,7 @@ async def delete_task(
 
 
 @router.post("/reorder", status_code=status.HTTP_204_NO_CONTENT)
-async def reorder(
-    payload: ReorderIn, user: CurrentUser, db: DbSession
-) -> None:
+async def reorder(payload: ReorderIn, user: CurrentUser, db: DbSession) -> None:
     """Reordena a lista (§5.7.3).
 
     Só as tarefas citadas mudam de posição; as outras preservam a ordem
@@ -493,9 +468,7 @@ async def reorder(
     restantes.
     """
     try:
-        await _provider(db, user.id).reorder(
-            payload.list_id, payload.ordered_ids
-        )
+        await _provider(db, user.id).reorder(payload.list_id, payload.ordered_ids)
     except TaskError as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -570,6 +543,13 @@ async def schedule_task(
     minutes = int((body.end - body.start).total_seconds() // 60)
     reason = f"você pediu para reservar {minutes}min para esta tarefa"
 
+    # O motivo do item de tarefa cita um horário, e horário citado para
+    # uma pessoa vai no fuso dela (§9.5). Sem isto o texto saía em UTC,
+    # e um bloco das 21:15 aparecia como "00:15" do dia seguinte — a
+    # pessoa leria que o Age marcou madrugada.
+    policy = await load_policy(db, user.id)
+    local_start = body.start.astimezone(ZoneInfo(policy.timezone))
+
     # Os dois itens do par, no formato que `_build_item` consome. O
     # `links` cruzado é o que faz a revisão tratá-los como unidade e o
     # executor revertê-los junto (§5.7.1).
@@ -592,7 +572,9 @@ async def schedule_task(
             "id": task_draft_id,
             "op": "UPDATE",
             "target": "task",
-            "reason": f"aponta para o bloco reservado em {body.start.isoformat()}",
+            "reason": (
+                f"aponta para o bloco reservado em {local_start:%d/%m às %H:%M}"
+            ),
             "links": [event_draft_id],
             "payload": {"task_id": task_id, "due_at": body.start.isoformat()},
         },
@@ -667,23 +649,15 @@ async def internal_overview(
                     "ref_kind": e.ref_kind,
                     "title": e.task.title,
                     "due_date": (
-                        e.task.due_date.isoformat()
-                        if e.task.due_date
-                        else None
+                        e.task.due_date.isoformat() if e.task.due_date else None
                     ),
-                    "due_at": (
-                        e.task.due_at.isoformat() if e.task.due_at else None
-                    ),
+                    "due_at": (e.task.due_at.isoformat() if e.task.due_at else None),
                     "estimated_min": e.task.estimated_min,
-                    "priority": (
-                        e.task.priority.value if e.task.priority else None
-                    ),
+                    "priority": (e.task.priority.value if e.task.priority else None),
                 }
                 for e in data.unscheduled_due_soon
             ],
-            "estimated_minutes_unscheduled": (
-                data.estimated_minutes_unscheduled
-            ),
+            "estimated_minutes_unscheduled": (data.estimated_minutes_unscheduled),
             "summary_text": describe_overview(data),
         }
 
@@ -707,17 +681,11 @@ async def internal_list(
                     "title": e.task.title,
                     "status": e.task.status.value,
                     "due_date": (
-                        e.task.due_date.isoformat()
-                        if e.task.due_date
-                        else None
+                        e.task.due_date.isoformat() if e.task.due_date else None
                     ),
-                    "due_at": (
-                        e.task.due_at.isoformat() if e.task.due_at else None
-                    ),
+                    "due_at": (e.task.due_at.isoformat() if e.task.due_at else None),
                     "estimated_min": e.task.estimated_min,
-                    "priority": (
-                        e.task.priority.value if e.task.priority else None
-                    ),
+                    "priority": (e.task.priority.value if e.task.priority else None),
                     "labels": list(e.task.labels),
                     "has_reserved_time": e.has_reserved_time,
                     "reserved_minutes": e.reserved_minutes,
