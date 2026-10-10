@@ -29,7 +29,11 @@ from app.core.deps import CurrentUser, DbSession
 from app.core.redis import get_arq, get_redis, turn_cancel_key, turn_stream_key
 from app.core.security import create_service_token
 from app.models import Conversation, Message
-from app.services.turn_sync import apply_title_suggestion, drain_turn_outputs
+from app.services.turn_sync import (
+    apply_pending_titles,
+    apply_title_suggestion,
+    drain_turn_outputs,
+)
 
 log = logging.getLogger("core-api.conversations")
 router = APIRouter(tags=["conversations"])
@@ -125,6 +129,10 @@ async def list_conversations(
     # escrever em `core` (§2.3.2). Drenar na leitura garante que a
     # sidebar nunca mostre contagem defasada.
     await drain_turn_outputs(db, user.id)
+    # Pelo mesmo motivo, o titulo sugerido precisa ser aplicado aqui: a
+    # versao por conversa so roda ao abrir uma, e quem acabou de mandar
+    # a primeira mensagem esta olhando justamente para a lista.
+    await apply_pending_titles(db, user.id)
 
     stmt = select(Conversation).where(Conversation.user_id == user.id)
 

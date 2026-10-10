@@ -142,6 +142,46 @@ async def drain_turn_outputs(
     return copied
 
 
+async def apply_pending_titles(db: AsyncSession, user_id: UUID) -> int:
+    """Aplica TODAS as sugestoes de titulo pendentes do usuario.
+
+    A versao por conversa so roda quando aquela conversa e aberta, e a
+    barra lateral mostra a lista. Sem isto, quem manda a primeira
+    mensagem ve "Sem titulo" ali ate sair e voltar na conversa - o
+    titulo ja existia, faltava ser aplicado.
+
+    Um UPDATE unico em vez de um por linha: a lista e o caminho mais
+    quente da interface.
+    """
+    result = await db.execute(
+        text(
+            """
+            WITH pending AS (
+                SELECT conversation_id, title
+                FROM ai.title_suggestions
+                WHERE user_id = :uid AND applied = false
+            ),
+            updated AS (
+                UPDATE core.conversations c
+                SET title = p.title, updated_at = now()
+                FROM pending p
+                WHERE c.id = p.conversation_id
+                  AND c.title IS NULL
+                  AND c.title_is_auto = true
+                RETURNING c.id
+            )
+            UPDATE ai.title_suggestions s
+            SET applied = true
+            FROM updated u
+            WHERE s.conversation_id = u.id AND s.user_id = :uid
+            RETURNING s.conversation_id
+            """
+        ),
+        {"uid": str(user_id)},
+    )
+    return len(result.fetchall())
+
+
 async def apply_title_suggestion(
     db: AsyncSession, user_id: UUID, conversation_id: UUID
 ) -> str | None:

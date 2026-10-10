@@ -174,6 +174,34 @@ else
   bad "resposta do modelo não chegou a core.messages"
 fi
 
+# Conversa SEPARADA para o título: tanto `GET /conversations/{id}`
+# quanto `GET .../messages` aplicam a sugestão como efeito colateral, e
+# a conversa `$CV` já passou pelos dois acima. Checar nela mediria o
+# efeito colateral, não a listagem.
+#
+# O caso real é quem manda a primeira mensagem e FICA na tela: a
+# sidebar lê a lista e mostrava "Sem título" até recarregar.
+CVT=$(curl -s -X POST "$API/conversations" "${AUTH[@]}" \
+  -H 'Content-Type: application/json' -d '{}' | jget "['id']")
+curl -s -o /dev/null -X POST "$API/conversations/$CVT/messages" "${AUTH[@]}" \
+  -H 'Content-Type: application/json' \
+  -d '{"content":"organizar a semana de provas"}'
+
+# O job de título tem `_defer_by=3`; espera por ele sem fixar um sleep.
+LIST_TITLE=""
+for _ in $(seq 1 12); do
+  sleep 2
+  LIST_TITLE=$(curl -s "$API/conversations" "${AUTH[@]}" \
+    | python -c "import json,sys; d=json.load(sys.stdin); print(next((c['title'] or '' for c in d['items'] if c['id']=='$CVT'), ''))" 2>/dev/null)
+  [ -n "$LIST_TITLE" ] && [ "$LIST_TITLE" != "None" ] && break
+done
+
+if [ -n "$LIST_TITLE" ] && [ "$LIST_TITLE" != "None" ]; then
+  ok "título aparece na listagem, sem abrir a conversa"
+else
+  bad "título só materializa ao abrir a conversa (sidebar fica vazia)"
+fi
+
 TITLE=$(curl -s "$API/conversations/$CV" "${AUTH[@]}" | jget "['title']")
 if [ -n "$TITLE" ] && [ "$TITLE" != "None" ]; then
   ok "título gerado automaticamente (§6.2.2)"

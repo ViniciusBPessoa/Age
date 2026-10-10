@@ -684,6 +684,51 @@ pegaria:
       em `plan_diff.py` já formatava certo; foi esta rota, escrita
       depois, que saiu crua
 
+### O 503 de quem abre rápido demais
+
+- [x] `.\age.ps1 up` devolvia o controle e imprimia a URL assim que o
+      core-api ficava healthy, mas em dev o Next ainda compila a rota
+      sob demanda. Abrir `localhost:3000` nessa janela dava
+      `ApiCallError: upstream_unavailable` em tela cheia — parece
+      defeito grave e é só pressa. Novo `Wait-Web`, análogo ao
+      `Wait-CoreApi`: o `up` só termina quando o web responde
+
+### O título que nunca aparecia
+
+Visto ao rodar o app, não ao ler o código: manda a primeira mensagem e
+a conversa fica **"Sem título"** na sidebar até navegar para outra tela.
+O título existia — o job do worker gerava e gravava a sugestão. Eram
+três defeitos empilhados, e os dois primeiros se escondiam atrás do
+terceiro:
+
+- [x] **A listagem nunca aplicava a sugestão.** O worker só escreve em
+      `ai.title_suggestions` (ele tem SELECT em `core`, §2.3.2); quem
+      aplica é o core-api, e só fazia isso em `GET /conversations/{id}`
+      e `GET .../messages` — nunca em `GET /conversations`, que é o que
+      a sidebar lê. Novo `apply_pending_titles()`, um UPDATE só.
+      O papel `core_api` tem UPDATE **apenas na coluna `applied`** —
+      privilégio por coluna, deliberado: ele marca como aplicada, não
+      reescreve o título que o worker sugeriu
+- [x] **O cliente buscava a lista cedo demais.** O job tem
+      `_defer_by=3`, então no `done` do turno o título ainda não
+      existe, e a invalidação dali trazia a conversa sem ele — sem
+      nunca mais buscar. Agora a condição vive na query:
+      `refetchInterval` que volta a buscar enquanto houver conversa sem
+      título e para sozinho quando todas têm. Na query, e não num
+      `setTimeout` após o `done`, porque assim vale para qualquer
+      conversa sem título, não só para a recém-criada
+- [x] **O smoke media o efeito colateral, não o comportamento.** A
+      checagem de título usava `GET /conversations/{id}` — a rota que
+      aplica a sugestão — e passava mesmo com a listagem quebrada.
+      Agora usa conversa própria e consulta só a listagem; verificado
+      reintroduzindo o bug (as duas primeiras versões do teste
+      passaram com o bug presente, e por isso foram refeitas)
+
+Uma hora perdida valeu a lição: o hot-reload do Next **não recarregou**
+as mudanças deste arquivo. O código estava certo na primeira tentativa;
+o container servia o build antigo. Ao depurar UI em dev, confirmar que
+houve recompilação antes de concluir que a correção não funciona.
+
 ### Adiado, de propósito
 - [ ] Arrastar evento na timeline — a prop existe em
       `<CalendarTimeline>`, mas ligar o drag a um `PATCH` criaria um
@@ -699,8 +744,8 @@ pegaria:
 
 ## Estado atual
 
-**Os sete marcos estão concluídos e validados**: 269 verificações de
-smoke contra containers reais (22 + 34 + 27 + 30 + 38 + 56 + 73), 240
+**Os sete marcos estão concluídos e validados**: 281 verificações de
+smoke contra containers reais (22 + 35 + 27 + 30 + 38 + 56 + 73), 240
 testes no backend e 100 no front, lint limpo nos três serviços,
 `tsc --noEmit` e `prettier --check` sem erros, e `next build` passando.
 

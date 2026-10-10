@@ -88,6 +88,21 @@ export function ChatScreen({
   const conversations = useQuery({
     queryKey: ["conversations"],
     queryFn: () => api.get<ConversationPage>("/conversations", { limit: 50 }),
+    // O título é gerado por um job assíncrono com `_defer_by=3`
+    // (§6.2.2): no `done` do turno ele ainda não existe, e a
+    // invalidação feita ali traz a conversa sem ele — depois nada mais
+    // busca, e a sidebar fica "Sem título" até trocar de tela.
+    //
+    // A condição vive na query, e não num `setTimeout` após o `done`,
+    // porque aqui ela vale para qualquer conversa sem título, não só
+    // para a que acabou de ser criada: enquanto houver alguma, a lista
+    // volta a buscar; quando todas têm, o polling para sozinho.
+    refetchInterval: (query) =>
+      query.state.data?.items.some((c) => c.title === null) ? 4000 : false,
+    // Sem isto o polling pausa quando a janela perde o foco, e é
+    // justamente aí que o título costuma chegar: a pessoa manda a
+    // mensagem e troca de aba enquanto espera.
+    refetchIntervalInBackground: true,
   });
 
   const messages = useQuery({

@@ -73,6 +73,29 @@ function Wait-CoreApi {
     throw "core-api não ficou pronto em ${TimeoutSeconds}s. Veja: .\age.ps1 logs"
 }
 
+function Wait-Web {
+    # O `depends_on` espera o core-api ficar healthy, mas em dev o
+    # Next ainda compila a rota sob demanda depois disso. Abrir a
+    # página nessa janela dá 503 em tela cheia
+    # ("upstream_unavailable"), que parece defeito e é só pressa.
+    # Então o `up` só devolve o controle quando o web responde.
+    param([int]$TimeoutSeconds = 180)
+    Write-Host "aguardando web compilar…" -NoNewline
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    while ((Get-Date) -lt $deadline) {
+        try {
+            $r = Invoke-WebRequest -Uri "http://localhost:3000/login" -UseBasicParsing -TimeoutSec 20 -ErrorAction Stop
+            if ($r.StatusCode -ge 200 -and $r.StatusCode -lt 400) {
+                Write-Host " ok"; return
+            }
+        } catch {}
+        Write-Host "." -NoNewline
+        Start-Sleep -Seconds 3
+    }
+    Write-Host ""
+    Write-Host "web não respondeu em ${TimeoutSeconds}s — veja os logs" -ForegroundColor Yellow
+}
+
 switch ($Command.ToLower()) {
 
     "help" {
@@ -127,6 +150,7 @@ switch ($Command.ToLower()) {
         Invoke-Compose -ComposeArgs @("up", "-d", "--build")
         Wait-CoreApi
         & $PSCommandPath migrate
+        Wait-Web
         Write-Host ""
         Write-Host "  web       http://localhost:3000" -ForegroundColor Green
         Write-Host "  core-api  http://localhost:8000/docs" -ForegroundColor Green
