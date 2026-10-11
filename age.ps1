@@ -29,7 +29,30 @@ function Invoke-Compose {
     # `$Args` é variável automática do PowerShell: usar esse nome como
     # parâmetro faz o splat chegar vazio no binário. Daí `ComposeArgs`.
     param([string[]]$ComposeArgs)
-    & docker @Compose @ComposeArgs
+    # `Continue` durante a chamada: o compose (e o alembic por baixo
+    # dele) escrevem progresso normal em stderr, e com o `Stop` do
+    # script o PowerShell promoveria isso a exceção mesmo com exit 0.
+    # Quem decide o sucesso é o exit code, conferido logo abaixo.
+    $anterior = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        # `2>&1 | Out-String` em vez de deixar o stderr solto: o
+        # PowerShell o pinta de vermelho com um bloco de NativeCommand-
+        # Error por linha, o que faz progresso normal do alembic e do
+        # compose parecer falha. Aqui vira texto comum, e o veredito
+        # continua sendo o exit code.
+        & docker @Compose @ComposeArgs 2>&1 | ForEach-Object {
+            # `$_.Exception.Message` e não `$_.ToString()`: num
+            # ErrorRecord vindo de stderr nativo o ToString() às vezes
+            # devolve o nome da classe em vez da linha original. Sem
+            # operador ternário, que não existe no PowerShell 5.1.
+            if ($_ -is [System.Management.Automation.ErrorRecord]) {
+                Write-Host $_.Exception.Message
+            }
+            else { Write-Host $_ }
+        }
+    }
+    finally { $ErrorActionPreference = $anterior }
     if ($LASTEXITCODE -ne 0) { throw "docker compose falhou (exit $LASTEXITCODE)" }
 }
 
@@ -105,6 +128,7 @@ switch ($Command.ToLower()) {
         $rows = @(
             @("env", "gera .env com segredos aleatórios"),
             @("up", "sobe os serviços e aplica as migrations"),
+            @("rebuild", "reconstrói as imagens do zero e sobe"),
             @("down", "para os serviços (mantém os dados)"),
             @("ps", "estado dos containers"),
             @("logs", "segue os logs dos três serviços"),
@@ -147,7 +171,30 @@ switch ($Command.ToLower()) {
 
     "up" {
         Assert-Env
-        Invoke-Compose -ComposeArgs @("up", "-d", "--build")
+        # O build resolve `python:3.12-slim` e `node:22-alpine` no
+        # registry para conferir se há versão nova. Com a internet
+        # oscilando isso estoura em 60s e derruba o `up` inteiro —
+        # mesmo com as imagens já construídas aqui. Nesse caso sobe com
+        # o que existe: é dev, e a alternativa é não trabalhar.
+        try {
+            Invoke-Compose -ComposeArgs @("up", "-d", "--build")
+        }
+        catch {
+            $locais = & docker images --format "{{.Repository}}" |
+                Where-Object { $_ -like "age-*" } |
+                Select-Object -Unique
+            if ($locais.Count -lt 4) {
+                Write-Host ""
+                Write-Host "O build falhou e nao ha imagens locais para usar." -ForegroundColor Red
+                Write-Host "Parece rede: confira a conexao e rode de novo." -ForegroundColor Yellow
+                throw
+            }
+            Write-Host ""
+            Write-Host "Build falhou (provavelmente rede). Subindo com as imagens ja construidas." -ForegroundColor Yellow
+            Write-Host "Para reconstruir depois: .\age.ps1 rebuild" -ForegroundColor Yellow
+            Write-Host ""
+            Invoke-Compose -ComposeArgs @("up", "-d", "--no-build")
+        }
         Wait-CoreApi
         & $PSCommandPath migrate
         Wait-Web
@@ -158,6 +205,21 @@ switch ($Command.ToLower()) {
     }
 
     "down" { Assert-Env; Invoke-Compose -ComposeArgs @("down") }
+
+    "rebuild" {
+        # Reconstrói de fato, consultando o registry. Use depois de um
+        # `up` que caiu no modo offline, ou ao mudar dependência.
+        Assert-Env
+        Invoke-Compose -ComposeArgs @("build", "--pull")
+        Invoke-Compose -ComposeArgs @("up", "-d")
+        Wait-CoreApi
+        & $PSCommandPath migrate
+        Wait-Web
+        Write-Host ""
+        Write-Host "  web       http://localhost:3000" -ForegroundColor Green
+        Write-Host "  core-api  http://localhost:8000/docs" -ForegroundColor Green
+        Write-Host ""
+    }
     "ps" { Assert-Env; Invoke-Compose -ComposeArgs @("ps") }
 
     "logs" {

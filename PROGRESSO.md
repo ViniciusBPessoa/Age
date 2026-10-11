@@ -742,6 +742,28 @@ Lição que já era para ter sido aprendida na semana: **toda correção de
 caminho de erro precisa ser verificada reintroduzindo o bug.** Duas
 vezes seguidas escrevi um teste que passava com o defeito no lugar.
 
+### Subir sem internet
+
+- [x] `.ge.ps1 up` morria inteiro quando o Docker não alcançava o
+      registry: o build resolve `python:3.12-slim` e `node:22-alpine`
+      só para conferir se há versão nova, e isso estoura em 60s com a
+      conexão oscilando — mesmo com as quatro imagens já construídas
+      na máquina. Agora o `up` cai para `--no-build` e sobe com o que
+      existe, avisando. Se não houver imagem local, aí sim falha e diz
+      que é rede
+- [x] Novo `.ge.ps1 rebuild`, que reconstrói de verdade
+      (`build --pull`) depois de um `up` offline ou ao mudar
+      dependência
+- [x] `Invoke-Compose` promovia stderr a exceção: o compose e o
+      alembic escrevem progresso normal ali, então `migrate` morria
+      com `NativeCommandError` apesar do exit 0. Agora o veredito é só
+      o exit code, e o stderr vira texto comum em vez de bloco
+      vermelho
+
+Verificado nos dois sentidos, com um proxy morto em `127.0.0.1:9` para
+simular a queda: offline o `up` completa pelo fallback, online
+constrói normal.
+
 ### O título que nunca aparecia
 
 Visto ao rodar o app, não ao ler o código: manda a primeira mensagem e
