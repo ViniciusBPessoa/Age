@@ -82,6 +82,24 @@ else
   bad "/chat sem sessão foi para '$APP'"
 fi
 
+# REFRESH sem ACCESS — quem volta no dia seguinte: o access expira em
+# 15 min, o refresh continua no navegador. É o único caso em que o
+# layout passa do `hasSessionCookie()` (que aceita os dois) e chega ao
+# `apiGet` sem credencial.
+#
+# Os dois testes acima NÃO cobrem isto: sem cookie algum, o layout
+# corta antes; com access inválido, o core-api responde 401 e o fluxo
+# de `Unauthenticated` segue normal. Só aqui o `authHeaders()` lança
+# ANTES do fetch — e foi assim que uma retentativa que engolia essa
+# exceção produziu três erros de tela cheia no lugar do redirect.
+VENCIDA=$(curl -s -o /dev/null -w '%{http_code}' \
+  -H 'Cookie: age_refresh=sessao-de-ontem' "$WEB/chat")
+if [[ "$VENCIDA" == "307" || "$VENCIDA" == "302" ]]; then
+  ok "/chat com refresh sem access redireciona (não dá 500)"
+else
+  bad "/chat com refresh sem access respondeu HTTP $VENCIDA"
+fi
+
 # ---------------------------------------------------------------
 head_ "2. §4.1.1 — a credencial não chega ao browser"
 

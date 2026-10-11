@@ -96,12 +96,16 @@ export async function apiGet<T>(
   const ESPERAS = [150, 400];
   let res: Response | undefined;
 
+  // FORA do try, e isto importa: `authHeaders()` lança `Unauthenticated`
+  // quando não há cookie, que não é falha de rede — é o sinal de "manda
+  // para o login". Dentro do laço ele era engolido pelo catch, repetido
+  // três vezes (um cookie não aparece em 400ms) e convertido num 503 de
+  // tela cheia, no lugar do redirect.
+  const headers = await authHeaders();
+
   for (let tentativa = 0; tentativa <= ESPERAS.length; tentativa++) {
     try {
-      res = await fetch(url, {
-        headers: await authHeaders(),
-        cache: "no-store",
-      });
+      res = await fetch(url, { headers, cache: "no-store" });
       break;
     } catch (cause) {
       // O `catch` sem binding escondia a causa: toda falha de rede

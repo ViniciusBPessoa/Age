@@ -717,6 +717,31 @@ paralelo passaram sem falhar. Por isso a retentativa, e não uma
 correção pontual — e por isso o log, que da próxima vez entrega o
 diagnóstico pronto em vez de mais um palpite.
 
+**E a retentativa trouxe um bug pior que o original.** No dia seguinte
+o usuário abriu o app e levou TRÊS erros de tela cheia. O log — que
+agora existia — deu o nome: `Unauthenticated: sem sessão`.
+
+- [x] `await authHeaders()` estava DENTRO do `try`. Ele lança
+      `Unauthenticated` quando não há access token, o que não é falha
+      de rede: é o sinal de "manda para o login". O catch engolia,
+      repetia três vezes (um cookie não aparece em 400ms) e convertia
+      num 503. Antes da retentativa isso subia direto e o layout
+      redirecionava. Agora `authHeaders()` roda ANTES do laço
+- [x] O gatilho é **refresh presente, access ausente** — quem volta no
+      dia seguinte: o access expira em 15 min, o refresh fica. É o
+      único caso em que o layout passa do `hasSessionCookie()` (que
+      aceita os dois) e chega ao `apiGet` sem credencial
+- [x] `smoke-ui.sh` já testava "/chat sem sessão", e passava: sem
+      cookie algum o layout corta antes de falar com o core-api. Com
+      access inválido também passa, porque aí o core-api responde 401
+      e o fluxo segue normal. Novo teste com refresh-sem-access —
+      a primeira versão dele, com access inválido, passava com o bug
+      presente e foi refeita
+
+Lição que já era para ter sido aprendida na semana: **toda correção de
+caminho de erro precisa ser verificada reintroduzindo o bug.** Duas
+vezes seguidas escrevi um teste que passava com o defeito no lugar.
+
 ### O título que nunca aparecia
 
 Visto ao rodar o app, não ao ler o código: manda a primeira mensagem e
@@ -768,8 +793,8 @@ houve recompilação antes de concluir que a correção não funciona.
 
 ## Estado atual
 
-**Os sete marcos estão concluídos e validados**: 281 verificações de
-smoke contra containers reais (22 + 35 + 27 + 30 + 38 + 56 + 73), 240
+**Os sete marcos estão concluídos e validados**: 282 verificações de
+smoke contra containers reais (22 + 35 + 27 + 30 + 38 + 56 + 74), 240
 testes no backend e 100 no front, lint limpo nos três serviços,
 `tsc --noEmit` e `prettier --check` sem erros, e `next build` passando.
 
