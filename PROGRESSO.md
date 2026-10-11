@@ -764,27 +764,25 @@ Verificado nos dois sentidos, com um proxy morto em `127.0.0.1:9` para
 simular a queda: offline o `up` completa pelo fallback, online
 constrói normal.
 
-### A paleta genérica, e o login que parecia cadastro
+### A crítica à interface: o que mudou e o que voltou atrás
 
 Retorno do usuário: a interface melhorou muito, mas a paleta estava
 "genérica". Procede — e o diagnóstico tem nome.
 
-- [x] **Cinzas quentes no lugar dos azulados.** `#0a0b0f` e `#98a0b0`
-      são o cinza-azulado que todo framework entrega de fábrica. Agora
-      todo neutro tem undertone marrom/oliva, como Claude e Notion
-      fazem, e o conjunto ganha identidade sem nenhuma cor berrante
-- [x] **Acento terracota (`#e08654` / `#b05530`) no lugar do índigo.**
-      Azul em produto de agenda desaparece: é a cor de link, de
-      seleção, de todo botão primário já visto. E libera o azul para
-      significar "flexível" na agenda (§5.6) — na timeline, o bloco
-      azul agora salta justamente por ser a única cor fria
-- [x] Contrastes remedidos e anotados no `globals.css`. Dois valores
-      do tema claro foram ajustados por reprovarem: `--faint` em
-      2.9:1 e branco sobre a marca em 4.35:1
-- [x] Aurora, sombra da marca e o `pulse` do streaming seguiam em
-      azul, puxando a tela de volta para o frio
-- [x] "3h reservadas" era `text-brand`: com o terracota, o que já está
-      resolvido competia por atenção com os botões de ação. Virou `ok`
+Primeira tentativa: troquei a paleta inteira para neutros quentes com
+acento terracota. **Revertido a pedido** — a mudança foi grande demais
+para o que se pediu, e o azul estava bom. Fica o registro de que o
+problema apontado não era a cor em si, e sim a tela ser seca:
+
+- [x] Cabeçalho de Estudo dizia só "Estudo". Agora resume a situação:
+      "2 assuntos · 1 de 11 sessões feitas · Calculo II em 9 dias" —
+      a pergunta que alguém faz ao abrir a tela
+- [x] "Como foi?" perguntava sem dizer por quê. Agora explica que
+      marcar recalibra a estimativa das próximas sessões (§5.9.8), que
+      é o que convence alguém a responder
+- [x] Numa rotina pausada, "0/12 nas últimas 4 semanas" lia como
+      cobrança. O zero ali é consequência, não falha, e agora a linha
+      diz "· pausada"
 
 **O login parecia tela de cadastro**, e a rota estava certa — a raiz
 sempre mandou para `/login`. O problema era hierarquia: o layout de

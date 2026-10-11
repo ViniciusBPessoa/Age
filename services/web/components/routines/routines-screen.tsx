@@ -200,7 +200,14 @@ function RoutineCard({
                     /{adherence.data.planned}
                   </span>
                 </span>
-                <p className="mt-1 text-2xs text-muted">nas últimas 4 semanas</p>
+                {/* Numa rotina pausada o zero não é falha, é
+                    consequência — e sem dizer isso a tela parece estar
+                    cobrando algo que ela mesma suspendeu. */}
+                <p className="mt-1 text-2xs text-muted">
+                  {paused && adherence.data.done === 0
+                    ? "nas últimas 4 semanas · pausada"
+                    : "nas últimas 4 semanas"}
+                </p>
               </div>
 
               {/* `moved` separado de `skipped` de propósito: adaptar

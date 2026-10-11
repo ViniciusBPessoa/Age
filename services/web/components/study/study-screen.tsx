@@ -37,8 +37,42 @@ import {
   cx,
 } from "@/components/ui";
 import { api } from "@/lib/api-client";
-import { dateOf, duration, percent, range } from "@/lib/format";
+import { dateOf, daysUntil, duration, percent, range } from "@/lib/format";
 import type { PendingSession, Subject, SubjectProgress } from "@/lib/types";
+
+/**
+ * O que o cabeçalho diz além do nome da tela.
+ *
+ * "Estudo" sozinho não informa nada, e era o que estava ali: as outras
+ * telas dizem "5 abertas", esta não dizia nada. O que importa aqui é
+ * quanto falta e qual prova vem primeiro — a pergunta que alguém faz
+ * ao abrir a tela.
+ */
+function resumoDosAssuntos(
+  subjects: Subject[] | undefined,
+  timezone: string,
+): string | undefined {
+  if (!subjects || subjects.length === 0) return undefined;
+
+  const feitas = subjects.reduce((n, s) => n + s.sessions_done, 0);
+  const total = subjects.reduce((n, s) => n + s.sessions_planned, 0);
+  const partes = [
+    `${subjects.length} ${subjects.length === 1 ? "assunto" : "assuntos"}`,
+  ];
+  if (total > 0) partes.push(`${feitas} de ${total} sessões feitas`);
+
+  // A prova mais próxima ainda por vir. Passada não serve de alerta.
+  const proxima = subjects
+    .filter((s) => s.deadline && daysUntil(s.deadline, timezone) >= 0)
+    .sort((a, b) => (a.deadline! < b.deadline! ? -1 : 1))[0];
+  if (proxima?.deadline) {
+    const dias = daysUntil(proxima.deadline, timezone);
+    const quando = dias === 0 ? "hoje" : dias === 1 ? "amanhã" : `em ${dias} dias`;
+    partes.push(`${proxima.name} ${quando}`);
+  }
+
+  return partes.join(" · ");
+}
 
 export function StudyScreen({ timezone }: { timezone: string }) {
   const queryClient = useQueryClient();
@@ -69,6 +103,7 @@ export function StudyScreen({ timezone }: { timezone: string }) {
     <div className="min-h-dvh pb-16 md:pb-0">
       <PageHeader
         title="Estudo"
+        subtitle={resumoDosAssuntos(subjects.data, timezone)}
         action={
           pending.data && pending.data.length > 0 ? (
             <Badge tone="warn">{pending.data.length} sem marcar</Badge>
@@ -83,7 +118,13 @@ export function StudyScreen({ timezone }: { timezone: string }) {
             nunca, e aí a recalibração de §5.9.8 perde o insumo. */}
         {pending.data && pending.data.length > 0 ? (
           <section>
-            <h2 className="eyebrow px-1 pb-2">Como foi?</h2>
+            {/* A pergunta sozinha não diz por que está sendo feita, e
+                o motivo é o que convence alguém a responder: sem a
+                marcação, a estimativa não se recalibra (§5.9.8). */}
+            <h2 className="eyebrow px-1 pb-1">Como foi?</h2>
+            <p className="px-1 pb-2.5 text-xs text-muted">
+              Marcar ajusta a estimativa das próximas sessões.
+            </p>
             <ul className="space-y-2">
               {pending.data.map((session) => (
                 <li
