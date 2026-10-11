@@ -201,13 +201,23 @@ export const Select = forwardRef<
   SelectHTMLAttributes<HTMLSelectElement> & { bare?: boolean }
 >(function Select({ className, bare, children, ...rest }, ref) {
   return (
-    <span className={cx("relative inline-flex items-center", bare && "shrink-0")}>
+    <span
+      className={cx(
+        "relative inline-flex items-center",
+        // `min-w-0` em vez de `shrink-0`: com `shrink-0` o seletor de
+        // provedor do chat ("Mock (testes) · mock-chat", 247px) não
+        // cedia espaço e vazava 10px da janela a 768px, criando barra
+        // de rolagem horizontal. A linha já tem `flex-wrap` — o que
+        // faltava era deixar o elemento encolher antes de quebrar.
+        bare && "min-w-0 max-w-full",
+      )}
+    >
       <select
         ref={ref}
         className={cx(
           "cursor-pointer appearance-none pr-8 outline-none transition-colors",
           bare
-            ? "rounded-lg bg-transparent py-1.5 pl-2.5 text-xs font-medium text-muted hover:bg-surface-3 hover:text-ink"
+            ? "min-w-0 max-w-full truncate rounded-lg bg-transparent py-1.5 pl-2.5 text-xs font-medium text-muted hover:bg-surface-3 hover:text-ink"
             : cx(FIELD_BASE, "h-10"),
           className,
         )}

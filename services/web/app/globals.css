@@ -212,6 +212,13 @@
   .aurora {
     position: relative;
     isolation: isolate;
+    /* O `::before` abaixo se estende -20% para cada lado, e sem recorte
+     * esse excedente conta como conteúdo: no chat ele empurrava o
+     * documento 157px além da janela e o navegador mostrava uma barra
+     * de rolagem horizontal — que, ao ser usada, revelava faixa vazia
+     * à direita. O brilho continua igual; o que passa da caixa é que
+     * para de ocupar espaço. */
+    overflow: hidden;
   }
   .aurora::before {
     content: "";

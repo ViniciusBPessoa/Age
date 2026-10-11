@@ -783,6 +783,20 @@ problema apontado não era a cor em si, e sim a tela ser seca:
 - [x] Numa rotina pausada, "0/12 nas últimas 4 semanas" lia como
       cobrança. O zero ali é consequência, não falha, e agora a linha
       diz "· pausada"
+- [x] **Barra de rolagem horizontal no chat.** A `.aurora` tem um
+      `::before` com `inset: -10% -20% auto` — 20% para cada lado — e
+      nada recortava o excedente: ele contava como conteúdo e
+      empurrava o documento 157px além da janela. `overflow: hidden`
+      na `.aurora` resolve sem mudar o brilho. Os três usos da classe
+      são containers de conteúdo centrado, nenhum com menu que
+      precise escapar da caixa
+- [x] O `<select>` do compositor tinha `shrink-0` e, com
+      "Mock (testes) · mock-chat" (247px), vazava 10px a 768px. A
+      linha já tinha `flex-wrap`; faltava deixar encolher antes de
+      quebrar (`min-w-0 max-w-full truncate`)
+- [x] Verificado em 30 combinações: 6 larguras (390 a 1920px) × 5
+      telas, todas com sobra 0px
+
 - [x] **`color-scheme` nunca foi declarada.** Sem ela o navegador
       assume claro e desenha o que é DELE — a lista aberta do
       `<select>`, a barra de rolagem, o seletor de data — em branco
@@ -842,6 +856,12 @@ o container servia o build antigo. Ao depurar UI em dev, confirmar que
 houve recompilação antes de concluir que a correção não funciona.
 
 ### Adiado, de propósito
+- [ ] Gaveta de conversas abaixo de `md:` — hoje a lista só existe a
+      partir de 768px, então no celular não há como trocar de
+      conversa: a barra inferior leva a `/chat`, que abre a atual. É
+      também o que impede subir a lista para `lg:`, onde ela caberia
+      melhor (em 768px a nav e a lista somam ~500px e espremem a
+      conversa).
 - [ ] Arrastar evento na timeline — a prop existe em
       `<CalendarTimeline>`, mas ligar o drag a um `PATCH` criaria um
       caminho de escrita sem `PlanDiff` e fora do undo (§5.8). O certo

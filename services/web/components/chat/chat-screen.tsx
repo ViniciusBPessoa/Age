@@ -279,6 +279,12 @@ export function ChatScreen({
 
   return (
     <div className="flex h-dvh">
+      {/* `md:` dá 768px, onde a nav principal (240px) e esta lista
+          (256px) deixam pouco para a conversa. Subir para `lg:`
+          pioraria outra coisa: não há gaveta de conversas abaixo
+          deste ponto, então a lista some e não há como trocar de
+          conversa. A estreiteza em 768px é o mal menor até existir
+          essa gaveta — anotado em PROGRESSO.md. */}
       <div className="hidden w-64 shrink-0 md:block">
         <ConversationSidebar
           conversations={conversations.data?.items ?? []}
