@@ -223,6 +223,12 @@ export function CalendarTimeline({
         // madrugada.
         min={new Date(1970, 0, 1, 6, 0)}
         max={new Date(1970, 0, 1, 23, 30)}
+        // Sem isto a lib rola sozinha para perto da hora atual e para
+        // alguns pixels adiante do começo do primeiro bloco: o
+        // "08:00 – 10:00" das aulas ficava com a primeira linha cortada
+        // pela borda do cabeçalho. Ancorar às 7h deixa a manhã inteira
+        // visível de cara, com uma hora de folga acima.
+        scrollToTime={new Date(1970, 0, 1, 7, 0)}
         messages={{
           today: "hoje",
           previous: "anterior",

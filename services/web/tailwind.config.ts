@@ -76,7 +76,7 @@ export default {
           "0 1px 2px 0 rgb(0 0 0 / 0.4), 0 8px 24px -8px rgb(0 0 0 / 0.5), inset 0 1px 0 0 rgb(255 255 255 / 0.05)",
         float:
           "0 2px 4px 0 rgb(0 0 0 / 0.4), 0 20px 50px -12px rgb(0 0 0 / 0.65), inset 0 1px 0 0 rgb(255 255 255 / 0.06)",
-        brand: "0 4px 16px -4px rgb(99 136 255 / 0.4)",
+        brand: "0 4px 16px -4px rgb(224 134 84 / 0.4)",
       },
       keyframes: {
         "fade-up": {

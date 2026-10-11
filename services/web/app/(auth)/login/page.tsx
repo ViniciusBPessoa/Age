@@ -35,7 +35,9 @@ export default function LoginPage() {
 
   return (
     <Panel className="p-6 shadow-raised">
-      <h1 className="mb-5 text-lg font-semibold">Entrar</h1>
+      {/* 2xl, não lg: é o título principal da tela, e precisa dizer de
+          longe que aqui se entra — não que se cadastra. */}
+      <h1 className="mb-5 text-2xl font-semibold tracking-[-0.02em]">Entrar</h1>
 
       {/* `noValidate` deixa a validação para a mensagem do servidor: a
           do browser aparece num balão que o leitor de tela não anuncia

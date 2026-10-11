@@ -26,12 +26,13 @@ export default function AuthLayout({ children }: { children: ReactNode }) {
             <Logo />
             <span className="text-lg font-semibold tracking-[-0.02em]">Age</span>
           </Link>
-          <h2 className="mt-5 text-2xl font-semibold leading-tight tracking-[-0.02em]">
-            Sua agenda,
-            <br />
-            organizada por conversa.
-          </h2>
-          <p className="mt-2.5 text-sm leading-relaxed text-muted">
+          {/* Subordinado de propósito. Na versão anterior esta frase
+              era um `h2` de 24px e o "Entrar" da página um `h1` de
+              18px: o título menos importante maior que o principal,
+              invertido inclusive na semântica. O resultado é que a
+              tela de login parecia uma página de apresentação, e quem
+              já tinha conta não achava onde entrar. */}
+          <p className="mt-4 text-sm leading-relaxed text-muted">
             Diga o que precisa fazer. O Age lê sua agenda, propõe um plano e espera você
             aprovar antes de escrever qualquer coisa.
           </p>

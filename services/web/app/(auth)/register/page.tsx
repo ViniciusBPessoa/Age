@@ -52,7 +52,7 @@ export default function RegisterPage() {
 
   return (
     <Panel className="p-6 shadow-raised">
-      <h1 className="mb-5 text-lg font-semibold">Criar conta</h1>
+      <h1 className="mb-5 text-2xl font-semibold tracking-[-0.02em]">Criar conta</h1>
 
       <form onSubmit={submit} noValidate className="space-y-4">
         <Field label="Nome" htmlFor="name" hint="Opcional.">

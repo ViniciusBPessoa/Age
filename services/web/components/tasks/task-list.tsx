@@ -178,7 +178,11 @@ export function TaskRow({
                 {task.reserved.map((block) => (
                   <p
                     key={block.event_ref_id}
-                    className="flex items-center gap-1.5 text-xs font-medium text-brand"
+                    /* `ok` e não `brand`: tempo reservado é estado
+                       resolvido, e a cor da marca é a mesma dos botões
+                       de ação. Pintado de terracota, o que já está
+                       feito competia por atenção com o que falta. */
+                    className="flex items-center gap-1.5 text-xs font-medium text-ok"
                   >
                     <IconClock className="h-3.5 w-3.5 shrink-0" />
                     <span className="tnum">

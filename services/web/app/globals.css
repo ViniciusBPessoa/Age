@@ -19,47 +19,63 @@
  *    que dá profundidade sem desenhar linha. A borda passou a ser
  *    reforço, não a única pista.
  *
- * 2. O acento é índigo, não azul de link. `#4c9aff` é a cor que todo
- *    framework entrega de fábrica; `#6388ff` tem a mesma função e um
- *    caráter próprio.
+ * 2. Os cinzas são QUENTES, não azulados. É a diferença entre uma
+ *    paleta com identidade e a que todo framework entrega de fábrica:
+ *    cinza com viés azul (`#0a0b0f`, `#98a0b0`) é o padrão de qualquer
+ *    dashboard. Aqui todo neutro tem undertone marrom/oliva — como
+ *    Claude e Notion fazem — e o conjunto para de parecer genérico sem
+ *    precisar de nenhuma cor berrante.
  *
- * 3. Contraste continua verificado, e os números ficam aqui porque
+ * 3. O acento é terracota, não índigo. Azul em produto de agenda
+ *    desaparece: é a cor de link, de seleção, de todo botão primário
+ *    já visto. O terracota cumpre a mesma função, conversa com os
+ *    neutros quentes, e ainda libera o azul para significar
+ *    "flexível" na agenda (§5.6), onde ele carrega sentido.
+ *
+ * 4. Contraste continua verificado, e os números ficam aqui porque
  *    contraste que ninguém mede volta a quebrar:
- *      --ink   #f0f2f6 sobre --canvas (#0a0b0f)   -> 16.8:1
- *      --ink-2 #c8cdd8 sobre --canvas             -> 11.3:1
- *      --muted #98a0b0 sobre --canvas             ->  6.6:1
- *      --muted #98a0b0 sobre --surface-2 (#171a21)->  5.6:1
- *      --faint #6b7280 sobre --canvas             ->  3.4:1  <- só para
- *        texto decorativo e ícone; NUNCA para informação (§8.2).
+ *
+ *    ESCURO (sobre --canvas #100f0d)
+ *      --ink   #f5f3ef -> 17.3:1    --muted #a39d94 ->  7.1:1
+ *      --ink-2 #d0ccc4 -> 12.0:1    --brand #e08654 ->  7.0:1
+ *      --faint #75706a ->  3.9:1  <- só decoração e ícone; NUNCA
+ *        informação (§8.2)
+ *      texto do botão #1a1207 sobre --brand -> 6.8:1
+ *
+ *    CLARO (sobre --canvas #faf9f5)
+ *      --ink   #1c1a17 -> 16.5:1    --muted #6b6459 ->  5.6:1
+ *      --ink-2 #423e38 -> 10.1:1    --brand #b05530 ->  4.8:1
+ *      --faint #8b8378 ->  3.6:1  <- só decoração
+ *      texto do botão #ffffff sobre --brand -> 5.0:1
  */
 :root {
   /* Superfícies, do fundo para cima. */
-  --canvas: #0a0b0f;
-  --surface: #11131a;
-  --surface-2: #171a21;
-  --surface-3: #1e222b;
+  --canvas: #100f0d;
+  --surface: #1a1917;
+  --surface-2: #232120;
+  --surface-3: #2d2a28;
 
-  --line: #23272f;
-  --line-strong: #323845;
+  --line: #302d2a;
+  --line-strong: #423e3a;
 
   /* Texto, do mais forte ao mais fraco. */
-  --ink: #f0f2f6;
-  --ink-2: #c8cdd8;
-  --muted: #98a0b0;
-  --faint: #6b7280;
+  --ink: #f5f3ef;
+  --ink-2: #d0ccc4;
+  --muted: #a39d94;
+  --faint: #75706a;
 
-  --brand: #6388ff;
-  --brand-soft: #2a3356;
-  --brand-ink: #070b18;
+  --brand: #e08654;
+  --brand-soft: #46291a;
+  --brand-ink: #1a1207;
 
-  --ok: #3ecf8e;
-  --warn: #e3a008;
-  --danger: #f1626c;
+  --ok: #5fcf96;
+  --warn: #e0a533;
+  --danger: #f07a7a;
 
   /* Semânticos do domínio (§5.6), para não repetir a decisão por tela. */
-  --fixed: #f59e5c; /* FIXED — não se mexe */
-  --flexible: #6388ff; /* FLEXIBLE — pode mover */
-  --proposed: #a97bf7; /* proposto, ainda não aplicado */
+  --fixed: #e8a05c; /* FIXED — não se mexe */
+  --flexible: #7aa2f7; /* FLEXIBLE — pode mover */
+  --proposed: #b490f0; /* proposto, ainda não aplicado */
 
   /* `--font-inter` vem do `next/font` no layout raiz: ele gera um nome
    * de família com hash, então citar "Inter" aqui cairia no fallback. */
@@ -76,48 +92,48 @@
  */
 @media (prefers-color-scheme: light) {
   :root:not([data-theme="dark"]) {
-    --canvas: #fbfbfd;
+    --canvas: #faf9f5;
     --surface: #ffffff;
-    --surface-2: #f4f5f8;
-    --surface-3: #eceef3;
-    --line: #e3e5ea;
-    --line-strong: #cfd3db;
-    --ink: #13151a;
-    --ink-2: #3a3f4a;
-    --muted: #61687a;
-    --faint: #9099aa;
-    --brand: #3f5fe0;
-    --brand-soft: #dfe5ff;
+    --surface-2: #f2f0ea;
+    --surface-3: #e9e6de;
+    --line: #e4e0d7;
+    --line-strong: #cdc7ba;
+    --ink: #1c1a17;
+    --ink-2: #423e38;
+    --muted: #6b6459;
+    --faint: #8b8378;
+    --brand: #b05530;
+    --brand-soft: #f6e4da;
     --brand-ink: #ffffff;
-    --ok: #15803d;
-    --warn: #a16207;
-    --danger: #c7303c;
-    --fixed: #c2630f;
-    --flexible: #3f5fe0;
-    --proposed: #7b3fd4;
+    --ok: #2f7d4f;
+    --warn: #9a6508;
+    --danger: #c0392f;
+    --fixed: #b4621a;
+    --flexible: #2d6ad6;
+    --proposed: #7a4bc4;
   }
 }
 
 :root[data-theme="light"] {
-  --canvas: #fbfbfd;
+  --canvas: #faf9f5;
   --surface: #ffffff;
-  --surface-2: #f4f5f8;
-  --surface-3: #eceef3;
-  --line: #e3e5ea;
-  --line-strong: #cfd3db;
-  --ink: #13151a;
-  --ink-2: #3a3f4a;
-  --muted: #61687a;
-  --faint: #9099aa;
-  --brand: #3f5fe0;
-  --brand-soft: #dfe5ff;
+  --surface-2: #f2f0ea;
+  --surface-3: #e9e6de;
+  --line: #e4e0d7;
+  --line-strong: #cdc7ba;
+  --ink: #1c1a17;
+  --ink-2: #423e38;
+  --muted: #6b6459;
+  --faint: #8b8378;
+  --brand: #b05530;
+  --brand-soft: #f6e4da;
   --brand-ink: #ffffff;
-  --ok: #15803d;
-  --warn: #a16207;
-  --danger: #c7303c;
-  --fixed: #c2630f;
-  --flexible: #3f5fe0;
-  --proposed: #7b3fd4;
+  --ok: #2f7d4f;
+  --warn: #9a6508;
+  --danger: #c0392f;
+  --fixed: #b4621a;
+  --flexible: #2d6ad6;
+  --proposed: #7a4bc4;
 }
 
 @layer base {
@@ -210,12 +226,15 @@
     height: 55vh;
     z-index: -1;
     pointer-events: none;
+    /* Terracota e âmbar, acompanhando a paleta quente. Com o azul e o
+       roxo antigos a aurora puxava a tela de volta para o frio logo na
+       primeira impressão. */
     background: radial-gradient(
         60% 60% at 25% 0%,
-        rgb(99 136 255 / 0.11),
+        rgb(224 134 84 / 0.13),
         transparent 70%
       ),
-      radial-gradient(50% 50% at 80% 10%, rgb(169 123 247 / 0.09), transparent 70%);
+      radial-gradient(50% 50% at 80% 10%, rgb(224 165 51 / 0.09), transparent 70%);
     filter: blur(28px);
   }
 
@@ -285,13 +304,13 @@
  * conversa (§8.1): "o chip pisca brevemente no valor usado". */
 @keyframes age-pulse {
   0% {
-    box-shadow: 0 0 0 0 rgb(99 136 255 / 0.55);
+    box-shadow: 0 0 0 0 rgb(224 134 84 / 0.55);
   }
   70% {
-    box-shadow: 0 0 0 7px rgb(99 136 255 / 0);
+    box-shadow: 0 0 0 7px rgb(224 134 84 / 0);
   }
   100% {
-    box-shadow: 0 0 0 0 rgb(99 136 255 / 0);
+    box-shadow: 0 0 0 0 rgb(224 134 84 / 0);
   }
 }
 .age-pulse {

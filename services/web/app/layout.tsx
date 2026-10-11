@@ -27,8 +27,8 @@ export const metadata: Metadata = {
 
 export const viewport: Viewport = {
   themeColor: [
-    { media: "(prefers-color-scheme: dark)", color: "#0a0b0f" },
-    { media: "(prefers-color-scheme: light)", color: "#fbfbfd" },
+    { media: "(prefers-color-scheme: dark)", color: "#100f0d" },
+    { media: "(prefers-color-scheme: light)", color: "#faf9f5" },
   ],
   // `maximum-scale` deliberadamente ausente: travar o zoom é uma falha
   // de acessibilidade comum em app mobile, e quem precisa ampliar texto

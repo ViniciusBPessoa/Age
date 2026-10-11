@@ -764,6 +764,41 @@ Verificado nos dois sentidos, com um proxy morto em `127.0.0.1:9` para
 simular a queda: offline o `up` completa pelo fallback, online
 constrói normal.
 
+### A paleta genérica, e o login que parecia cadastro
+
+Retorno do usuário: a interface melhorou muito, mas a paleta estava
+"genérica". Procede — e o diagnóstico tem nome.
+
+- [x] **Cinzas quentes no lugar dos azulados.** `#0a0b0f` e `#98a0b0`
+      são o cinza-azulado que todo framework entrega de fábrica. Agora
+      todo neutro tem undertone marrom/oliva, como Claude e Notion
+      fazem, e o conjunto ganha identidade sem nenhuma cor berrante
+- [x] **Acento terracota (`#e08654` / `#b05530`) no lugar do índigo.**
+      Azul em produto de agenda desaparece: é a cor de link, de
+      seleção, de todo botão primário já visto. E libera o azul para
+      significar "flexível" na agenda (§5.6) — na timeline, o bloco
+      azul agora salta justamente por ser a única cor fria
+- [x] Contrastes remedidos e anotados no `globals.css`. Dois valores
+      do tema claro foram ajustados por reprovarem: `--faint` em
+      2.9:1 e branco sobre a marca em 4.35:1
+- [x] Aurora, sombra da marca e o `pulse` do streaming seguiam em
+      azul, puxando a tela de volta para o frio
+- [x] "3h reservadas" era `text-brand`: com o terracota, o que já está
+      resolvido competia por atenção com os botões de ação. Virou `ok`
+
+**O login parecia tela de cadastro**, e a rota estava certa — a raiz
+sempre mandou para `/login`. O problema era hierarquia: o layout de
+auth tinha "Sua agenda, organizada por conversa" como `h2` de 24px e o
+"Entrar" da página como `h1` de 18px. O título menos importante maior
+que o principal, invertido inclusive na semântica. Agora o `h1` é
+24px e a frase de apresentação virou texto de apoio.
+
+**E um defeito que a captura revelou:** o horário dos eventos das 8h
+saía cortado pela borda do cabeçalho. A lib rolava sozinha para perto
+da hora atual e parava 7px adiante do topo do bloco (medido: evento em
+160px, área visível começando em 167px). `scrollToTime` às 7h resolve
+e ainda deixa a manhã inteira visível.
+
 ### O título que nunca aparecia
 
 Visto ao rodar o app, não ao ler o código: manda a primeira mensagem e
