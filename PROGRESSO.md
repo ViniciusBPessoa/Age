@@ -693,6 +693,30 @@ pegaria:
       defeito grave e é só pressa. Novo `Wait-Web`, análogo ao
       `Wait-CoreApi`: o `up` só termina quando o web responde
 
+O `Wait-Web` **não bastou**: o 503 voltou no dia seguinte, com o `up`
+tendo esperado direitinho. Desta vez o log deu o veredito — e ele era
+outro:
+
+- [x] `apiGet` tinha `catch {}` **sem binding**: toda falha de rede
+      virava "serviço indisponível", e a causa real era descartada
+      antes de chegar ao log. Dois episódios foram diagnosticados no
+      chute por falta dessa linha. Agora a causa é registrada
+- [x] A causa é **`getaddrinfo ENOTFOUND core-api`** — falha de DNS na
+      rede do Compose, não serviço fora do ar. Bate com o que os
+      timestamps diziam e eu não soube ler no primeiro dia: o core-api
+      respondeu `/readyz` 200 às 06:24:42 e 06:24:52, com a falha do
+      web às 06:24:44 bem no meio. O serviço estava vivo; o nome é que
+      não resolveu
+- [x] `apiGet` desistia na primeira tentativa. Agora são três (150ms,
+      400ms), e só para falha de CONEXÃO — resposta de erro do
+      servidor não é repetida, que é decisão dele e repetir não muda.
+      Seguro porque `apiGet` é só GET, idempotente por definição
+
+Não reproduz sob demanda: 28 cargas seguidas e 6 rotas frias em
+paralelo passaram sem falhar. Por isso a retentativa, e não uma
+correção pontual — e por isso o log, que da próxima vez entrega o
+diagnóstico pronto em vez de mais um palpite.
+
 ### O título que nunca aparecia
 
 Visto ao rodar o app, não ao ler o código: manda a primeira mensagem e

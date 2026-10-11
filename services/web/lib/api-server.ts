@@ -80,13 +80,51 @@ export async function apiGet<T>(
     if (value !== undefined) url.searchParams.set(key, String(value));
   }
 
-  let res: Response;
-  try {
-    res = await fetch(url, {
-      headers: await authHeaders(),
-      cache: "no-store",
-    });
-  } catch {
+  // Retentativa curta para falha de CONEXÃO — nunca para resposta de
+  // erro, que é decisão do servidor e repetir não muda.
+  //
+  // Isto é um GET: repetir é seguro por definição. O caso observado foi
+  // uma tela 503 inteira em `/chat` com o core-api respondendo
+  // `/readyz` 200 nos dois lados da falha, a 2s de distância — ou seja,
+  // o serviço estava vivo e a conexão é que não se estabeleceu. É
+  // intermitente e não reproduz sob demanda (28 cargas seguidas, 6
+  // rotas frias em paralelo: nenhuma falha), então o que resta é não
+  // desistir na primeira tentativa.
+  //
+  // Duas tentativas extras, 150ms e 400ms: o suficiente para uma falha
+  // transitória de rede e rápido o bastante para não travar o render.
+  const ESPERAS = [150, 400];
+  let res: Response | undefined;
+
+  for (let tentativa = 0; tentativa <= ESPERAS.length; tentativa++) {
+    try {
+      res = await fetch(url, {
+        headers: await authHeaders(),
+        cache: "no-store",
+      });
+      break;
+    } catch (cause) {
+      // O `catch` sem binding escondia a causa: toda falha de rede
+      // virava "serviço indisponível", sem como distinguir DNS de
+      // recusa de conexão, de timeout. Com a causa no log, o próximo
+      // episódio já chega diagnosticado.
+      const descricao =
+        cause instanceof Error
+          ? `${cause.name}: ${cause.message}${cause.cause ? ` <- ${String(cause.cause)}` : ""}`
+          : String(cause);
+      if (tentativa < ESPERAS.length) {
+        console.warn(
+          `[apiGet] ${url.pathname} falhou (${descricao}); ` +
+            `tentando de novo em ${ESPERAS[tentativa]}ms`,
+        );
+        await new Promise((resolve) => setTimeout(resolve, ESPERAS[tentativa]));
+      } else {
+        console.error(`[apiGet] ${url.pathname} falhou definitivamente: ${descricao}`);
+      }
+    }
+  }
+
+  if (res === undefined) {
     throw new ApiCallError(
       503,
       "upstream_unavailable",
