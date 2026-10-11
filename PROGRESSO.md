@@ -783,6 +783,14 @@ problema apontado não era a cor em si, e sim a tela ser seca:
 - [x] Numa rotina pausada, "0/12 nas últimas 4 semanas" lia como
       cobrança. O zero ali é consequência, não falha, e agora a linha
       diz "· pausada"
+- [x] **`color-scheme` nunca foi declarada.** Sem ela o navegador
+      assume claro e desenha o que é DELE — a lista aberta do
+      `<select>`, a barra de rolagem, o seletor de data — em branco
+      sobre a UI escura. O dropdown de ordenação das tarefas abria um
+      menu branco de cantos retos. Nenhum CSS nosso alcança esses
+      controles; só esta propriedade. Declarada nos três blocos de
+      tema e verificada nos quatro casos, inclusive escolha manual
+      contrariando o sistema
 
 **O login parecia tela de cadastro**, e a rota estava certa — a raiz
 sempre mandou para `/login`. O problema era hierarquia: o layout de

@@ -33,6 +33,14 @@
  *        texto decorativo e ícone; NUNCA para informação (§8.2).
  */
 :root {
+  /* Diz ao navegador em que esquema desenhar o que é DELE: a lista
+   * aberta do `<select>`, a barra de rolagem, o seletor de data, o
+   * preenchimento automático. Sem esta linha ele assume claro e
+   * desenha um menu branco de cantos retos sobre a UI escura — foi
+   * exatamente o que apareceu no dropdown de ordenação das tarefas.
+   * Nenhum CSS nosso alcança esses controles; só esta propriedade. */
+  color-scheme: dark;
+
   /* Superfícies, do fundo para cima. */
   --canvas: #0a0b0f;
   --surface: #11131a;
@@ -76,6 +84,7 @@
  */
 @media (prefers-color-scheme: light) {
   :root:not([data-theme="dark"]) {
+    color-scheme: light;
     --canvas: #fbfbfd;
     --surface: #ffffff;
     --surface-2: #f4f5f8;
@@ -99,6 +108,7 @@
 }
 
 :root[data-theme="light"] {
+  color-scheme: light;
   --canvas: #fbfbfd;
   --surface: #ffffff;
   --surface-2: #f4f5f8;

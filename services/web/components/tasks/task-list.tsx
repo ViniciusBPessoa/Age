@@ -180,8 +180,9 @@ export function TaskRow({
                     key={block.event_ref_id}
                     /* `ok` e não `brand`: tempo reservado é estado
                        resolvido, e a cor da marca é a mesma dos botões
-                       de ação. Pintado de terracota, o que já está
-                       feito competia por atenção com o que falta. */
+                       "reservar tempo" ao lado. Na mesma cor deles, o
+                       que já está feito disputava atenção com o que
+                       ainda falta — e é só o que falta que pede ação. */
                     className="flex items-center gap-1.5 text-xs font-medium text-ok"
                   >
                     <IconClock className="h-3.5 w-3.5 shrink-0" />
