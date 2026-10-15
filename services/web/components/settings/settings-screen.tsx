@@ -45,6 +45,7 @@ import type {
   AutonomyLevel,
   CalendarRef,
   Credential,
+  KeySource,
   Me,
   Preferences,
   ProviderInfo,
@@ -202,8 +203,21 @@ function CredentialsSection() {
     queryFn: () => api.get<Credential[]>("/llm/credentials"),
   });
 
+  // De qual chave este usuário depende hoje, e quanto da cota sobrou
+  // (§3451). Sem isto a pessoa que usa a chave da casa bate num limite
+  // invisível: a mensagem falha e nada na tela tinha avisado.
+  const keySource = useQuery({
+    queryKey: ["key-source"],
+    queryFn: () => api.get<KeySource>("/llm/key-source"),
+  });
+
   function refresh() {
     void queryClient.invalidateQueries({ queryKey: ["credentials"] });
+    // A origem da chave MUDA quando uma credencial é criada ou apagada —
+    // é exatamente o que decide entre cota e sem cota. Sem invalidar
+    // aqui, a tela continuaria dizendo "uso incluído" depois de a
+    // pessoa colar a própria chave.
+    void queryClient.invalidateQueries({ queryKey: ["key-source"] });
   }
 
   const upsert = useMutation({
@@ -242,9 +256,50 @@ function CredentialsSection() {
   return (
     <Section
       title="Credenciais de LLM"
-      description="Sua chave, seu custo. O Age não cobra nada e não vê suas conversas — a chave é cifrada antes de ir para o banco e nunca volta numa resposta da API."
+      description={
+        keySource.data?.source === "instance"
+          ? "O uso já está incluído — a chave própria é opcional e remove o limite. Qualquer chave que você colar é cifrada antes de ir para o banco e nunca volta numa resposta da API."
+          : "Sua chave, seu custo. O Age não cobra nada e não vê suas conversas — a chave é cifrada antes de ir para o banco e nunca volta numa resposta da API."
+      }
     >
       <div className="space-y-2">
+        {/* O estado da cota, quando é a casa que paga. Vem antes da
+            lista de credenciais porque é a informação que explica por
+            que a lista pode estar vazia e o chat funcionar mesmo
+            assim. */}
+        {keySource.data?.source === "instance" ? (
+          <Panel className="px-4 py-3.5">
+            <p className="text-sm font-medium">Uso incluído</p>
+            <p className="mt-1 text-xs leading-relaxed text-muted">
+              Você está usando o modelo fornecido pelo Age
+              {keySource.data.model ? ` (${keySource.data.model})` : ""}, sem precisar
+              de chave própria.
+            </p>
+            {keySource.data.limit_usd ? (
+              <>
+                {/* Barra de progresso com `<progress>` nativo: leitor de
+                    tela anuncia o valor sozinho, e o rótulo em texto
+                    fica ao lado para quem lê a tela. */}
+                <div className="mt-3 flex items-center gap-3">
+                  <progress
+                    className="h-1.5 w-full overflow-hidden rounded-full [&::-moz-progress-bar]:bg-brand [&::-webkit-progress-bar]:bg-surface-3 [&::-webkit-progress-value]:bg-brand"
+                    value={keySource.data.used_usd ?? 0}
+                    max={keySource.data.limit_usd}
+                  />
+                  <span className="tnum shrink-0 text-xs text-muted">
+                    US$ {(keySource.data.used_usd ?? 0).toFixed(2)} de US${" "}
+                    {keySource.data.limit_usd.toFixed(2)}
+                  </span>
+                </div>
+                <p className="mt-2 text-xs leading-relaxed text-faint">
+                  A cota renova no dia 1º. Para não ter limite, cole sua própria chave
+                  abaixo.
+                </p>
+              </>
+            ) : null}
+          </Panel>
+        ) : null}
+
         {credentials.isError ? (
           <LoadError
             message="Não consegui carregar suas credenciais."

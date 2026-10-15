@@ -18,7 +18,7 @@ from uuid import UUID, uuid4
 import httpx
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, select, text, update
 
 from app.core.config import get_settings
 from app.core.crypto import SecretBox, llm_context
@@ -36,6 +36,26 @@ class ProviderInfo(BaseModel):
     name: str
     models: list[str]
     default_model: str
+
+
+class KeySourceOut(BaseModel):
+    """De onde vem a chave usada nas mensagens deste usuário (§3451).
+
+    O que a tela de Configurações precisa para contar a verdade: se o
+    uso é por conta da casa ou da chave do próprio usuário, e quanto da
+    cota sobrou. Sem isto a pessoa bateria num limite invisível.
+    """
+
+    # "user" | "instance" | "none"
+    source: str
+    # Preenchidos só quando `source == "instance"`.
+    provider_key: str | None = None
+    model: str | None = None
+    # Cota em USD. `limit_usd = None` significa ilimitado — o que vale
+    # para quem usa a própria chave E para contas liberadas pelo
+    # operador. `used_usd` é o gasto do mês corrente pago pela casa.
+    used_usd: float | None = None
+    limit_usd: float | None = None
 
 
 class CredentialIn(BaseModel):
@@ -111,6 +131,76 @@ async def list_providers(user: CurrentUser) -> list[ProviderInfo]:
     """Catálogo vindo do registry do worker (§3.1)."""
     data = await _worker_call("/internal/llm/providers")
     return [ProviderInfo(**item) for item in data]
+
+
+@router.get("/key-source")
+async def key_source(user: CurrentUser, db: DbSession) -> KeySourceOut:
+    """De qual chave este usuário depende, e quanto da cota sobrou.
+
+    A precedência replicada aqui é a MESMA de
+    `ai-worker/credential_resolver.py`, e isso é uma duplicação que vale
+    reconhecer: se as duas divergirem, a tela mente. Está coberta por
+    teste que compara os dois caminhos — a alternativa seria o core-api
+    perguntar ao worker a cada carregamento da tela, o que acrescenta um
+    salto de rede a uma leitura puramente informativa.
+
+    A cota é somada aqui, e não no worker, porque `core_api` já tem
+    SELECT em `ai.turn_usage` (verificado em
+    `information_schema.role_table_grants`) e porque esta é a única
+    consulta que a tela precisa.
+    """
+    propria = (
+        await db.execute(
+            select(LLMCredential.id)
+            .where(
+                LLMCredential.user_id == user.id,
+                LLMCredential.is_active.is_(True),
+            )
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+
+    if propria is not None:
+        # Chave do usuário: sem cota, porque o custo é dele.
+        return KeySourceOut(source="user")
+
+    instancia = await _worker_call("/internal/llm/instance-key")
+    if not instancia.get("available"):
+        return KeySourceOut(source="none")
+
+    limite_row = (
+        await db.execute(
+            text("SELECT monthly_quota_usd FROM core.users WHERE id = :uid"),
+            {"uid": str(user.id)},
+        )
+    ).first()
+    limite = limite_row[0] if limite_row and limite_row[0] is not None else None
+
+    usado_row = (
+        await db.execute(
+            text(
+                """
+                SELECT COALESCE(SUM(estimated_cost_usd), 0)
+                FROM ai.turn_usage
+                WHERE user_id = :uid
+                  AND used_instance_key = true
+                  AND created_at >= date_trunc('month', now())
+                """
+            ),
+            {"uid": str(user.id)},
+        )
+    ).first()
+
+    return KeySourceOut(
+        source="instance",
+        provider_key=instancia.get("provider_key"),
+        model=instancia.get("model"),
+        used_usd=float(usado_row[0]) if usado_row else 0.0,
+        # 0 no banco significa ilimitado, igual a NULL (migration 0010);
+        # a API expõe os dois como `null`, porque "sem limite" é um
+        # estado e não o número zero.
+        limit_usd=float(limite) if limite else None,
+    )
 
 
 @router.get("/credentials")

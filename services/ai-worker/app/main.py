@@ -176,6 +176,31 @@ async def list_providers() -> list[dict]:
     return available_providers()
 
 
+@internal.get("/llm/instance-key")
+async def instance_key_status() -> dict:
+    """Se o operador configurou uma chave de instância (§3451).
+
+    Perguntado pelo core-api, e não lido de uma variável de ambiente
+    dele: a chave vive só aqui, porque só o worker fala com provedor de
+    LLM (§3.4). Duplicar a variável nos dois serviços criaria dois
+    lugares para desalinhar — o core-api diria "tem chave" e o turno
+    falharia com `no_credential`.
+
+    **Nunca devolve a chave**, nem os últimos dígitos: o front não tem o
+    que fazer com eles, e credencial do operador não é informação de
+    usuário. Só se existe, de qual provedor e qual modelo — que é o que
+    a tela precisa para dizer "usando o modelo X, por conta da casa".
+    """
+    settings = get_settings()
+    if not settings.has_instance_key:
+        return {"available": False}
+    return {
+        "available": True,
+        "provider_key": settings.instance_llm_provider,
+        "model": settings.instance_llm_model.strip() or None,
+    }
+
+
 app.include_router(internal)
 
 

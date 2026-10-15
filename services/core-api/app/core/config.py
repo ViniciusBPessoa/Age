@@ -72,6 +72,19 @@ class Settings(BaseSettings):
     rate_limit_llm_per_user: str = "30/60"
     rate_limit_llm_verify_per_user: str = "10/300"
 
+    # --- Cota do modo de chave de instância (§3451) ---
+    # Aplicada a contas NOVAS, em USD. A cota efetiva de cada conta vive
+    # em `core.users.monthly_quota_usd` (migration 0010), e é ela que o
+    # worker consulta — este valor é só o ponto de partida.
+    #
+    # A separação importa: mudar este número não afeta quem já tem conta,
+    # e liberar uma conta específica (a do operador) é um UPDATE numa
+    # linha, sem tocar em configuração de serviço. É também o que torna
+    # cobrança, um dia, uma mudança de dado.
+    #
+    # 0 = ilimitado, igual a NULL na coluna.
+    default_monthly_quota_usd: float = 2.0
+
     @property
     def is_production(self) -> bool:
         return self.environment == "production"

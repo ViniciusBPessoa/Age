@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime
+from decimal import Decimal
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, HTTPException, Request, Response, status
@@ -156,6 +157,20 @@ async def register(
                 password_hash=hash_password(body.password),
                 name=body.name,
                 timezone=body.timezone,
+                # Cota do modo de chave de instância (§3451). Gravada na
+                # conta, e não lida da configuração a cada turno, porque
+                # é a conta que carrega o limite: mudar o default depois
+                # não deve alterar silenciosamente quem já se cadastrou,
+                # e liberar uma conta é um UPDATE aqui.
+                #
+                # `None` quando o default é 0, porque "ilimitado" é NULL
+                # na coluna — não o número zero, que leria como "nenhum
+                # uso permitido".
+                monthly_quota_usd=(
+                    Decimal(str(settings.default_monthly_quota_usd))
+                    if settings.default_monthly_quota_usd > 0
+                    else None
+                ),
             )
         )
         # Preferências com os defaults do esquema, criadas junto: evita

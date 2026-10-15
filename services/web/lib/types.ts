@@ -118,6 +118,25 @@ export interface Credential {
   created_at: string;
 }
 
+/**
+ * De qual chave as mensagens deste usuário dependem (§3451).
+ *
+ * `"instance"` é o modo em que o operador fornece a chave: a pessoa não
+ * precisa criar conta em provedor nenhum para mandar a primeira
+ * mensagem, e o uso é limitado por cota. `"user"` é quem colou a
+ * própria chave — sem cota, porque paga. `"none"` é quando não há
+ * nenhuma das duas, e aí o chat não responde.
+ */
+export interface KeySource {
+  source: "user" | "instance" | "none";
+  provider_key: string | null;
+  model: string | null;
+  /** Gasto do mês corrente pago pela instância, em USD. */
+  used_usd: number | null;
+  /** `null` = ilimitado, o que vale para `"user"` e para contas liberadas. */
+  limit_usd: number | null;
+}
+
 export interface VerifyResult {
   ok: boolean;
   error_code: string | null;

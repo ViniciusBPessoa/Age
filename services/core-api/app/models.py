@@ -12,6 +12,7 @@ verificada em §10.2.
 from __future__ import annotations
 
 from datetime import datetime
+from decimal import Decimal
 from uuid import UUID
 
 from sqlalchemy import (
@@ -44,6 +45,12 @@ class User(Base):
     email_verified: Mapped[bool] = mapped_column(Boolean, default=False)
     role: Mapped[str] = mapped_column(Text, default="user")
     onboarding_step: Mapped[int] = mapped_column(Integer, default=0)
+    # Cota mensal do modo de chave de instância, em USD (§3451, migration
+    # 0010). NULL = ilimitado, que é o caso de quem usa a própria chave e
+    # das contas liberadas pelo operador. `Numeric` e não float porque é
+    # dinheiro, e a comparação "usado >= limite" decide se a pessoa
+    # consegue mandar mensagem.
+    monthly_quota_usd: Mapped[Decimal | None] = mapped_column(Numeric(10, 4))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

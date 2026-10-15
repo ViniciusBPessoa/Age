@@ -50,6 +50,7 @@ import {
 import type {
   CalendarRef,
   Credential,
+  KeySource,
   Me,
   ProviderInfo,
   TaskListRef,
@@ -64,12 +65,14 @@ export function OnboardingFlow({
   initialCredentials,
   calendars,
   taskLists,
+  keySource,
 }: {
   me: Me;
   providers: ProviderInfo[] | null;
   initialCredentials: Credential[];
   calendars: CalendarRef[];
   taskLists: TaskListRef[];
+  keySource: KeySource | null;
 }) {
   const router = useRouter();
   const [step, setStep] = useState(Math.min(me.onboarding_step, 2));
@@ -108,6 +111,7 @@ export function OnboardingFlow({
         <StepModel
           providers={providers}
           credentials={credentials}
+          keySource={keySource}
           onCredentials={setCredentials}
           onDone={() => goTo(1)}
         />
@@ -183,11 +187,13 @@ function Stepper({ current }: { current: number }) {
 function StepModel({
   providers,
   credentials,
+  keySource,
   onCredentials,
   onDone,
 }: {
   providers: ProviderInfo[] | null;
   credentials: Credential[];
+  keySource: KeySource | null;
   onCredentials: (next: Credential[]) => void;
   onDone: () => void;
 }) {
@@ -209,6 +215,13 @@ function StepModel({
   const provider = visible.find((p) => p.key === selected);
   const presentation = presentationFor(selected);
   const needsKey = presentation.keyUrl !== null || selected !== "ollama";
+
+  // O operador forneceu uma chave (§3451), então este passo deixa de
+  // ser obrigatório: a pessoa cria a conta e já conversa. É a diferença
+  // entre um produto que alguém abre e usa e um que exige criar conta
+  // no DeepSeek antes da primeira mensagem — o risco de produto que
+  // §14 classificou como alto.
+  const casaPaga = keySource?.source === "instance";
 
   async function saveAndVerify() {
     setError(null);
@@ -273,11 +286,32 @@ function StepModel({
 
   return (
     <Panel className="p-6 shadow-raised">
-      <h1 className="text-xl font-semibold">Escolha de onde vem a inteligência</h1>
+      <h1 className="text-xl font-semibold">
+        {casaPaga ? "Você já pode começar" : "Escolha de onde vem a inteligência"}
+      </h1>
       <p className="mt-2.5 text-sm leading-relaxed text-muted">
-        O Age usa sua própria chave de API. Você paga só pelo que usar, direto no
-        provedor — nós não cobramos nada e não vemos suas conversas.
+        {casaPaga
+          ? "O uso já está incluído — não precisa configurar nada para conversar. Se preferir usar sua própria chave de API, pode colar abaixo e aí não há limite de uso."
+          : "O Age usa sua própria chave de API. Você paga só pelo que usar, direto no provedor — nós não cobramos nada e não vemos suas conversas."}
       </p>
+
+      {/* O caminho sem atrito, em primeiro lugar na tela: quem só quer
+          usar o produto clica aqui e acabou. A opção de chave própria
+          continua logo abaixo, para quem a quer — mas deixa de ser a
+          única porta. */}
+      {casaPaga && !verified ? (
+        <div className="mt-5 rounded-xl bg-brand/[0.07] px-4 py-4 ring-1 ring-inset ring-brand/20">
+          <p className="text-sm leading-relaxed">
+            <strong>Uso incluído</strong>
+            {keySource?.limit_usd
+              ? ` — até US$ ${keySource.limit_usd.toFixed(2)} por mês, por conta da casa.`
+              : " — por conta da casa."}
+          </p>
+          <Button variant="primary" className="mt-3.5" onClick={onDone}>
+            Começar a usar
+          </Button>
+        </div>
+      ) : null}
 
       {verified ? (
         <div className="mt-5 flex flex-wrap items-center gap-3 rounded-xl bg-ok/10 px-4 py-3.5 ring-1 ring-inset ring-ok/25">
@@ -296,7 +330,22 @@ function StepModel({
         </div>
       ) : null}
 
-      <fieldset className="mt-5 space-y-2">
+      {/* Quando a casa paga, o formulário de chave continua inteiro
+          logo abaixo, mas precedido de um rótulo que o reposiciona como
+          alternativa — e não como o pedágio da tela. A seção não é
+          escondida num `<details>` de propósito: quem veio justamente
+          para colar a própria chave não deveria ter de descobrir um
+          clique a mais. */}
+      {casaPaga ? (
+        <p className="mt-6 border-t border-line pt-5 text-sm font-medium">
+          Ou use sua própria chave
+          <span className="ml-2 font-normal text-muted">
+            sem limite de uso, pago direto no provedor
+          </span>
+        </p>
+      ) : null}
+
+      <fieldset className={cx("space-y-2", casaPaga ? "mt-3.5" : "mt-5")}>
         <legend className="sr-only">Provedor de LLM</legend>
         {visible.map((p) => {
           const info = presentationFor(p.key);

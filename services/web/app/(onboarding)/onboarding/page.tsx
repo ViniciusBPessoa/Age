@@ -15,7 +15,7 @@ import { redirect } from "next/navigation";
 
 import { OnboardingFlow } from "@/components/onboarding-flow";
 import { Unauthenticated, apiGet, apiGetOptional } from "@/lib/api-server";
-import type { Credential, Me, ProviderInfo, TaskListRef } from "@/lib/types";
+import type { Credential, KeySource, Me, ProviderInfo, TaskListRef } from "@/lib/types";
 import type { CalendarRef } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -32,14 +32,20 @@ export default async function OnboardingPage() {
   // Já terminou? Não há por que ver isto de novo.
   if (me.onboarding_step >= 3) redirect("/chat");
 
-  // `Optional` nos três: se o catálogo do worker estiver fora do ar, o
+  // `Optional` em todos: se o catálogo do worker estiver fora do ar, o
   // onboarding ainda deve abrir e dizer o que aconteceu — melhor que
   // uma tela de erro na primeira coisa que a pessoa vê (§5.9.13).
-  const [providers, credentials, calendars, lists] = await Promise.all([
+  const [providers, credentials, calendars, lists, keySource] = await Promise.all([
     apiGetOptional<ProviderInfo[]>("/llm/providers"),
     apiGetOptional<Credential[]>("/llm/credentials"),
     apiGetOptional<CalendarRef[]>("/calendar/calendars"),
     apiGetOptional<TaskListRef[]>("/tasks/lists"),
+    // Decide se o passo da chave é obrigatório ou opcional (§3451).
+    // `Optional` como os outros: se esta leitura falhar, o onboarding
+    // cai no comportamento antigo (chave obrigatória), que é o
+    // conservador — pedir a chave a quem não precisava é atrito,
+    // deixar passar quem precisava é um chat que não responde.
+    apiGetOptional<KeySource>("/llm/key-source"),
   ]);
 
   return (
@@ -49,6 +55,7 @@ export default async function OnboardingPage() {
       initialCredentials={credentials ?? []}
       calendars={calendars ?? []}
       taskLists={lists ?? []}
+      keySource={keySource}
     />
   );
 }

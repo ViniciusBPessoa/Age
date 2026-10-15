@@ -960,6 +960,99 @@ nesta conta. Aguarde alguns minutos e tente de novo." —, porque
 `api-client.ts` lê `detail.error.message` e o login e o chat exibem
 `err.message`.
 
+### Chave de instância: o Age sem exigir chave de API do usuário
+
+ARQUITETURA.md §3451 previu este modo como a saída para o risco de
+produto do atrito da chave: "o operador fornece a chave com cota por
+usuário — o esquema já suporta, mas aí o custo passa a ser seu".
+
+**A medição já existia inteira**, e isso encurtou o trabalho pela
+metade: `ai.turn_usage` grava tokens e `estimated_cost_usd` por turno
+desde o M1, com índice `(user_id, created_at DESC)` — exatamente a
+consulta que uma cota mensal faz. Faltava a decisão, não a instrumentação.
+
+- [x] `ai-worker/app/credential_resolver.py`: a árvore de decisão num
+      lugar só. Chave do usuário → usa, sem cota (o custo é dele). Sem
+      chave própria → a da instância, com cota. Nenhuma das duas → o
+      erro acionável de antes
+- [x] **A chave do operador vive em variável de ambiente**, e não como
+      uma linha de `core.llm_credentials` com `user_id` inventado: a
+      tabela tem RLS com política `user_id = app.user_id`, e uma
+      credencial que não é de ninguém exigiria furar a política. Também
+      é melhor operacionalmente — rotacionar é trocar a variável, não
+      dar UPDATE em dado de usuário
+- [x] **A cota é em custo (USD), não em número de mensagens.** Uma
+      conversa longa custa ordens de magnitude mais que um "oi", e um
+      limite por mensagem seria generoso demais para conter custo ou
+      apertado demais para uso normal
+- [x] **A cota mora na conta** (`core.users.monthly_quota_usd`, migration
+      0010), não numa constante. É o que torna cobrança, um dia, uma
+      mudança de DADO: confirmar pagamento passa a ser escrever outro
+      número ali, com o caminho do turno intocado. NULL e 0 = ilimitado,
+      porque "sem limite" é uma intenção e não um teto alto que se
+      adivinha
+- [x] `ai.turn_usage.used_instance_key` (migration 0005 do `ai`), e a
+      soma da cota filtra por ele. Sem essa coluna, quem colasse a
+      própria chave veria a cota do operador cair por gasto que ele
+      mesmo pagou
+- [x] `GET /llm/key-source`: de qual chave a conta depende e quanto da
+      cota sobrou. A tela precisa disso ou a pessoa bate num limite
+      invisível
+- [x] **Onboarding deixa de exigir chave** quando a instância tem uma:
+      "Você já pode começar · Uso incluído — até US$ 2,00 por mês" com
+      botão "Começar a usar", e o formulário de chave própria logo
+      abaixo como alternativa ("sem limite de uso, pago direto no
+      provedor"). Sem chave de instância, volta exatamente ao texto
+      anterior — verificado nos dois sentidos
+- [x] Configurações → Credenciais mostra a barra de cota com
+      `<progress>` nativo (leitor de tela anuncia sozinho), e a
+      descrição da seção muda de "sua chave, seu custo" para "o uso já
+      está incluído". A query de `key-source` é invalidada ao criar ou
+      apagar credencial, senão a tela continuaria dizendo "uso incluído"
+      depois de a pessoa colar a dela
+- [x] O job de título também usa a chave da instância, mas **sem checar
+      cota**: o usuário não pediu aquele turno (é efeito de mandar a
+      primeira mensagem), e gastar cota em algo que ele não escolheu
+      seria consumir o limite sem aviso. O gasto segue registrado
+
+**Um bug encontrado no caminho**, e não no que eu estava escrevendo:
+`_fail` calculava `retryable = code != "no_credential"` — uma lista de
+exceções com um item só. `quota_exceeded` entrou como repetível por
+omissão, então a tela ofereceria "tentar de novo" para algo que repetir
+não resolve. Agora é um conjunto nomeado.
+
+**Validação.** 13 testes unitários do resolver (82 no worker agora),
+cada um verificado reintroduzindo o defeito correspondente: precedência
+invertida derruba 2, cota que não bloqueia derruba 2, soma sem o filtro
+de `used_instance_key` derruba 1. E o fluxo medido ponta a ponta contra
+containers: conta nova sem chave nenhuma conversa (`done`, custo
+marcado como da instância), colar a própria chave troca para
+`source: "user"` sem cota, e cota esgotada dá `failed /
+quota_exceeded` com a mensagem que diz o que fazer.
+
+### Teste de componente no front, que não existia
+
+O front tinha 100 testes e **nenhum renderizava um componente**: sem
+`@testing-library/react`, sem `jsdom`, `environment: "node"` e
+`include` só com `.test.ts`. É o que explica três bugs desta semana
+achados olhando a tela, um por um — `PlanItem.op` com caixa divergente
+(o diff de movimentação nunca renderizou, em silêncio), o estado vazio
+do chat que ignorava `streaming`, e o cabeçalho desalinhado.
+
+- [x] `vitest.config.ts` com **dois projetos**: `node` para os testes
+      que leem disco e comparam contratos, `jsdom` só para
+      `tests/components/`. `jsdom` global deixaria mais lentos três
+      arquivos que não tocam o DOM. (`environmentMatchGlobs` resolveria
+      por glob, mas está depreciado nesta versão)
+- [x] `tests/components/task-row.test.tsx`, 10 testes no `needsTime` de
+      §8.1 — "o sinal que o produto existe para dar", e regra de domínio
+      que vive num componente, que é onde um bug fica invisível: o
+      cartão renderiza, nada quebra, e o aviso só não aparece. Cobre
+      prazo próximo, prazo longe, atrasado, com tempo reservado,
+      concordância de plural, tarefa concluída, sem prazo, prazo só com
+      data (§9.5), degradação de provedor (§3.3.2) e o nome acessível da
+      caixa de marcação
+
 ### Adiado, de propósito
 - [ ] Gaveta de conversas abaixo de `md:` — hoje a lista só existe a
       partir de 768px, então no celular não há como trocar de
@@ -982,8 +1075,8 @@ nesta conta. Aguarde alguns minutos e tente de novo." —, porque
 ## Estado atual
 
 **Os sete marcos estão concluídos e validados**: 286 verificações de
-smoke contra containers reais (22 + 35 + 27 + 30 + 38 + 56 + 78), 263
-testes no backend e 100 no front, lint limpo nos três serviços,
+smoke contra containers reais (22 + 35 + 27 + 30 + 38 + 56 + 78), 345
+testes no backend (263 no core-api, 82 no ai-worker) e 110 no front, lint limpo nos três serviços,
 `tsc --noEmit` e `prettier --check` sem erros, e `next build` passando.
 
 **Uma instabilidade pré-existente no `smoke-m3`**, encontrada ao rodar

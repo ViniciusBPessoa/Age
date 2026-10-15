@@ -18,6 +18,18 @@ x-py-env: &py-env
   MASTER_KEY: ${MASTER_KEY:?MASTER_KEY obrigatório}
   SERVICE_JWT_SECRET: ${SERVICE_JWT_SECRET:?SERVICE_JWT_SECRET obrigatório}
   ENVIRONMENT: development
+  # Chave de instância (§3451): o operador fornece, o usuário não
+  # precisa colar nada para mandar a primeira mensagem. Vazia = cada
+  # usuário com a sua, que era o comportamento antes deste modo existir.
+  #
+  # Vai nos DOIS serviços de worker por meio desta âncora: o `ai-worker`
+  # consome a fila e roda o turno, e o `ai-worker-api` responde
+  # `/internal/llm/instance-key`, que é como o core-api sabe se a chave
+  # existe. Configurar só num deles faria a tela e o turno discordarem.
+  INSTANCE_LLM_API_KEY: ${INSTANCE_LLM_API_KEY:-}
+  INSTANCE_LLM_PROVIDER: ${INSTANCE_LLM_PROVIDER:-deepseek}
+  INSTANCE_LLM_MODEL: ${INSTANCE_LLM_MODEL:-}
+  INSTANCE_LLM_BASE_URL: ${INSTANCE_LLM_BASE_URL:-}
 
 services:
   postgres:

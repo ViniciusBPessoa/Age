@@ -5,7 +5,7 @@ ARQUITETURA.md §5.1 e §2.3.1. Este arquivo é a cola entre o núcleo
 
 Responsabilidades, em ordem:
   1. guarda de idempotência — a fila é at-least-once (§5.1)
-  2. carrega credencial e constrói o provedor
+  2. resolve a credencial (do usuário ou da instância) e checa a cota
   3. monta o histórico canônico do banco
   4. roda o laço, publicando no stream
   5. persiste mensagens, uso e estado do turno
@@ -31,7 +31,8 @@ from sqlalchemy import text
 from app.adapters.llm.registry import build_llm
 from app.calendar_client import CalendarClient
 from app.config import get_settings
-from app.crypto import SecretBox, llm_context
+from app.credential_resolver import NoCredential, QuotaExceeded
+from app.credential_resolver import resolve as resolve_credential
 from app.db import user_session
 from app.domain.orchestrator import TurnCancelled, run_conversation_turn
 from app.domain.tools import (
@@ -119,27 +120,15 @@ async def run_turn(ctx: dict, payload: dict) -> dict:
 
         # --- 2. Credencial e provedor ---
         async with user_session(user_id) as db:
-            cred = (
-                await db.execute(
-                    text(
-                        """
-                        SELECT provider_key, encrypted_api_key, default_model,
-                               base_url
-                        FROM core.llm_credentials
-                        WHERE user_id = :uid AND is_active = true
-                          AND provider_key = COALESCE(
-                              (SELECT provider_key FROM core.conversations
-                               WHERE id = :cid),
-                              provider_key
-                          )
-                        LIMIT 1
-                        """
-                    ),
-                    {"uid": str(user_id), "cid": str(conversation_id)},
+            # Chave do usuário se ele colou uma; senão a da instância,
+            # com cota (§3451). A decisão inteira vive em
+            # `credential_resolver`, inclusive a checagem de cota, para
+            # que este arquivo continue sendo cola e não política.
+            try:
+                credencial = await resolve_credential(
+                    db, user_id, conversation_id
                 )
-            ).first()
-
-            if cred is None:
+            except NoCredential:
                 await _fail(
                     pub,
                     db,
@@ -149,8 +138,25 @@ async def run_turn(ctx: dict, payload: dict) -> dict:
                     "Vá em Configurações → Modelos.",
                 )
                 return {"status": "failed", "reason": "no_credential"}
+            except QuotaExceeded as cota:
+                # Mensagem com os números: §5.9.13 pede degradação
+                # acionável, e "cota excedida" sem dizer quanto nem o
+                # que fazer não é acionável. A saída existe e é dita.
+                await _fail(
+                    pub,
+                    db,
+                    turn_id,
+                    "quota_exceeded",
+                    f"Você usou os US$ {cota.limit_usd:.2f} de uso "
+                    "incluído deste mês. Para continuar agora, cole sua "
+                    "própria chave de API em Configurações → Modelos — "
+                    "aí não há limite. Senão, a cota volta no dia 1º.",
+                )
+                return {"status": "failed", "reason": "quota_exceeded"}
 
-            provider_key, blob, default_model, base_url = cred
+            provider_key = credencial.provider_key
+            default_model = credencial.model
+            base_url = credencial.base_url
 
             conv = (
                 await db.execute(
@@ -231,11 +237,14 @@ async def run_turn(ctx: dict, payload: dict) -> dict:
                 else {}
             )
 
-        api_key = SecretBox(settings.master_key).decrypt(
-            bytes(blob), llm_context(user_id)
-        )
+        # A chave já vem decifrada do resolver — seja a do usuário (que
+        # ele decifrou de `llm_credentials`) ou a da instância (que vem
+        # do ambiente, sem cifra, porque não é dado de usuário).
         provider = build_llm(
-            provider_key, api_key=api_key, model=model, base_url=base_url
+            provider_key,
+            api_key=credencial.api_key,
+            model=model,
+            base_url=base_url,
         )
 
         messages = [
@@ -320,6 +329,7 @@ async def run_turn(ctx: dict, payload: dict) -> dict:
                 model=model,
                 usage=result.usage,
                 cost_usd=cost,
+                used_instance_key=credencial.is_instance,
             )
             await db.execute(
                 text(
@@ -432,6 +442,7 @@ async def _persist_assistant_message(
     model: str | None,
     usage,
     cost_usd: float | None,
+    used_instance_key: bool,
 ) -> UUID:
     """Grava a saída do turno no schema `ai`.
 
@@ -469,8 +480,9 @@ async def _persist_assistant_message(
             """
             INSERT INTO ai.turn_usage
               (turn_id, user_id, provider_key, model,
-               prompt_tokens, completion_tokens, estimated_cost_usd)
-            VALUES (:tid, :uid, :pk, :model, :pt, :ct, :cost)
+               prompt_tokens, completion_tokens, estimated_cost_usd,
+               used_instance_key)
+            VALUES (:tid, :uid, :pk, :model, :pt, :ct, :cost, :inst)
             """
         ),
         {
@@ -481,6 +493,10 @@ async def _persist_assistant_message(
             "pt": usage.prompt_tokens,
             "ct": usage.completion_tokens,
             "cost": cost_usd,
+            # De quem foi o custo. É o que a consulta da cota filtra:
+            # sem isto, turnos pagos pela chave do próprio usuário
+            # descontariam da cota do operador.
+            "inst": used_instance_key,
         },
     )
     return output_id
@@ -494,8 +510,21 @@ async def _fail(pub, db, turn_id: str, code: str, message: str) -> None:
         ),
         {"tid": turn_id, "code": code},
     )
+    # `retryable` diz ao front se oferecer "tentar de novo", e para
+    # estes dois a resposta é não: repetir não cria uma credencial nem
+    # devolve cota, e um botão que não resolve nada é pior que nenhum.
+    #
+    # Era `code != "no_credential"` — uma lista de exceções com um item
+    # só, então `quota_exceeded` entrou como repetível por omissão
+    # quando passou a existir. Agora é um conjunto nomeado, que é o que
+    # faz o próximo código deste tipo ser uma decisão e não um descuido.
+    NAO_RESOLVE_REPETINDO = {"no_credential", "quota_exceeded"}
     await pub.publish(
-        ErrorEvent(code=code, message=message, retryable=code != "no_credential")
+        ErrorEvent(
+            code=code,
+            message=message,
+            retryable=code not in NAO_RESOLVE_REPETINDO,
+        )
     )
 
 

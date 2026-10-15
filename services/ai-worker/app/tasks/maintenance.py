@@ -88,12 +88,41 @@ async def title_conversation(ctx: dict, payload: dict) -> dict:
     title = _fallback_title(first_message)
     source = "fallback"
 
+    # Credencial do usuário se houver; senão a da instância (§3451), que
+    # é o que faz o título gerado valer para quem nunca colou chave.
+    #
+    # **Sem checar cota, de propósito**, e por duas razões. Primeira: o
+    # usuário não pediu este turno — ele é efeito colateral de mandar a
+    # primeira mensagem, e cobrar cota por algo que a pessoa não escolheu
+    # seria gastar o limite dela sem aviso. Segunda: é barato e limitado
+    # a `max_tokens=16`, uma vez por conversa. O gasto segue registrado
+    # em `turn_usage`, então aparece no relatório de custo mesmo não
+    # descontando da cota.
+    escolhida = None
     if cred is not None:
         provider_key, blob, model, base_url = cred
         try:
-            api_key = SecretBox(settings.master_key).decrypt(
-                bytes(blob), llm_context(user_id)
+            escolhida = (
+                provider_key,
+                SecretBox(settings.master_key).decrypt(
+                    bytes(blob), llm_context(user_id)
+                ),
+                model,
+                base_url,
             )
+        except Exception as exc:
+            log.warning("falha ao decifrar credencial de %s: %s", user_id, exc)
+    elif settings.has_instance_key:
+        escolhida = (
+            settings.instance_llm_provider,
+            settings.instance_llm_api_key.strip(),
+            settings.instance_llm_model.strip() or None,
+            settings.instance_llm_base_url.strip() or None,
+        )
+
+    if escolhida is not None:
+        provider_key, api_key, model, base_url = escolhida
+        try:
             provider = build_llm(
                 provider_key, api_key=api_key, model=model, base_url=base_url
             )
