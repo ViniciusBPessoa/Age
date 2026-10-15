@@ -23,6 +23,7 @@ from sqlalchemy import delete, select, update
 from app.core.config import get_settings
 from app.core.crypto import SecretBox, llm_context
 from app.core.deps import CurrentUser, DbSession
+from app.core.rate_limit import enforce
 from app.core.security import create_service_token
 from app.models import LLMCredential
 
@@ -195,8 +196,21 @@ async def verify_credential(
 
     Chamada no onboarding antes de deixar avançar: descobrir que a chave
     está errada na primeira mensagem é pior (§8.1).
+
+    Limitado por usuário, e mais baixo que o resto (§2219): cada
+    verificação é uma chamada real ao provedor com a chave do usuário.
+    Sem limite, um laço nesta rota consome a cota dele — o custo cai em
+    quem não fez nada. É o tipo de rota em que o limite protege o dono
+    da chave, não o servidor.
     """
     settings = get_settings()
+
+    await enforce(
+        "llm:verify",
+        str(user.id),
+        settings.rate_limit_llm_verify_per_user,
+        "Muitas verificações de chave. Aguarde um momento.",
+    )
     cred = (
         await db.execute(
             select(LLMCredential).where(

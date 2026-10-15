@@ -10,6 +10,18 @@
 set -uo pipefail
 
 API="http://localhost:8000/api/v1"
+
+# As chaves de rate limit por IP são zeradas no início (§2219): rodada
+# em sequência com os outros smokes, a bateria cria ~11 contas e faz
+# dezenas de logins do MESMO IP, o que sob os limites de produção a
+# bloquearia a si mesma. Zerar o contador é melhor que desligar o
+# limite, porque a rota exercitada continua sendo a real, com o
+# `enforce` no lugar — se o limite quebrar, o `smoke-ui.sh` acusa.
+COMPOSE="docker compose -f infra/docker-compose.yml --env-file .env"
+rl_reset_() {
+  $COMPOSE exec -T redis sh -c     'redis-cli -a "$REDIS_PASSWORD" --no-auth-warning --scan --pattern "rl:*:ip:*"      | xargs -r redis-cli -a "$REDIS_PASSWORD" --no-auth-warning DEL' >/dev/null 2>&1 || true
+}
+rl_reset_
 PASS=0
 FAIL=0
 EMAIL="smoke-m1-$RANDOM@exemplo.com"

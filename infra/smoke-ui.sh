@@ -704,6 +704,87 @@ else
 fi
 
 # ---------------------------------------------------------------
+head_ "16. Rate limit no login (§2219, §9.1)"
+
+# Limpa as chaves antes: sem isto o teste depende de quantas tentativas
+# rodaram nos 15 minutos anteriores, e passa ou falha por acaso.
+redis_() { $COMPOSE exec -T redis sh -c 'redis-cli -a "$REDIS_PASSWORD" --no-auth-warning '"$1" 2>/dev/null; }
+rl_limpa_() { redis_ '--scan --pattern "rl:*" | xargs -r redis-cli -a "$REDIS_PASSWORD" --no-auth-warning DEL' >/dev/null; }
+
+rl_limpa_
+
+# O limite de produção é 5/900 por e-mail. O alvo é um e-mail que NÃO
+# existe: o que está sendo medido é a contenção de força bruta, e ela
+# não pode depender de a conta existir — senão descobrir se um e-mail
+# tem conta já seria um oráculo.
+ALVO="forca-bruta-$RANDOM@exemplo.com"
+RL_HDR=$(mktemp)
+BLOQUEIO=0
+for i in $(seq 1 7); do
+  C=$(curl -s -o /dev/null -w '%{http_code}' -D "$RL_HDR" \
+      -X POST "$WEB/api/auth/login" -H 'Content-Type: application/json' \
+      -d "{\"email\":\"$ALVO\",\"password\":\"senha-errada-123456\"}")
+  if [ "$C" = "429" ] && [ "$BLOQUEIO" = "0" ]; then BLOQUEIO=$i; fi
+done
+
+if [ "$BLOQUEIO" = "6" ]; then
+  ok "o 6º login errado é bloqueado com 429 (5 passam, como configurado)"
+elif [ "$BLOQUEIO" = "0" ]; then
+  bad "sete logins errados seguidos e nenhum 429 — não há rate limit"
+else
+  bad "o 429 veio na tentativa $BLOQUEIO, esperado na 6ª"
+fi
+
+# `Retry-After` é o único campo que o cliente HTTP respeita sozinho, e
+# ele atravessa DUAS camadas: core-api -> BFF -> browser. Esta checagem
+# existe porque ele se perdia na segunda: `proxyTokenRoute` montava a
+# resposta de erro com uma lista fixa de headers, e o header sumia em
+# silêncio. O catch-all de `[...path]` copia tudo e não tinha o
+# problema, então só login e registro eram afetados.
+RA=$(grep -i '^retry-after' "$RL_HDR" | tr -d '\r' | cut -d' ' -f2)
+rm -f "$RL_HDR"
+if [ -n "$RA" ] && [ "$RA" -ge 1 ] 2>/dev/null; then
+  ok "o 429 traz Retry-After ($RA s) atravessando o BFF"
+else
+  bad "o 429 chegou sem Retry-After — o cliente não sabe quanto esperar"
+fi
+
+# E o corpo no formato de erro de §7.3, para o front poder mapear o code.
+CORPO=$(curl -s -X POST "$WEB/api/auth/login" -H 'Content-Type: application/json' \
+        -d "{\"email\":\"$ALVO\",\"password\":\"senha-errada-123456\"}")
+if [ "$(echo "$CORPO" | jq_ "d['detail']['error']['code']")" = "rate_limited" ]; then
+  ok "o corpo traz code=rate_limited no formato de §7.3"
+else
+  bad "o corpo do 429 não tem code=rate_limited"
+fi
+
+# O que mais importa NÃO quebrar: quem sabe a senha não é força bruta.
+# Sem o reset no sucesso, errar algumas vezes e depois acertar deixaria a
+# conta a um erro do bloqueio — e trocar de dispositivo bloquearia o
+# acesso legítimo.
+rl_limpa_
+for i in 1 2 3 4; do
+  curl -s -o /dev/null -X POST "$WEB/api/auth/login" \
+    -H 'Content-Type: application/json' \
+    -d "{\"email\":\"$EMAIL\",\"password\":\"errada-123456\"}"
+done
+CERTA=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$WEB/api/auth/login" \
+        -H 'Content-Type: application/json' \
+        -d "{\"email\":\"$EMAIL\",\"password\":\"$SENHA\"}")
+DEPOIS=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$WEB/api/auth/login" \
+         -H 'Content-Type: application/json' \
+         -d "{\"email\":\"$EMAIL\",\"password\":\"errada-123456\"}")
+if [ "$CERTA" = "200" ] && [ "$DEPOIS" != "429" ]; then
+  ok "acertar a senha zera a contagem (4 erros + acerto + erro, sem bloqueio)"
+else
+  bad "o acerto não zerou: login certo=$CERTA, erro seguinte=$DEPOIS"
+fi
+
+# Deixa limpo para quem rodar depois: as chaves têm TTL de 15 min, e um
+# smoke que bloqueia o próximo não serve.
+rl_limpa_
+
+# ---------------------------------------------------------------
 printf '\n\033[1m%s\033[0m\n' "Resultado"
 printf '  %s passaram, %s falharam\n\n' "$PASS" "$FAIL"
 if [ "$FAIL" -gt 0 ]; then

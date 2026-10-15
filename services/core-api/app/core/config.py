@@ -45,6 +45,33 @@ class Settings(BaseSettings):
     # --- Stream de turno (§7.1) ---
     turn_stream_ttl_seconds: int = 3600
 
+    # --- Rate limit (§2219, §9.1) ---
+    # Configurável porque o número certo depende do ambiente: o smoke
+    # test faz dezenas de logins seguidos de um IP só, e CI roda tudo
+    # atrás de um NAT. Em vez de o teste contornar o limite, ele o
+    # ajusta — o caminho exercitado continua sendo o de produção.
+    #
+    # Os defaults valem para produção. Login: 5 tentativas por e-mail em
+    # 15 min é folgado para quem erra a senha e estreito para quem
+    # chuta. O limite por IP é mais alto porque uma casa com NAT
+    # compartilha IP, e seria injusto bloquear a família porque alguém
+    # errou a senha três vezes.
+    rate_limit_enabled: bool = True
+    rate_limit_login_per_email: str = "5/900"
+    rate_limit_login_per_ip: str = "20/900"
+    # 20/hora, e não 5: um IP legítimo é compartilhado. Uma república,
+    # um laboratório da faculdade ou um escritório atrás de NAT criam
+    # várias contas no mesmo dia, e 5 bloqueia o uso real enquanto 20
+    # ainda contém o laço automatizado (que faria milhares). A bateria
+    # de smoke cria ~11 contas do mesmo IP, e foi ela que mostrou que o
+    # número de partida estava errado.
+    rate_limit_register_per_ip: str = "20/3600"
+    rate_limit_refresh_per_ip: str = "60/300"
+    # Mais baixo, e por usuário: cada chamada aqui gasta token de uma
+    # chave de API de verdade (§2219).
+    rate_limit_llm_per_user: str = "30/60"
+    rate_limit_llm_verify_per_user: str = "10/300"
+
     @property
     def is_production(self) -> bool:
         return self.environment == "production"

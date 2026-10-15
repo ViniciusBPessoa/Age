@@ -18,6 +18,7 @@ from sqlalchemy import select, update
 from app.core.config import get_settings
 from app.core.db import system_session
 from app.core.deps import CurrentUser, DbSession, client_ip
+from app.core.rate_limit import enforce, reset
 from app.core.redis import get_redis
 from app.core.security import hash_password, needs_rehash
 from app.models import Session as SessionModel
@@ -114,9 +115,22 @@ async def register(
 
     Pedir login logo após registrar é atrito sem ganho: a pessoa acabou
     de provar que sabe a senha.
+
+    Limitado por IP: criar conta é barato para quem pede e caro para
+    quem hospeda (uma linha em `users`, uma em `user_preferences`, uma
+    sessão e um hash de Argon2id, que é deliberadamente lento). Sem
+    limite, um laço enche o banco. Só por IP, porque aqui não existe
+    conta prévia para contar contra.
     """
     settings = get_settings()
     email = body.email.lower()
+
+    await enforce(
+        "register:ip",
+        client_ip(request) or "sem-ip",
+        settings.rate_limit_register_per_ip,
+        "Muitas contas criadas desta rede. Aguarde alguns minutos.",
+    )
 
     # Sessão de sistema: ainda não existe usuário para o RLS.
     async with system_session() as db:
@@ -170,10 +184,49 @@ async def register(
 async def login(
     body: LoginRequest, request: Request, response: Response
 ) -> TokenResponse:
+    """Autentica e abre sessão.
+
+    **Limitado em duas dimensões** (§9.1), e as duas são necessárias por
+    motivos diferentes:
+
+    - **por e-mail**, que é o que contém força bruta contra UMA conta.
+      Sem isto, uma lista de senhas comuns roda contra o e-mail à
+      vontade. O Argon2id torna cada tentativa lenta, mas lento vezes
+      ilimitado ainda é ilimitado;
+    - **por IP**, mais folgado, que contém a varredura de MUITAS contas
+      a partir de uma origem — o caso que o limite por e-mail não vê,
+      porque cada e-mail tem só uma ou duas tentativas.
+
+    O limite por IP é maior de propósito: NAT doméstico e rede de
+    faculdade compartilham IP entre pessoas, e bloquear a rede inteira
+    porque alguém errou a senha seria pior que o ataque.
+
+    A contagem é anterior à verificação da senha, porque é a tentativa
+    que precisa ser contada — contar só o erro deixaria passar o ataque
+    que acerta.
+    """
     settings = get_settings()
+    email = body.email.lower()
+    ip = client_ip(request) or "sem-ip"
+
+    await enforce(
+        "login:email",
+        email,
+        settings.rate_limit_login_per_email,
+        "Muitas tentativas de entrada nesta conta. Aguarde alguns "
+        "minutos e tente de novo.",
+    )
+    await enforce(
+        "login:ip",
+        ip,
+        settings.rate_limit_login_per_ip,
+        "Muitas tentativas de entrada desta rede. Aguarde alguns "
+        "minutos e tente de novo.",
+    )
+
     async with system_session() as db:
         try:
-            user = await authenticate(db, body.email.lower(), body.password)
+            user = await authenticate(db, email, body.password)
         except AuthError as exc:
             raise _auth_error(exc) from exc
 
@@ -191,6 +244,15 @@ async def login(
             user_agent=request.headers.get("User-Agent"),
         )
 
+    # Acertou a senha: a contagem do e-mail zera. Quem está testando
+    # senhas não chega aqui, e sem isto alguém que erra quatro vezes e
+    # acerta na quinta continuaria a um erro do bloqueio.
+    #
+    # O limite por IP NÃO é zerado: um login certo não prova nada sobre
+    # a origem, e zerar daria a quem tem uma conta válida um jeito de
+    # limpar o contador entre rajadas contra outras contas.
+    await reset("login:email", email)
+
     _set_refresh_cookie(response, pair.refresh_token)
     return TokenResponse(
         access_token=pair.access_token,
@@ -205,8 +267,22 @@ async def refresh(request: Request, response: Response) -> TokenResponse:
     O lock no Redis resolve a corrida de §4.1.2: várias chamadas
     paralelas recebendo 401 juntas tentariam rotacionar ao mesmo tempo
     e, com rotação estrita, invalidariam a sessão legítima.
+
+    O limite aqui é largo (§9.1) e existe contra outra coisa: esta rota
+    é o caminho de quem tem um refresh token roubado e quer descobrir se
+    ainda vale. Apertar demais quebraria o uso legítimo, porque o BFF
+    chama isto a cada access token expirado — várias abas renovando ao
+    mesmo tempo é normal.
     """
     settings = get_settings()
+
+    await enforce(
+        "refresh:ip",
+        client_ip(request) or "sem-ip",
+        settings.rate_limit_refresh_per_ip,
+        "Muitas renovações de sessão. Aguarde um momento.",
+    )
+
     token = request.cookies.get(_REFRESH_COOKIE)
     if not token:
         raise HTTPException(

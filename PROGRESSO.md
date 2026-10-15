@@ -855,6 +855,111 @@ as mudanças deste arquivo. O código estava certo na primeira tentativa;
 o container servia o build antigo. Ao depurar UI em dev, confirmar que
 houve recompilação antes de concluir que a correção não funciona.
 
+### Rate limit, que a especificação pedia em três lugares e não existia
+
+Procurado no código antes de escrever: as únicas ocorrências de "rate
+limit" eram `RateLimitError` nas portas de calendário e tarefas — erros
+que se RECEBEM do Google, não limites que se aplicam. `POST /login`
+aceitava tentativas de senha sem limite nenhum.
+
+Pedido em §2219 ("por usuário, com `429` e `Retry-After`; limite
+separado e mais baixo para rotas que disparam LLM"), §9.1 ("por usuário
+e por IP") e §2727, que o lista entre os itens da suíte de segurança.
+
+- [x] `app/core/rate_limit.py`: **janela deslizante** num `ZSET` do
+      Redis, não contador por janela fixa. O contador fixo deixa passar
+      o dobro na virada — 3 tentativas às 11:59:59 e 3 às 12:00:01 são 6
+      em dois segundos — e para força bruta é justamente a rajada que
+      importa. As quatro operações vão num `MULTI/EXEC`: entre contar e
+      registrar, duas requisições paralelas leriam a mesma contagem e as
+      duas passariam
+- [x] **Login limitado em duas dimensões**, que contêm ataques
+      diferentes: por e-mail (5/15min) contra força bruta em UMA conta;
+      por IP (20/15min) contra varredura de MUITAS contas, que o limite
+      por e-mail não vê porque cada e-mail teria uma ou duas tentativas.
+      O de IP é mais folgado de propósito — NAT doméstico e rede de
+      faculdade compartilham IP, e bloquear a rede inteira porque
+      alguém errou a senha seria pior que o ataque
+- [x] A contagem vem ANTES de verificar a senha: é a tentativa que
+      precisa ser contada, e contar só o erro deixaria passar o ataque
+      que acerta
+- [x] **Acertar a senha zera a contagem do e-mail** — quem sabe a senha
+      não é força bruta, e sem isso errar quatro vezes e acertar na
+      quinta deixaria a conta a um erro do bloqueio. O contador de IP
+      **não** é zerado: um login certo não prova nada sobre a origem, e
+      zerar daria a quem tem conta válida um jeito de limpar o contador
+      entre rajadas contra outras contas
+- [x] Registro (20/h por IP) e refresh (60/5min por IP). O refresh é
+      largo porque o BFF o chama a cada access expirado, e várias abas
+      renovando juntas é normal
+- [x] **As rotas de LLM, com limite próprio e mais baixo** (§2219):
+      `POST /conversations/{id}/messages` em 30/min e
+      `POST /credentials/{id}/verify` em 10/5min, as duas por usuário.
+      É o único limite que protege o DONO DA CHAVE e não o servidor:
+      cada chamada gasta token de uma chave de API real, e o 202
+      imediato esconde isso — o cliente não sente a demora que
+      normalmente freia um laço
+- [x] `429` no formato de §7.3 (`code: "rate_limited"`), com
+      `Retry-After` no header e `retry_after_seconds` no corpo. O
+      `Retry-After` é medido pela tentativa mais antiga ainda na janela,
+      arredondado para cima com piso de 1 — `Retry-After: 0` convidaria
+      a repetir na hora
+- [x] **Tentativa bloqueada também conta**, de propósito: quem insiste
+      depois do `429` empurra a janela e demora mais a ser liberado. O
+      cliente legítimo respeita o `Retry-After` e não gasta tentativa
+- [x] **Redis fora do ar libera em vez de barrar**, com `log.error`.
+      Transformar a queda do Redis em login indisponível trocaria um
+      risco por uma falha garantida; liberar em silêncio é o que não
+      serviria. E `reset()` não propaga exceção, porque ele roda no
+      caminho de SUCESSO — se estourasse, a queda do Redis faria a senha
+      certa virar erro
+
+**Um bug real, encontrado ao verificar o caminho do browser e não só o
+da API.** O `429` e a mensagem chegavam, mas o header `Retry-After`
+desaparecia:
+
+- [x] `proxyTokenRoute` montava a resposta de erro com uma lista FIXA de
+      headers (`Content-Type` só), e o header sumia em silêncio. O
+      catch-all de `[...path]` copia todos os headers do upstream e não
+      tinha o problema — então só login e registro eram afetados,
+      exatamente as rotas que este trabalho limitou. Visto medindo a
+      resposta na porta 3000; a porta 8000 estava correta o tempo todo
+
+**Um número que eu errei e o teste mostrou.** O registro começou em
+5/hora. A bateria de smoke cria ~11 contas do mesmo IP e passou a se
+bloquear: `smoke-m4` e `smoke-m5` falharam em "registro falhou". O
+diagnóstico foi `ZCARD` na chave do IP — 8 contra limite de 5. Não é o
+teste que estava errado: 5/hora bloqueia uma república, um laboratório
+ou um escritório atrás de NAT. Subiu para 20/hora, que ainda contém o
+laço automatizado (que faria milhares), e os smokes zeram as chaves
+`rl:*:ip:*` no início em vez de desligar o limite — a rota exercitada
+continua sendo a de produção, com o `enforce` no lugar.
+
+**Validação, com a lição da semana aplicada.** 23 testes unitários
+contra um fake de Redis com relógio controlável (uma janela de 15 min
+não expira em tempo de parede) e 4 checagens novas no `smoke-ui.sh`,
+contra containers reais — 78 agora. Cada uma foi verificada
+reintroduzindo o defeito que lhe corresponde:
+
+- sem `enforce` no login: 3 das 4 checagens do smoke falham
+- sem `reset` no sucesso: falha a 4ª, e só ela
+- com o `Retry-After` descartado no BFF: falha a do header, e só ela
+
+E **um teste meu que passava por acaso**: `test_nao_deixa_passar_o_dobro
+_na_virada` usava um relógio em 1.000.000s, que é 40s dentro do minuto,
+então a "virada" que ele tentava cruzar caía no lugar errado e a rajada
+ficava inteira numa janela só. Ele passava mesmo com o código sabotado
+para contador fixo — justamente o bug que existe para pegar. Descoberto
+sabotando, corrigido alinhando o relógio à janela.
+
+Medido contra a API de verdade: 5 logins errados passam com 401 e o 6º
+dá 429 com `Retry-After: 898`; 20 e-mails diferentes do mesmo IP passam
+e o 21º bloqueia; 30 mensagens são aceitas com 202 e a 31ª dá 429. E a
+mensagem que chega à tela é legível — "Muitas tentativas de entrada
+nesta conta. Aguarde alguns minutos e tente de novo." —, porque
+`api-client.ts` lê `detail.error.message` e o login e o chat exibem
+`err.message`.
+
 ### Adiado, de propósito
 - [ ] Gaveta de conversas abaixo de `md:` — hoje a lista só existe a
       partir de 768px, então no celular não há como trocar de
@@ -876,10 +981,21 @@ houve recompilação antes de concluir que a correção não funciona.
 
 ## Estado atual
 
-**Os sete marcos estão concluídos e validados**: 282 verificações de
-smoke contra containers reais (22 + 35 + 27 + 30 + 38 + 56 + 74), 240
+**Os sete marcos estão concluídos e validados**: 286 verificações de
+smoke contra containers reais (22 + 35 + 27 + 30 + 38 + 56 + 78), 263
 testes no backend e 100 no front, lint limpo nos três serviços,
 `tsc --noEmit` e `prettier --check` sem erros, e `next build` passando.
+
+**Uma instabilidade pré-existente no `smoke-m3`**, encontrada ao rodar
+a bateria inteira em sequência: ele falha de forma intermitente e em
+checagens que mudam de execução para execução — "preferência não foi
+salva" numa, "sequência de faltas: 2 (esperado >= 3)" e "gatilho de 3
+faltas não acionou" noutra. Medido com o MESMO código: 30/0 numa
+rodada e 27/3 na seguinte. Não é regressão de nada recente (reproduz
+com as mudanças guardadas no stash), e o padrão — checagens que
+dependem de contagem acumulada — sugere estado de execuções anteriores
+no banco, não um bug de produto. Fica anotado porque um smoke que falha
+por acaso é pior que um que não existe: ele treina a ignorar falha.
 
 As telas foram conferidas no navegador, não só no código — foi assim
 que apareceram o desalinhamento do cabeçalho, o estado vazio que não

@@ -26,6 +26,7 @@ from sse_starlette.sse import EventSourceResponse
 
 from app.core.config import get_settings
 from app.core.deps import CurrentUser, DbSession
+from app.core.rate_limit import enforce
 from app.core.redis import get_arq, get_redis, turn_cancel_key, turn_stream_key
 from app.core.security import create_service_token
 from app.models import Conversation, Message
@@ -549,7 +550,25 @@ async def send_message(
     Não espera o modelo: é o ponto central da separação por perfil de
     execução (§2.3). A resposta chega em milissegundos mesmo que o turno
     leve minutos.
+
+    **O limite mais importante do sistema** (§2219: "limite separado e
+    mais baixo para rotas que disparam LLM"). Cada chamada aceita aqui
+    enfileira um turno que vai gastar token de uma chave de API real e
+    ocupar o worker por até 5 minutos. É a única rota em que estourar o
+    limite custa dinheiro ao usuário, e a resposta 202 imediata esconde
+    isso: o cliente não sente a demora que normalmente freia um laço.
+
+    Limitado por usuário, não por IP: o custo segue a chave, que é da
+    conta.
     """
+    await enforce(
+        "llm:turn",
+        str(user.id),
+        get_settings().rate_limit_llm_per_user,
+        "Muitas mensagens em pouco tempo. Aguarde um momento antes de "
+        "enviar a próxima.",
+    )
+
     conversation = await _load_conversation(db, user, conversation_id)
 
     turn_id = body.client_turn_id or uuid4()

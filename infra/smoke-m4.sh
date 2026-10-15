@@ -23,6 +23,17 @@ head_() { printf '\n\033[1m%s\033[0m\n' "$1"; }
 jq_() { python -c "import json,sys; d=json.load(sys.stdin); print($1)" 2>/dev/null; }
 
 COMPOSE="docker compose -f infra/docker-compose.yml --env-file .env"
+# As chaves de rate limit por IP são zeradas no início (§2219): este
+# script cria várias contas e faz dezenas de logins do MESMO IP, o que
+# sob os limites de produção o bloquearia a si mesmo. Zerar o contador é
+# melhor que desligar o limite, porque a rota exercitada continua sendo
+# a real, com o `enforce` no lugar — se o limite quebrar, o
+# `smoke-ui.sh` acusa.
+rl_reset_() {
+  $COMPOSE exec -T redis sh -c     'redis-cli -a "$REDIS_PASSWORD" --no-auth-warning --scan --pattern "rl:*:ip:*"      | xargs -r redis-cli -a "$REDIS_PASSWORD" --no-auth-warning DEL' >/dev/null 2>&1 || true
+}
+rl_reset_
+
 psql_() { $COMPOSE exec -T postgres psql -U age_super -d age -tAc "$1" 2>&1; }
 # Extrai só o uuid da saída do psql: com mais de um comando, `-tAc`
 # também devolve linhas de status como "INSERT 0 1".

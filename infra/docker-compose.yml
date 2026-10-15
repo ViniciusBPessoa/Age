@@ -72,6 +72,16 @@ services:
       JWT_SIGNING_KEY: ${JWT_SIGNING_KEY:?JWT_SIGNING_KEY obrigatório}
       AI_WORKER_INTERNAL_URL: http://ai-worker-api:8001
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:3000}
+      # Rate limit (§2219). Os defaults de produção vivem em
+      # `config.py`; aqui só o que o ambiente precisa sobrepor. A
+      # bateria de smoke cria ~11 contas e faz dezenas de logins do
+      # MESMO IP, então sob os limites de produção ela se bloqueia a si
+      # mesma. Em vez de o teste desviar do caminho real da rota, ele
+      # ajusta o limite — a rota exercitada continua sendo a de
+      # produção, com o `enforce` no lugar.
+      RATE_LIMIT_ENABLED: ${RATE_LIMIT_ENABLED:-true}
+      RATE_LIMIT_LOGIN_PER_IP: ${RATE_LIMIT_LOGIN_PER_IP:-20/900}
+      RATE_LIMIT_REGISTER_PER_IP: ${RATE_LIMIT_REGISTER_PER_IP:-20/3600}
       DB_SCHEMA_OWN: core
       DB_SCHEMA_READ: ai
     depends_on:

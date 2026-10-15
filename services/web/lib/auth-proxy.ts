@@ -69,9 +69,20 @@ export async function proxyTokenRoute(
     // Erro volta como veio: a mensagem do core-api já é em pt-BR, e no
     // caso de credencial inválida já é deliberadamente vaga sobre o que
     // falhou (e-mail ou senha).
+    const erro = new Headers({ "Content-Type": "application/json" });
+
+    // `Retry-After` precisa atravessar, e esta é a única rota de erro
+    // onde isso não acontecia de graça: o catch-all de `[...path]` copia
+    // todos os headers do upstream, aqui a lista era fixa e o header
+    // sumia. Sem ele o 429 do rate limit (§2219) chega ao browser sem
+    // dizer quanto esperar, e o cliente HTTP perde o único campo que
+    // respeita automaticamente.
+    const retryAfter = upstream.headers.get("retry-after");
+    if (retryAfter) erro.set("Retry-After", retryAfter);
+
     return new Response(upstream.body, {
       status: upstream.status,
-      headers: { "Content-Type": "application/json" },
+      headers: erro,
     });
   }
 
