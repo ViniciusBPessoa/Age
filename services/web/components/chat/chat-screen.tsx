@@ -71,6 +71,30 @@ interface ConversationPage {
   next_cursor: string | null;
 }
 
+/**
+ * Quando a URL pode ser trocada para a conversa recém-criada (§8.1).
+ *
+ * Extraída do componente para poder ser testada sozinha: o defeito que
+ * ela corrige é de SEQUÊNCIA, e sequência não se vê renderizando uma
+ * vez. A regra tem de valer nos três momentos do primeiro turno, e o
+ * caso perigoso é o do meio.
+ *
+ * `streaming` true significa turno em curso: navegar aí remonta a tela
+ * (`/chat` e `/chat/[id]` são páginas diferentes), o estado do turno
+ * zera e o EventSource é fechado pela limpeza do efeito.
+ */
+export function podeNavegarParaNova(
+  streaming: boolean,
+  novaConversa: string | null,
+  conversationId: string | null,
+): boolean {
+  if (streaming) return false;
+  if (!novaConversa) return false;
+  // Já estamos na página certa: navegar de novo seria um no-op que
+  // ainda assim remonta a árvore.
+  return conversationId === null;
+}
+
 export function ChatScreen({
   me,
   conversationId,
@@ -99,6 +123,45 @@ export function ChatScreen({
   const [turnError, setTurnError] = useState<string | null>(null);
   const unsubscribe = useRef<(() => void) | null>(null);
 
+  /*
+   * A conversa criada DENTRO desta tela, antes de a URL mudar.
+   *
+   * Relato: "na primeira mensagem o feedback não aparece, e só consigo
+   * ver a resposta se der F5; a partir da segunda funciona".
+   *
+   * A causa era o `router.replace(/chat/<id>)` disparado assim que a
+   * conversa nascia, no meio do turno. `/chat` e `/chat/[id]` são duas
+   * páginas diferentes, então a troca REMONTA o ChatScreen: o
+   * `useState` do streaming volta a `false`, o texto acumulado se
+   * perde, e o `useEffect` de limpeza fecha o EventSource do turno que
+   * estava em curso. O turno continuava no servidor e terminava bem —
+   * por isso o F5 mostrava a resposta — mas a tela que o acompanhava
+   * já não existia.
+   *
+   * A navegação agora espera o turno acabar (`done`). Até lá o id vive
+   * aqui, o que mantém as queries de mensagens e de plano apontando
+   * para a conversa certa sem trocar de página.
+   */
+  const [novaConversa, setNovaConversa] = useState<string | null>(null);
+  const idAtivo = conversationId ?? novaConversa;
+
+  // A URL alcançou o id que estava só no estado: a página certa montou
+  // e a muleta não é mais necessária.
+  useEffect(() => {
+    if (conversationId && conversationId === novaConversa) {
+      setNovaConversa(null);
+    }
+  }, [conversationId, novaConversa]);
+
+  // A URL só muda depois que o turno termina. Remontar a tela aqui é
+  // inofensivo: não há mais stream aberto nem texto parcial a perder, e
+  // a mensagem já foi recarregada do banco.
+  useEffect(() => {
+    if (podeNavegarParaNova(streaming, novaConversa, conversationId)) {
+      router.replace(`/chat/${novaConversa}`);
+    }
+  }, [streaming, novaConversa, conversationId, router]);
+
   // Encerra o stream ao sair da tela. Sem isto, trocar de conversa
   // deixaria o EventSource anterior vivo, e os tokens do turno antigo
   // continuariam chegando na conversa nova.
@@ -125,15 +188,15 @@ export function ChatScreen({
   });
 
   const messages = useQuery({
-    queryKey: ["messages", conversationId],
+    queryKey: ["messages", idAtivo],
     queryFn: () =>
-      api.get<{ items: Message[] }>(`/conversations/${conversationId}/messages`, {
+      api.get<{ items: Message[] }>(`/conversations/${idAtivo}/messages`, {
         limit: 100,
       }),
-    enabled: conversationId !== null,
+    enabled: idAtivo !== null,
   });
 
-  const active = conversations.data?.items.find((c) => c.id === conversationId);
+  const active = conversations.data?.items.find((c) => c.id === idAtivo);
 
   /**
    * §5.10: reativo, nunca notificação.
@@ -170,7 +233,7 @@ export function ChatScreen({
       // Desta conversa, e o mais recente: a lista já vem ordenada por
       // `created_at DESC`, e um plano pendente de outra conversa não é
       // o que acabou de ser proposto aqui.
-      return propostos.find((p) => p.conversation_id === conversationId) ?? null;
+      return propostos.find((p) => p.conversation_id === idAtivo) ?? null;
     },
     enabled: planId !== null,
   });
@@ -233,15 +296,18 @@ export function ChatScreen({
     setStreamingText("");
     setPlanId(null);
 
-    let targetId = conversationId;
+    let targetId = idAtivo;
     try {
       // Primeira mensagem sem conversa: cria uma. O título vem depois,
       // automático (§6.2.2).
       if (!targetId) {
         const created = await api.post<Conversation>("/conversations", {});
         targetId = created.id;
+        // Guarda em estado e NÃO navega: trocar de página agora
+        // remontaria esta tela e mataria o turno que está por começar.
+        // A URL é acertada no `done`.
+        setNovaConversa(created.id);
         await queryClient.invalidateQueries({ queryKey: ["conversations"] });
-        router.replace(`/chat/${created.id}`);
       }
 
       setStreaming(true);
@@ -329,7 +395,7 @@ export function ChatScreen({
               { events: c.applied_events, tasks: c.applied_tasks },
             ]),
           )}
-          activeId={conversationId}
+          activeId={idAtivo}
           timezone={timezone}
           loading={conversations.isLoading}
           onNew={() => router.push("/chat")}
@@ -356,7 +422,7 @@ export function ChatScreen({
           }
           onDelete={async (id) => {
             await mutateConversation(() => api.del(`/conversations/${id}`));
-            if (id === conversationId) router.replace("/chat");
+            if (id === idAtivo) router.replace("/chat");
           }}
           onDeleteMany={async (ids) => {
             /*
@@ -371,7 +437,7 @@ export function ChatScreen({
               await api.del(`/conversations/${id}`).catch(() => undefined);
             }
             await queryClient.invalidateQueries({ queryKey: ["conversations"] });
-            if (conversationId && ids.includes(conversationId)) {
+            if (idAtivo && ids.includes(idAtivo)) {
               router.replace("/chat");
             }
           }}
@@ -423,7 +489,7 @@ export function ChatScreen({
          * durante os segundos de espera, como se o envio nao tivesse
          * acontecido.
          */}
-        {(conversationId === null || (messages.data?.items.length ?? 0) === 0) &&
+        {(idAtivo === null || (messages.data?.items.length ?? 0) === 0) &&
         !streaming &&
         !streamingText ? (
           <ChatEmptyState
@@ -490,18 +556,18 @@ export function ChatScreen({
           sending={streaming}
           onSend={send}
           onProviderChange={(providerKey, model) => {
-            if (!conversationId) return;
+            if (!idAtivo) return;
             void mutateConversation(() =>
-              api.patch(`/conversations/${conversationId}`, {
+              api.patch(`/conversations/${idAtivo}`, {
                 provider_key: providerKey,
                 model,
               }),
             );
           }}
           onTargetChange={(target) => {
-            if (!conversationId) return;
+            if (!idAtivo) return;
             void mutateConversation(() =>
-              api.patch(`/conversations/${conversationId}`, {
+              api.patch(`/conversations/${idAtivo}`, {
                 target_default: target,
               }),
             );

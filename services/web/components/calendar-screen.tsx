@@ -130,6 +130,62 @@ export function CalendarScreen({ timezone }: { timezone: string }) {
     return map;
   }, [events.data]);
 
+  // Painel de gerência das propostas, aberto pelo selo do cabeçalho.
+  const [gerenciando, setGerenciando] = useState(false);
+  const [remarcando, setRemarcando] = useState<Proposal | null>(null);
+  const [novoInicio, setNovoInicio] = useState("");
+  const [ocupado, setOcupado] = useState(false);
+
+  async function recarregarPropostas() {
+    await queryClient.invalidateQueries({ queryKey: ["plans", "proposed"] });
+  }
+
+  async function descartar(itemId: string) {
+    setOcupado(true);
+    try {
+      await api.del(`/plans/items/${itemId}`);
+      await recarregarPropostas();
+    } finally {
+      setOcupado(false);
+    }
+  }
+
+  async function descartarTudo() {
+    setOcupado(true);
+    try {
+      // Em série: o rate limit do core-api responde 429 ao excedente, e
+      // um lote paralelo deixaria parte das propostas na tela depois do
+      // "descartei tudo".
+      for (const proposta of proposals) {
+        await api.del(`/plans/items/${proposta.id}`).catch(() => undefined);
+      }
+      await recarregarPropostas();
+      setGerenciando(false);
+    } finally {
+      setOcupado(false);
+    }
+  }
+
+  async function salvarRemarcacao() {
+    if (!remarcando || !novoInicio) return;
+    // Preserva a duração original: a pessoa escolhe quando começa, e
+    // mexer no tamanho do bloco sem ela pedir seria outra decisão.
+    const duracao =
+      new Date(remarcando.end).getTime() - new Date(remarcando.start).getTime();
+    const inicio = new Date(novoInicio);
+    setOcupado(true);
+    try {
+      await api.patch(`/plans/items/${remarcando.id}`, {
+        start: inicio.toISOString(),
+        end: new Date(inicio.getTime() + duracao).toISOString(),
+      });
+      await recarregarPropostas();
+      setRemarcando(null);
+    } finally {
+      setOcupado(false);
+    }
+  }
+
   async function setFlexibility(eventId: string, flexibility: Flexibility) {
     await api.patch<AgeEvent>(`/calendar/events/${eventId}/flexibility`, {
       flexibility,
@@ -190,9 +246,28 @@ export function CalendarScreen({ timezone }: { timezone: string }) {
                 {periodLabel}
               </span>
               {proposals.length > 0 ? (
-                <Badge tone="proposed">
-                  {proposals.length} proposto{proposals.length === 1 ? "" : "s"}
-                </Badge>
+                /*
+                 * O selo era só informativo, e o relato foi "está lá
+                 * como proposta, não posso mais alterar, não posso mais
+                 * editar". A agenda desenhava os blocos hachurados e
+                 * não oferecia uma única ação sobre eles: só dava para
+                 * aprovar ou rejeitar o plano INTEIRO, e apenas pelo
+                 * cartão do turno que os criou — que some assim que a
+                 * conversa avança.
+                 *
+                 * Agora o selo é a porta: abre a lista com horário, e
+                 * cada item pode ser remarcado ou descartado sozinho.
+                 */
+                <button
+                  onClick={() => setGerenciando(true)}
+                  className="rounded-full transition-opacity hover:opacity-80"
+                  aria-label={`Gerenciar ${proposals.length} propostas`}
+                >
+                  <Badge tone="proposed">
+                    {proposals.length} proposto
+                    {proposals.length === 1 ? "" : "s"}
+                  </Badge>
+                </button>
               ) : null}
             </h1>
           </div>
@@ -269,6 +344,109 @@ export function CalendarScreen({ timezone }: { timezone: string }) {
           />
         )}
       </div>
+
+      <Dialog
+        open={gerenciando}
+        onClose={() => (ocupado ? undefined : setGerenciando(false))}
+        title="Propostas esperando aprovação"
+        description="Nada aqui está na sua agenda ainda."
+        footer={
+          <>
+            <Button
+              variant="ghost"
+              onClick={() => setGerenciando(false)}
+              disabled={ocupado}
+            >
+              Fechar
+            </Button>
+            <Button
+              variant="danger"
+              onClick={() => void descartarTudo()}
+              disabled={ocupado || proposals.length === 0}
+            >
+              {ocupado ? "Descartando…" : "Descartar todas"}
+            </Button>
+          </>
+        }
+      >
+        {proposals.length === 0 ? (
+          <p className="text-sm text-muted">Nenhuma proposta pendente.</p>
+        ) : (
+          <ul className="max-h-80 space-y-1.5 overflow-y-auto">
+            {proposals.map((proposta) => (
+              <li
+                key={proposta.id}
+                className="flex items-center gap-2 rounded-lg border border-line px-2.5 py-2"
+              >
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm text-ink">{proposta.title}</p>
+                  <p className="text-2xs text-muted">
+                    {range(proposta.start, proposta.end, timezone)}
+                  </p>
+                </div>
+                <Button
+                  variant="quiet"
+                  size="sm"
+                  disabled={ocupado}
+                  onClick={() => {
+                    setRemarcando(proposta);
+                    // `datetime-local` não aceita offset: o valor tem de
+                    // ser a hora local já formatada, sem o fuso.
+                    setNovoInicio(proposta.start.slice(0, 16));
+                  }}
+                >
+                  Remarcar
+                </Button>
+                <Button
+                  variant="quiet"
+                  size="sm"
+                  disabled={ocupado}
+                  onClick={() => void descartar(proposta.id)}
+                  aria-label={`Descartar ${proposta.title}`}
+                >
+                  Descartar
+                </Button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Dialog>
+
+      <Dialog
+        open={remarcando !== null}
+        onClose={() => (ocupado ? undefined : setRemarcando(null))}
+        title="Remarcar proposta"
+        description={remarcando?.title}
+        footer={
+          <>
+            <Button
+              variant="ghost"
+              onClick={() => setRemarcando(null)}
+              disabled={ocupado}
+            >
+              Cancelar
+            </Button>
+            <Button
+              variant="primary"
+              onClick={() => void salvarRemarcacao()}
+              disabled={ocupado || !novoInicio}
+            >
+              Salvar
+            </Button>
+          </>
+        }
+      >
+        <label htmlFor="novo-inicio" className="mb-1.5 block text-xs text-muted">
+          Novo início (a duração não muda)
+        </label>
+        <input
+          id="novo-inicio"
+          type="datetime-local"
+          value={novoInicio}
+          onChange={(e) => setNovoInicio(e.target.value)}
+          className="w-full rounded-lg border border-line-strong bg-surface-2 px-3 py-2 text-sm text-ink"
+        />
+      </Dialog>
 
       <Dialog
         open={selected !== null}

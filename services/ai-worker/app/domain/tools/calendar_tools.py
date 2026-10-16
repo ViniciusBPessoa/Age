@@ -93,6 +93,62 @@ async def get_pending_proposals(ctx: ToolContext, args: dict) -> dict:
 
 
 @register_tool(
+    name="discard_proposals",
+    description=(
+        "Descarta propostas que ainda esperam aprovação, num período. "
+        "Use quando a pessoa disser que não quer mais os blocos "
+        "propostos, que mudou de ideia, ou pedir para limpar o que você "
+        "sugeriu. NÃO mexe no que já foi aprovado: para remover um "
+        "compromisso confirmado, use `propose_delete`. "
+        "Informe `title_contains` para apagar só parte: sem ele, TODAS "
+        "as propostas do período vão embora."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "start": {"type": "string", "description": f"início, {_ISO}"},
+            "end": {"type": "string", "description": f"fim, {_ISO}"},
+            "title_contains": {
+                "type": "string",
+                "description": (
+                    "opcional: só descarta propostas cujo título contenha "
+                    "este texto, ex. 'Função de 1º grau'"
+                ),
+            },
+        },
+        "required": ["start", "end"],
+    },
+    category=ToolCategory.READ,
+)
+async def discard_proposals(ctx: ToolContext, args: dict) -> dict:
+    """Categoria READ embora escreva, e a razão importa.
+
+    `ToolCategory.WRITE` significa "acumula no plano para o usuário
+    aprovar" (§5.2). Descartar proposta não pode virar proposta: seria
+    pedir aprovação para cancelar algo que ainda nem foi aprovado, e o
+    usuário ficaria com duas pendências onde queria zero.
+
+    Nada aqui toca a agenda. O pior caso é descartar demais, e a saída
+    é pedir ao Age que proponha de novo.
+    """
+    if ctx.read_calendar is None:
+        return {"error": "agenda não disponível neste turno"}
+
+    data = await ctx.read_calendar(
+        "discard_proposals",
+        start=args["start"],
+        end=args["end"],
+        title_contains=args.get("title_contains"),
+    )
+    if not data.get("discarded"):
+        return {
+            "discarded": 0,
+            "hint": "Não havia proposta pendente nesse período.",
+        }
+    return data
+
+
+@register_tool(
     name="find_free_slots",
     description=(
         "Encontra horários livres que caibam uma duração. SEMPRE use esta "

@@ -319,6 +319,133 @@ async def reject(plan_id: UUID, user: CurrentUser, db: DbSession) -> None:
     await mark_rejected(db, user.id, plan_id)
 
 
+class ItemRescheduleIn(BaseModel):
+    """Novo horário para um item ainda não aplicado."""
+
+    start: datetime
+    end: datetime
+
+
+@router.delete("/items/{item_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def discard_item(
+    item_id: UUID, user: CurrentUser, db: DbSession
+) -> None:
+    """Descarta UM item proposto, sem mexer nos outros do mesmo plano.
+
+    Existe por um relato direto: "está lá como proposta, não posso mais
+    alterar, não posso mais editar". O `reject` do plano inteiro já
+    existia, mas quem recebeu 18 blocos de estudo e quer tirar 3 não
+    tinha como — era tudo ou nada.
+
+    Só toca item `pending`: aplicado já virou evento na agenda, e
+    apagar de lá é operação de agenda, não de plano (§5.8).
+    """
+    row = await db.execute(
+        text(
+            """
+            UPDATE core.plan_items SET status = 'rejected'
+            WHERE id = :iid AND user_id = :uid AND status = 'pending'
+            RETURNING plan_id
+            """
+        ),
+        {"iid": str(item_id), "uid": str(user.id)},
+    )
+    plan_id = row.scalar_one_or_none()
+    if plan_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "error": {
+                    "code": "item_not_found",
+                    "message": "Item não encontrado ou já decidido.",
+                }
+            },
+        )
+
+    # Plano sem nenhum item pendente não deve continuar `proposed`:
+    # ficaria para sempre na lista de pendências e no contador da
+    # agenda, pedindo uma aprovação que não tem mais o que aprovar.
+    restantes = await db.execute(
+        text(
+            "SELECT count(*) FROM core.plan_items "
+            "WHERE plan_id = :pid AND user_id = :uid AND status = 'pending'"
+        ),
+        {"pid": str(plan_id), "uid": str(user.id)},
+    )
+    if restantes.scalar_one() == 0:
+        await db.execute(
+            text(
+                "UPDATE core.plans SET status = 'rejected' "
+                "WHERE id = :pid AND user_id = :uid AND status = 'proposed'"
+            ),
+            {"pid": str(plan_id), "uid": str(user.id)},
+        )
+
+
+@router.patch("/items/{item_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def reschedule_item(
+    item_id: UUID, body: ItemRescheduleIn, user: CurrentUser, db: DbSession
+) -> None:
+    """Muda o horário de um item proposto antes de aprová-lo.
+
+    O par natural do descarte: "esse bloco serve, mas não às 8h15".
+    Sem isto a única saída é rejeitar e pedir tudo de novo ao modelo,
+    gastando um turno para mover meia hora.
+
+    Edita só `start` e `end` do payload. Título e calendário saem do
+    que foi proposto: o que esta rota resolve é horário, e abrir o
+    payload inteiro à edição transformaria aprovação em formulário.
+    """
+    if body.end <= body.start:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "error": {
+                    "code": "invalid_window",
+                    "message": "O fim precisa vir depois do início.",
+                }
+            },
+        )
+
+    row = await db.execute(
+        text(
+            """
+            UPDATE core.plan_items
+            -- `CAST(... AS text)` e não `:start::text`: o `::` do cast
+            -- colide com o marcador de parâmetro do SQLAlchemy, e o
+            -- Postgres recebe a query com um `:` solto.
+            SET after = jsonb_set(
+                    jsonb_set(
+                        CAST(after AS jsonb), '{start}',
+                        to_jsonb(CAST(:start AS text))
+                    ),
+                    '{end}', to_jsonb(CAST(:end AS text))
+                )
+            WHERE id = :iid AND user_id = :uid
+              AND status = 'pending' AND target = 'event'
+              AND after IS NOT NULL
+            RETURNING id
+            """
+        ),
+        {
+            "iid": str(item_id),
+            "uid": str(user.id),
+            "start": body.start.isoformat(),
+            "end": body.end.isoformat(),
+        },
+    )
+    if row.scalar_one_or_none() is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "error": {
+                    "code": "item_not_found",
+                    "message": "Item não encontrado ou já decidido.",
+                }
+            },
+        )
+
+
 @router.post("/{plan_id}/undo")
 async def undo(plan_id: UUID, user: CurrentUser, db: DbSession) -> dict:
     """Desfaz um plano aplicado, dentro da janela de 7 dias (§5.8).

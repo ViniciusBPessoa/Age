@@ -23,7 +23,7 @@ from uuid import UUID
 import jwt
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from pydantic import BaseModel, Field
-from sqlalchemy import text
+from sqlalchemy import bindparam, text
 
 from app.adapters.calendar.local import LocalCalendar
 from app.core.config import get_settings
@@ -628,4 +628,101 @@ async def internal_pending_proposals(
             "count": len(itens),
             "plan_count": len(planos),
             "items": itens[:50],
+        }
+
+
+@internal.post("/discard-proposals")
+async def internal_discard_proposals(
+    user_id: WorkerUser,
+    body: dict,
+) -> dict:
+    """Descarta propostas pendentes numa janela, pelo chat.
+
+    Relato: "está lá como proposta, não posso mais alterar, não posso
+    mais editar, que porra é essa". O usuário tinha razão: havia
+    `propose_*` para criar e nada para desfazer antes de aprovar.
+
+    Escrita que NÃO passa por plano, de propósito. A regra de §5.2 é
+    que nada entra na agenda sem aprovação; descartar uma proposta não
+    coloca nada na agenda, tira. Exigir um plano para rejeitar outro
+    plano criaria uma escada sem fim, e o pior caso de um engano aqui é
+    pedir ao Age que proponha de novo.
+    """
+    inicio = datetime.fromisoformat(body["start"])
+    fim = datetime.fromisoformat(body["end"])
+    titulo = (body.get("title_contains") or "").strip().lower()
+
+    async with user_session(user_id) as db:
+        await promote_drafts(db, user_id)
+
+        rows = await db.execute(
+            text(
+                """
+                SELECT pi.id, pi.after, pi.plan_id
+                FROM core.plan_items pi
+                JOIN core.plans p ON p.id = pi.plan_id
+                WHERE p.user_id = :uid
+                  AND p.status = 'proposed'
+                  AND pi.status = 'pending'
+                  AND pi.after IS NOT NULL
+                """
+            ),
+            {"uid": str(user_id)},
+        )
+
+        alvos: list[tuple[str, str]] = []
+        for item_id, after, _plan in rows.all():
+            payload = after if isinstance(after, dict) else json.loads(after)
+            bruto = payload.get("start")
+            if not bruto:
+                continue
+            try:
+                quando = datetime.fromisoformat(bruto)
+            except ValueError:
+                continue
+            if quando < inicio or quando > fim:
+                continue
+            nome = payload.get("title") or ""
+            if titulo and titulo not in nome.lower():
+                continue
+            alvos.append((str(item_id), nome))
+
+        if not alvos:
+            return {"discarded": 0, "items": []}
+
+        # `IN (...)` com `expanding`, não `ANY(:ids)`: o asyncpg espera
+        # uma LISTA Python para um array, e a literal do Postgres
+        # (`'{a,b}'`) chega como str e estoura com "a sized iterable
+        # container expected (got type 'str')". Foi exatamente o que
+        # aconteceu no primeiro teste real desta rota.
+        await db.execute(
+            text(
+                "UPDATE core.plan_items SET status = 'rejected' "
+                "WHERE id IN :ids AND user_id = :uid"
+            ).bindparams(bindparam("ids", expanding=True)),
+            {
+                "ids": [UUID(i) for i, _ in alvos],
+                "uid": str(user_id),
+            },
+        )
+        # Planos que ficaram sem nada pendente saem de `proposed`:
+        # continuariam contando no cabeçalho da agenda pedindo uma
+        # aprovação que não tem mais o que aprovar.
+        await db.execute(
+            text(
+                """
+                UPDATE core.plans p SET status = 'rejected'
+                WHERE p.user_id = :uid AND p.status = 'proposed'
+                  AND NOT EXISTS (
+                      SELECT 1 FROM core.plan_items pi
+                      WHERE pi.plan_id = p.id AND pi.status = 'pending'
+                  )
+                """
+            ),
+            {"uid": str(user_id)},
+        )
+
+        return {
+            "discarded": len(alvos),
+            "items": [nome for _, nome in alvos[:20]],
         }

@@ -67,6 +67,8 @@ class CalendarClient:
                 return await self.pending_proposals(
                     kwargs["start"], kwargs["end"]
                 )
+            case "discard_proposals":
+                return await self.discard_proposals(**kwargs)
             case "find_free_slots":
                 return await self.find_free_slots(**kwargs)
             case "summarize_workload":
@@ -160,6 +162,21 @@ class CalendarClient:
         """
         return await self._get(
             "/pending-proposals", {"start": start, "end": end}
+        )
+
+    async def discard_proposals(
+        self, *, start: str, end: str, title_contains: str | None = None
+    ) -> dict:
+        """Descarta propostas pendentes na janela.
+
+        Única escrita do worker, e ela não toca a agenda: só rejeita o
+        que ainda estava esperando aprovação.
+        """
+        # Caminho completo: `_post` não acrescenta prefixo, ao contrário
+        # de `_get`, que assume `/internal/calendar`.
+        return await self._post(
+            "/internal/calendar/discard-proposals",
+            {"start": start, "end": end, "title_contains": title_contains},
         )
 
     async def find_free_slots(
