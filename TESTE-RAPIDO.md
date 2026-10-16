@@ -80,7 +80,35 @@ na verdade 16h, e só 30 min
 diz que tirou o anterior. Antes ficavam dois, e era esse o mecanismo
 que empilhou as 28 propostas de estudo na sua conta.
 
-## 6. Apagar conversas
+## 6. O cartão que não apareceu
+
+Era o relato da conversa de Python: ele disse *"Preparei a proposta,
+está esperando sua aprovação"* e **nenhum cartão apareceu**. Você só
+viu as 3 sessões depois do F5.
+
+Medi na sua conta: o rascunho ficou pronto às 19:22:57 e o plano só
+virou visível às 19:24:35, quando você atualizou. **98 segundos
+invisível.**
+
+Peça qualquer coisa que gere proposta e confira que o cartão aparece
+**sem F5**. Ele é a confirmação: não existe outra pergunta no chat.
+
+## 7. Voltar onde você estava
+
+O pedido. Faça nesta ordem:
+
+1. abra uma conversa qualquer no chat;
+2. vá para **Agenda** e troque para **mês**;
+3. volte para **Conversa** pela navegação.
+
+**O que deve acontecer:** volta para a conversa que estava aberta, não
+para a tela vazia. E ao voltar para a Agenda, ela está em **mês**.
+
+A **data** volta sempre para hoje, de propósito: foi o que você
+escolheu quando perguntei. Guardar a data faria você cair numa semana
+velha ao voltar dias depois.
+
+## 8. Apagar conversas
 
 Na lista à esquerda, **"Selecionar conversas"** abre caixas de seleção
 com "Selecionar todas". O menu de três pontos de cada conversa agora
@@ -101,7 +129,7 @@ ajusto. Esse tipo de problema é invisível para os testes que eu rodo.
 
 ## Estado
 
-- 179 testes no front, 294 no core-api, 113 no worker
+- 195 testes no front, 294 no core-api, 113 no worker
 - `ruff` e `tsc` limpos
 - Custo da madrugada: **US$ 0,38**
 - Sua conta: 0 eventos, 1 proposta ("Limpar a casa") esperando você
