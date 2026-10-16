@@ -143,6 +143,7 @@ export function subscribeToTurn(
 const TOOL_LABELS: Record<string, string> = {
   // Agenda (§5.2)
   get_events: "lendo sua agenda",
+  get_pending_proposals: "vendo o que espera aprovação",
   find_free_slots: "procurando horários livres",
   summarize_workload: "medindo a carga da semana",
   propose_event: "montando a proposta",

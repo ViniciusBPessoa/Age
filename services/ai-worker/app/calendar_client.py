@@ -63,6 +63,10 @@ class CalendarClient:
         match operation:
             case "list_events":
                 return await self.list_events(kwargs["start"], kwargs["end"])
+            case "pending_proposals":
+                return await self.pending_proposals(
+                    kwargs["start"], kwargs["end"]
+                )
             case "find_free_slots":
                 return await self.find_free_slots(**kwargs)
             case "summarize_workload":
@@ -146,6 +150,17 @@ class CalendarClient:
     async def list_events(self, start: str, end: str) -> list[dict]:
         data = await self._get("/events", {"start": start, "end": end})
         return data["events"]
+
+    async def pending_proposals(self, start: str, end: str) -> dict:
+        """Propostas pendentes na janela.
+
+        Separada de `list_events` de propósito: propostos NÃO contam
+        como ocupação para o Scheduler (§5.3). Ver a docstring da rota
+        no core-api para o relato que originou isto.
+        """
+        return await self._get(
+            "/pending-proposals", {"start": start, "end": end}
+        )
 
     async def find_free_slots(
         self,

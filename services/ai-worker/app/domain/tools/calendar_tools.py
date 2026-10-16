@@ -61,6 +61,38 @@ async def get_events(ctx: ToolContext, args: dict) -> dict:
 
 
 @register_tool(
+    name="get_pending_proposals",
+    description=(
+        "Lê o que VOCÊ já propôs e o usuário ainda não aprovou, num "
+        "período. `get_events` não mostra isso: ela só devolve o que já "
+        "foi aplicado. Use esta ferramenta SEMPRE que o usuário "
+        "perguntar o que tem na agenda, o que tem para fazer, ou pedir "
+        "para limpar/remarcar o dia — senão você vai dizer que está "
+        "vazio enquanto a tela dele mostra blocos esperando aprovação."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "start": {"type": "string", "description": f"início, {_ISO}"},
+            "end": {"type": "string", "description": f"fim, {_ISO}"},
+        },
+        "required": ["start", "end"],
+    },
+    category=ToolCategory.READ,
+)
+async def get_pending_proposals(ctx: ToolContext, args: dict) -> dict:
+    if ctx.read_calendar is None:
+        return {"error": "agenda não disponível neste turno"}
+
+    data = await ctx.read_calendar(
+        "pending_proposals", start=args["start"], end=args["end"]
+    )
+    if not data.get("count"):
+        return {"count": 0, "items": [], "hint": "Nada esperando aprovação."}
+    return data
+
+
+@register_tool(
     name="find_free_slots",
     description=(
         "Encontra horários livres que caibam uma duração. SEMPRE use esta "

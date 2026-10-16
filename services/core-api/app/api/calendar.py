@@ -14,6 +14,7 @@ diverge.
 
 from __future__ import annotations
 
+import json
 import logging
 from datetime import datetime, timedelta
 from typing import Annotated, Literal
@@ -22,6 +23,7 @@ from uuid import UUID
 import jwt
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from pydantic import BaseModel, Field
+from sqlalchemy import text
 
 from app.adapters.calendar.local import LocalCalendar
 from app.core.config import get_settings
@@ -35,6 +37,7 @@ from app.services.calendar_access import (
     read_busy,
     read_events,
 )
+from app.services.plan_store import promote_drafts
 
 log = logging.getLogger("core-api.calendar")
 router = APIRouter(prefix="/calendar", tags=["calendar"])
@@ -547,4 +550,82 @@ async def internal_workload(
                 }
                 for load in loads
             ]
+        }
+
+
+@internal.get("/pending-proposals")
+async def internal_pending_proposals(
+    user_id: WorkerUser,
+    start: datetime = Query(...),
+    end: datetime = Query(...),
+) -> dict:
+    """O que foi proposto e ainda espera aprovação, na janela.
+
+    Existe por causa de um relato real: o usuário pediu um plano de
+    estudo, viu 28 blocos na tela da agenda, perguntou ao Age "o que eu
+    tenho hoje?" e ouviu "não achei nada".
+
+    As duas respostas estavam certas cada uma por si. A tela mostra
+    propostos com borda tracejada (o cabeçalho dizia "28 propostos"), e
+    `/events` só devolve o que foi APLICADO, que é o correto para
+    `find_free_slots`: horário proposto não está ocupado, senão o
+    Scheduler recusaria encaixar qualquer coisa perto dele.
+
+    O furo era o modelo não ter como enxergar a outra metade. Ele lia a
+    agenda aplicada e concluía "vazio", sem saber que havia 28 itens
+    pendurados esperando o usuário.
+
+    Esta rota é SÓ leitura e deliberadamente separada de `/events`:
+    misturar as duas fontes num endpoint só faria propostos contarem
+    como ocupação e quebraria o agendamento (§5.3).
+    """
+    async with user_session(user_id) as db:
+        await promote_drafts(db, user_id)
+
+        rows = await db.execute(
+            text(
+                """
+                SELECT pi.after, pi.op, p.id
+                FROM core.plan_items pi
+                JOIN core.plans p ON p.id = pi.plan_id
+                WHERE p.user_id = :uid
+                  AND p.status = 'proposed'
+                  AND pi.status = 'pending'
+                  AND pi.target = 'event'
+                  AND pi.after IS NOT NULL
+                ORDER BY pi.sequence
+                """
+            ),
+            {"uid": str(user_id)},
+        )
+
+        itens: list[dict] = []
+        planos: set[str] = set()
+        for after, op, plan_id in rows.all():
+            payload = after if isinstance(after, dict) else json.loads(after)
+            inicio = payload.get("start")
+            if not inicio:
+                continue
+            try:
+                quando = datetime.fromisoformat(inicio)
+            except ValueError:
+                continue
+            # Janela comparada com consciência de fuso: `start` vem com
+            # offset, e comparar ingênuo levantaria TypeError.
+            if quando < start or quando > end:
+                continue
+            planos.add(str(plan_id))
+            itens.append(
+                {
+                    "title": payload.get("title"),
+                    "start": inicio,
+                    "end": payload.get("end"),
+                    "op": op,
+                }
+            )
+
+        return {
+            "count": len(itens),
+            "plan_count": len(planos),
+            "items": itens[:50],
         }

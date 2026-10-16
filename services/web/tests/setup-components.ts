@@ -21,6 +21,27 @@ if (!Element.prototype.scrollIntoView) {
   Element.prototype.scrollIntoView = function scrollIntoView() {};
 }
 
+// Mesma história com `<dialog>`: o jsdom reconhece a tag mas não
+// implementa `showModal`/`close`, então qualquer componente que use o
+// diálogo nativo (o `Dialog` de `components/ui`) quebra no `useEffect`
+// com "el.showModal is not a function".
+//
+// O stub mantém a propriedade `open` coerente, que é o que o React e as
+// queries por `role="dialog"` enxergam — um stub vazio deixaria o
+// diálogo aberto invisível para o teste e trocaria um erro por uma
+// falha silenciosa.
+if (!HTMLDialogElement.prototype.showModal) {
+  HTMLDialogElement.prototype.showModal = function showModal() {
+    this.open = true;
+  };
+}
+if (!HTMLDialogElement.prototype.close) {
+  HTMLDialogElement.prototype.close = function close() {
+    this.open = false;
+    this.dispatchEvent(new Event("close"));
+  };
+}
+
 // Sem `cleanup`, cada `render` acumula no mesmo `document.body`: o
 // segundo teste de um arquivo encontraria DOIS elementos com o mesmo
 // texto e `getByText` falharia com "found multiple elements" — uma falha

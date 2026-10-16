@@ -358,6 +358,23 @@ export function ChatScreen({
             await mutateConversation(() => api.del(`/conversations/${id}`));
             if (id === conversationId) router.replace("/chat");
           }}
+          onDeleteMany={async (ids) => {
+            /*
+             * Em série, não com `Promise.all`.
+             *
+             * Apagar 20 conversas de uma vez dispararia 20 requisições
+             * simultâneas, e o rate limit do core-api (§2219) responde
+             * 429 ao excedente: o usuário veria "apaguei tudo" com
+             * metade ainda na lista. Em série é mais lento e termina.
+             */
+            for (const id of ids) {
+              await api.del(`/conversations/${id}`).catch(() => undefined);
+            }
+            await queryClient.invalidateQueries({ queryKey: ["conversations"] });
+            if (conversationId && ids.includes(conversationId)) {
+              router.replace("/chat");
+            }
+          }}
           onFork={async (id) => {
             try {
               const forked = await api.post<Conversation>(

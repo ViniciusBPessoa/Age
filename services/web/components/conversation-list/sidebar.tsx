@@ -54,6 +54,7 @@ export function ConversationSidebar({
   onPin,
   onArchive,
   onDelete,
+  onDeleteMany,
   onFork,
 }: {
   conversations: Conversation[];
@@ -67,12 +68,65 @@ export function ConversationSidebar({
   onPin: (id: string, pinned: boolean) => void;
   onArchive: (id: string) => void;
   onDelete: (id: string) => void;
+  /** Apaga várias de uma vez (§6.2.4). Ausente = modo seleção some. */
+  onDeleteMany?: (ids: string[]) => Promise<void> | void;
   onFork: (id: string) => void;
 }) {
   const [term, setTerm] = useState("");
   const [renaming, setRenaming] = useState<Conversation | null>(null);
   const [draftTitle, setDraftTitle] = useState("");
   const [showArchived, setShowArchived] = useState(false);
+
+  /*
+   * Modo seleção (§6.2.4).
+   *
+   * Apagar uma por uma pelo menu de três pontos já existia, e com 20
+   * conversas acumuladas isso são 60 cliques. O pedido foi "apagar
+   * todos, ou um lugar onde eu escolha quais".
+   *
+   * Fica atrás de um modo em vez de caixas sempre visíveis: a lista é
+   * para navegar, e caixa de seleção em cada linha cobra atenção de
+   * quem só quer trocar de conversa.
+   */
+  const [selecting, setSelecting] = useState(false);
+  const [chosen, setChosen] = useState<Set<string>>(new Set());
+  const [confirming, setConfirming] = useState(false);
+  const [erasing, setErasing] = useState(false);
+
+  // Só o que o usuário VÊ pode ser selecionado: aplicar "selecionar
+  // tudo" a conversas escondidas por um filtro de busca apagaria coisa
+  // que ele não tinha na tela.
+  const visiveis = useMemo(
+    () => conversations.filter((c) => !c.archived_at),
+    [conversations],
+  );
+  const todasMarcadas = visiveis.length > 0 && chosen.size === visiveis.length;
+
+  function sairDaSelecao() {
+    setSelecting(false);
+    setChosen(new Set());
+  }
+
+  function alternar(id: string) {
+    setChosen((atual) => {
+      const proximo = new Set(atual);
+      if (proximo.has(id)) proximo.delete(id);
+      else proximo.add(id);
+      return proximo;
+    });
+  }
+
+  async function apagarEscolhidas() {
+    if (!onDeleteMany || chosen.size === 0) return;
+    setErasing(true);
+    try {
+      await onDeleteMany([...chosen]);
+      setConfirming(false);
+      sairDaSelecao();
+    } finally {
+      setErasing(false);
+    }
+  }
   // Um menu aberto por vez, controlado aqui: antes cada linha guardava o
   // seu próprio `menuOpen`, então abrir o segundo deixava o primeiro
   // aberto atrás dele.
@@ -106,6 +160,9 @@ export function ConversationSidebar({
     conversation: c,
     counts: counts[c.id],
     active: c.id === activeId,
+    selecting,
+    checked: chosen.has(c.id),
+    onToggle: () => alternar(c.id),
     menuOpen: openMenu === c.id,
     onMenu: (open: boolean) => setOpenMenu(open ? c.id : null),
     onRename: () => {
@@ -148,6 +205,55 @@ export function ConversationSidebar({
             className="h-9 pl-9 text-xs"
           />
         </form>
+
+        {onDeleteMany && visiveis.length > 0 ? (
+          selecting ? (
+            <div className="space-y-2 rounded-lg border border-line bg-surface-2 p-2">
+              <div className="flex items-center justify-between gap-2">
+                <label className="flex cursor-pointer items-center gap-2 text-xs text-ink-2">
+                  <input
+                    type="checkbox"
+                    checked={todasMarcadas}
+                    onChange={() =>
+                      setChosen(
+                        todasMarcadas ? new Set() : new Set(visiveis.map((c) => c.id)),
+                      )
+                    }
+                    className="h-3.5 w-3.5 accent-brand"
+                  />
+                  Selecionar todas
+                </label>
+                <span className="tabular-nums text-2xs text-muted">
+                  {chosen.size} de {visiveis.length}
+                </span>
+              </div>
+              <div className="flex gap-1.5">
+                <Button
+                  variant="ghost"
+                  className="h-7 flex-1 text-xs"
+                  onClick={sairDaSelecao}
+                >
+                  Cancelar
+                </Button>
+                <Button
+                  variant="danger"
+                  className="h-7 flex-1 text-xs"
+                  disabled={chosen.size === 0}
+                  onClick={() => setConfirming(true)}
+                >
+                  Apagar {chosen.size > 0 ? chosen.size : ""}
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <button
+              onClick={() => setSelecting(true)}
+              className="w-full rounded-lg px-2.5 py-1.5 text-left text-xs text-muted transition-colors hover:bg-surface-2 hover:text-ink"
+            >
+              Selecionar conversas
+            </button>
+          )
+        ) : null}
       </div>
 
       <nav aria-label="Conversas" className="flex-1 overflow-y-auto px-2 pb-2">
@@ -216,6 +322,42 @@ export function ConversationSidebar({
         </div>
       ) : null}
 
+      {/* Confirmação explícita: apagar em lote é a ação mais destrutiva
+          desta tela, e o diálogo diz QUANTAS e o que NÃO é perdido —
+          §6.2.3, eventos e tarefas já aprovados continuam na agenda. */}
+      <Dialog
+        open={confirming}
+        onClose={() => (erasing ? undefined : setConfirming(false))}
+        title={
+          chosen.size === visiveis.length && visiveis.length > 1
+            ? "Apagar todas as conversas?"
+            : `Apagar ${chosen.size} ${chosen.size === 1 ? "conversa" : "conversas"}?`
+        }
+        footer={
+          <>
+            <Button
+              variant="ghost"
+              onClick={() => setConfirming(false)}
+              disabled={erasing}
+            >
+              Cancelar
+            </Button>
+            <Button
+              variant="danger"
+              onClick={() => void apagarEscolhidas()}
+              disabled={erasing}
+            >
+              {erasing ? "Apagando…" : "Apagar"}
+            </Button>
+          </>
+        }
+      >
+        <p className="text-sm leading-relaxed text-ink-2">
+          O que você já aprovou continua na agenda e nas tarefas. Some só o histórico da
+          conversa, e dá para recuperar por 30 dias.
+        </p>
+      </Dialog>
+
       <Dialog
         open={renaming !== null}
         onClose={() => setRenaming(null)}
@@ -277,6 +419,9 @@ function Row({
   conversation,
   counts,
   active,
+  selecting,
+  checked,
+  onToggle,
   menuOpen,
   onMenu,
   onRename,
@@ -288,6 +433,9 @@ function Row({
   conversation: Conversation;
   counts?: ConversationCounts;
   active: boolean;
+  selecting: boolean;
+  checked: boolean;
+  onToggle: () => void;
   menuOpen: boolean;
   onMenu: (open: boolean) => void;
   onRename: () => void;
@@ -331,6 +479,34 @@ function Row({
     { label: "Ramificar", run: onFork },
     { label: "Arquivar", run: onArchive },
   ];
+
+  /*
+   * No modo seleção a linha deixa de ser link e vira rótulo da caixa.
+   *
+   * Se continuasse navegando, clicar para marcar trocaria de conversa e
+   * tiraria o usuário da lista no meio da escolha — o clique faria duas
+   * coisas, e a errada seria a que ele mais nota.
+   */
+  if (selecting) {
+    return (
+      <li>
+        <label
+          className={cx(
+            "flex cursor-pointer items-center gap-2.5 rounded-lg py-2 pl-2.5 pr-2 text-sm transition-colors",
+            checked ? "bg-surface-2 text-ink" : "text-muted hover:bg-surface-2/60",
+          )}
+        >
+          <input
+            type="checkbox"
+            checked={checked}
+            onChange={onToggle}
+            className="h-3.5 w-3.5 shrink-0 accent-brand"
+          />
+          <span className="min-w-0 flex-1 truncate">{title}</span>
+        </label>
+      </li>
+    );
+  }
 
   return (
     <li ref={wrap} className="group relative">
