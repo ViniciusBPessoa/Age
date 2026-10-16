@@ -19,6 +19,7 @@ from redis.asyncio import Redis
 
 # Importar os adaptadores registra cada um no registry (§3.1). Sem estes
 # imports o registry fica vazio e `build_llm` não acha nada.
+from app import tracing
 from app.adapters.llm import deepseek, mock, openai  # noqa: F401
 from app.config import get_settings
 from app.db import dispose_engine
@@ -26,10 +27,9 @@ from app.tasks.echo import echo
 from app.tasks.maintenance import purge_conversations, title_conversation
 from app.tasks.run_turn import run_turn
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='{"level":"%(levelname)s","logger":"%(name)s","msg":"%(message)s"}',
-)
+# Formato e filtro juntos: separados, o formato entrou sem o filtro
+# chegar aos handlers e todo log do `arq` morreu com `ValueError`.
+tracing.configure_logging(logging.INFO)
 log = logging.getLogger("ai-worker")
 
 

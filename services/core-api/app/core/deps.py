@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import user_session
 from app.core.security import TokenError, decode_access_token
+from app.core.tracing import set_user_id as set_log_user_id
 
 
 @dataclass(frozen=True)
@@ -55,6 +56,12 @@ async def get_current_user(request: Request) -> AuthenticatedUser:
         # expirado dispara a renovação silenciosa (§4.1.2).
         code = "token_expired" if "expirado" in str(exc) else "invalid_token"
         raise _unauthorized(code, str(exc)) from exc
+
+    # §12 pede `user_id` no log estruturado, e este é o único ponto por
+    # onde todo request autenticado passa — pôr aqui é o que garante que
+    # nenhuma rota nova esqueça. Vale para o request inteiro: o
+    # `ContextVar` é zerado por `TraceMiddleware` a cada requisição.
+    set_log_user_id(str(payload["sub"]))
 
     return AuthenticatedUser(
         id=UUID(payload["sub"]),

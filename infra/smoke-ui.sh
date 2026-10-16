@@ -785,6 +785,66 @@ fi
 rl_limpa_
 
 # ---------------------------------------------------------------
+head_ "17. O trace_id atravessa os serviços (§12, §14.2)"
+
+# §14.2 lista como risco número um a complexidade operacional de três
+# serviços, e nomeia esta propriedade como a mitigação. O teste é pelo
+# NAVEGADOR de propósito: o trace nasce no BFF, e medir só a porta 8000
+# deixaria de fora justamente o salto que ele atravessa primeiro.
+TRACE_SMOKE="smoke-trace-$RANDOM-$RANDOM"
+
+TR_HDR=$(curl -s -D - -o /dev/null -X POST "$WEB/api/auth/login"          -H 'Content-Type: application/json'          -H "x-trace-id: $TRACE_SMOKE"          -d "{\"email\":\"$EMAIL\",\"password\":\"$SENHA\"}"          | grep -i '^x-trace-id:' | tr -d '
+' | awk '{print $2}')
+
+if [ "$TR_HDR" = "$TRACE_SMOKE" ]; then
+  ok "o BFF devolve o trace na resposta (quem reporta erro pode citá-lo)"
+else
+  bad "o trace não voltou na resposta: '$TR_HDR'"
+fi
+
+# O log do core-api tem de conter o id, em JSON de uma linha. Sem isto a
+# propagação é decorativa: o id viaja e não há onde procurá-lo.
+sleep 1
+LINHA=$($COMPOSE logs --no-log-prefix core-api 2>/dev/null         | grep -F "$TRACE_SMOKE" | tail -1)
+if [ -n "$LINHA" ]; then
+  ok "o core-api registra o trace no log"
+else
+  bad "nenhuma linha de log do core-api com o trace"
+fi
+
+# JSON válido importa porque o envelope é montado por nós: a mensagem do
+# uvicorn contém aspas, e com formato interpolado em vez de serializado
+# a linha saía inválida — descartada em silêncio por um agregador.
+if [ -n "$LINHA" ] && printf '%s' "$LINHA"    | python -c "import json,sys; json.loads(sys.stdin.read())" 2>/dev/null; then
+  ok "a linha de log é JSON válido mesmo com aspas na mensagem"
+else
+  bad "a linha de log do core-api não é JSON válido"
+fi
+
+# E o salto pela fila: §12 diz que é onde o trace quebra se não for
+# propagado no payload, e era exatamente o que acontecia — o worker
+# recebia o campo e o descartava.
+# Sessão nova: a seção 15 fez logout e a 16 esgotou o rate limit de
+# login desta conta. Reaproveitar o jar aqui testaria o estado deixado
+# pelas seções anteriores, não o trace — e foi o que falhou na primeira
+# versão desta seção.
+EMAIL_TR="smoke-trace-$RANDOM@exemplo.com"
+web -o /dev/null -X POST "$WEB/api/auth/register"     -H 'Content-Type: application/json'     -d "{\"email\":\"$EMAIL_TR\",\"password\":\"$SENHA\"}" >/dev/null
+
+CONV_TR=$(web -X POST "$WEB/api/conversations" -H 'Content-Type: application/json'           -H "x-trace-id: $TRACE_SMOKE" -d '{}' | uuid_)
+if [ -n "$CONV_TR" ]; then
+  web -o /dev/null -X POST "$WEB/api/conversations/$CONV_TR/messages"       -H 'Content-Type: application/json' -H "x-trace-id: $TRACE_SMOKE"       -d '{"content":"smoke de rastreio"}' >/dev/null
+  sleep 5
+  if $COMPOSE logs --no-log-prefix ai-worker 2>/dev/null      | grep -qF "$TRACE_SMOKE"; then
+    ok "o trace chega ao ai-worker pela fila (o salto de §12)"
+  else
+    bad "o trace não chegou ao worker: o salto pela fila está quebrado"
+  fi
+else
+  bad "não consegui criar conversa para testar o trace pela fila"
+fi
+
+# ---------------------------------------------------------------
 printf '\n\033[1m%s\033[0m\n' "Resultado"
 printf '  %s passaram, %s falharam\n\n' "$PASS" "$FAIL"
 if [ "$FAIL" -gt 0 ]; then

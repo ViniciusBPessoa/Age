@@ -28,19 +28,28 @@ from app.api import (
     study,
     tasks,
 )
+from app.core import tracing
 from app.core.config import get_settings
 from app.core.db import dispose_engine
 from app.core.redis import close_redis
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='{"level":"%(levelname)s","logger":"%(name)s","msg":"%(message)s"}',
-)
+# Formato e filtro numa chamada só: era `basicConfig` com `%(trace_id)s`
+# mais um `install()` separado, e a separação permitiu o formato entrar
+# sem o filtro chegar aos handlers — toda linha de log de biblioteca
+# morreu com `ValueError` até isso ser corrigido. Ver `core.tracing`.
+tracing.configure_logging(logging.INFO)
 log = logging.getLogger("core-api")
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    # De novo aqui, e não só no topo do módulo: o uvicorn aplica o
+    # LOGGING_CONFIG dele DEPOIS de importar a app, e aquilo
+    # desconfigura `uvicorn.access`. O `lifespan` roda depois disso,
+    # então é o último a falar — e é o que faz a linha de acesso sair
+    # em JSON com trace, em vez do texto puro do uvicorn.
+    tracing.configure_logging(logging.INFO)
+
     settings = get_settings()
     log.info("core-api subindo (env=%s)", settings.environment)
     yield
@@ -57,6 +66,11 @@ app = FastAPI(
     docs_url="/docs",
     openapi_url="/openapi.json",
 )
+
+# Primeiro da pilha, portanto o mais externo: o trace precisa existir
+# antes da autenticação, porque um 401 é exatamente o tipo de resposta
+# que se vai querer rastrear.
+app.add_middleware(tracing.TraceMiddleware)
 
 # /healthz e /readyz na raiz: o Compose e o orquestrador esperam ali,
 # não sob /api/v1.

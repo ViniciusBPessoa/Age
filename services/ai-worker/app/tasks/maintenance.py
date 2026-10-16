@@ -10,6 +10,7 @@ from uuid import UUID
 
 from sqlalchemy import text
 
+from app import tracing
 from app.adapters.llm.registry import build_llm
 from app.config import get_settings
 from app.crypto import SecretBox, llm_context
@@ -28,6 +29,11 @@ async def title_conversation(ctx: dict, payload: dict) -> dict:
     """
     conversation_id = UUID(payload["conversation_id"])
     user_id = UUID(payload["user_id"])
+    # Mesmo trace do turno que originou a conversa: o `core-api`
+    # enfileira os dois jobs com o `trace_id` da mesma requisição, então
+    # o título aparece agrupado com o turno que o provocou — e não como
+    # uma chamada de LLM solta, sem causa aparente.
+    tracing.bind(payload, user_id=str(user_id))
     settings = get_settings()
 
     async with user_session(user_id) as db:

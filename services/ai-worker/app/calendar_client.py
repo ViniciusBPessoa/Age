@@ -27,6 +27,8 @@ import httpx
 import jwt
 
 from app.config import get_settings
+from app.tracing import HEADER as TRACE_HEADER
+from app.tracing import current_trace_id
 
 log = logging.getLogger("ai-worker.calendar")
 
@@ -96,6 +98,29 @@ class CalendarClient:
             case _:
                 raise ValueError(f"operação desconhecida: {operation}")
 
+    def _headers(self) -> dict[str, str]:
+        """Headers de toda chamada interna, num lugar só.
+
+        Eram três dicionários idênticos, um por método de chamada, e a
+        duplicação deixou de ser inofensiva quando o `X-Trace-Id`
+        entrou: esquecer o header num dos três quebraria o trace apenas
+        nas tools que passam por aquele caminho — o tipo de furo que só
+        aparece quando se está depurando outra coisa.
+
+        O trace sai do contexto do job (`tracing.bind`, na entrada de
+        `run_turn`), e é o mesmo que o navegador gerou. É o salto que
+        fechava o círculo: worker → core-api começava um trace novo, e
+        as duas metades da mesma operação ficavam sem ligação.
+        """
+        headers = {
+            "Authorization": f"Bearer {_service_token()}",
+            "X-Age-User-Id": str(self._user_id),
+        }
+        trace = current_trace_id()
+        if trace:
+            headers[TRACE_HEADER] = trace
+        return headers
+
     async def _get(self, path: str, params: dict) -> Any:
         return await self._get_at("/internal/calendar", path, params)
 
@@ -107,10 +132,7 @@ class CalendarClient:
         permite escrita — escrever passa pelo `PlanExecutor` (§3.4).
         """
         url = f"{self._base}{prefix}{path}"
-        headers = {
-            "Authorization": f"Bearer {_service_token()}",
-            "X-Age-User-Id": str(self._user_id),
-        }
+        headers = self._headers()
         async with httpx.AsyncClient(timeout=20.0) as client:
             response = await client.get(url, params=params, headers=headers)
 
@@ -156,10 +178,7 @@ class CalendarClient:
     # -----------------------------------------------------------
     async def _post(self, path: str, payload: dict) -> dict:
         url = f"{self._base}{path}"
-        headers = {
-            "Authorization": f"Bearer {_service_token()}",
-            "X-Age-User-Id": str(self._user_id),
-        }
+        headers = self._headers()
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post(url, json=payload, headers=headers)
 
@@ -192,10 +211,7 @@ class CalendarClient:
     async def study_progress(self, subject: str | None = None) -> dict:
         params = {"subject": subject} if subject else {}
         url = f"{self._base}/internal/study/progress"
-        headers = {
-            "Authorization": f"Bearer {_service_token()}",
-            "X-Age-User-Id": str(self._user_id),
-        }
+        headers = self._headers()
         async with httpx.AsyncClient(timeout=20.0) as client:
             response = await client.get(url, params=params, headers=headers)
         if response.status_code >= 400:

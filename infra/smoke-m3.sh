@@ -34,7 +34,32 @@ rl_reset_() {
 }
 rl_reset_
 
-psql_() { $COMPOSE exec -T postgres psql -U age_super -d age -tAc "$1" 2>&1; }
+# `2>/dev/null` e não `2>&1`: com o stderr misturado, qualquer aviso do
+# Docker ou do psql entrava no "resultado" da consulta. Uma lista de
+# UUIDs virava texto de aviso, o laço que a consome não marcava nada, e
+# a falha aparecia DEPOIS, numa asserção de domínio — "sequência de
+# faltas: 2" em vez de "a consulta não devolveu linhas".
+#
+# Foi essa indireção que fez este smoke parecer instável: o sintoma
+# aparecia em checagens diferentes a cada rodada, porque dependia de
+# qual consulta tinha sido contaminada.
+psql_() { $COMPOSE exec -T postgres psql -U age_super -d age -tAc "$1" 2>/dev/null; }
+
+# Consulta que PRECISA devolver linha: aborta na hora se não devolver.
+# Falhar aqui aponta para a causa; falhar três checagens adiante não.
+psql_req_() {
+  local saida
+  saida=$(psql_ "$1")
+  if [ -z "$(printf '%s' "$saida" | tr -d '[:space:]')" ]; then
+    bad "consulta sem resultado (o smoke depende dela): $2"
+    printf '
+[31mM3 incompleto: estado de banco inesperado.[0m
+
+'
+    exit 1
+  fi
+  printf '%s' "$saida"
+}
 
 # Tópicos de Álgebra Linear, com os pré-requisitos reais da disciplina.
 TOPICS='[
@@ -245,12 +270,29 @@ else
 fi
 
 # Empurra as sessões para o passado, para virarem "pendentes".
-psql_ "UPDATE core.study_sessions s
-       SET scheduled_start = now() - interval '2 days',
-           scheduled_end = now() - interval '2 days' + interval '60 minutes'
-       WHERE s.topic_id IN (
-         SELECT id FROM core.study_topics WHERE subject_id = '$SUBJECT_ID'
-       );" >/dev/null
+#
+# `RETURNING`, e não `>/dev/null`: este UPDATE é a base de tudo que vem
+# depois — se ele não tocar linha nenhuma (um `$SUBJECT_ID` vazio
+# bastaria), nada fica pendente, as seções 5 e 6 não marcam nada, e o
+# erro só aparece como "sequência de faltas: 2" lá na frente. Medir aqui
+# transforma três checagens enganosas numa mensagem única e certa.
+MOVIDAS=$(psql_ "WITH m AS (
+         UPDATE core.study_sessions s
+         SET scheduled_start = now() - interval '2 days',
+             scheduled_end = now() - interval '2 days' + interval '60 minutes'
+         WHERE s.topic_id IN (
+           SELECT id FROM core.study_topics WHERE subject_id = '$SUBJECT_ID'
+         )
+         RETURNING 1
+       ) SELECT count(*) FROM m;" | tr -d '[:space:]')
+
+if [ "${MOVIDAS:-0}" -lt 3 ]; then
+  bad "só $MOVIDAS sessões movidas para o passado (esperado >= 3)"
+  printf '
+[31mM3 incompleto: estado de banco inesperado.[0m
+
+'; exit 1
+fi
 
 PENDING=$(curl -s "$API/study/sessions/pending" "${AUTH[@]}")
 PENDING_COUNT=$(echo "$PENDING" | python -c "
@@ -266,11 +308,15 @@ fi
 head_ "5. Recalibração de estimativa (§5.9.8)"
 
 # Duas sessões do MESMO tópico, concluídas mais rápido que o planejado.
-TOPIC_ID=$(psql_ "SELECT id FROM core.study_topics
+TOPIC_ID=$(psql_req_ "SELECT id FROM core.study_topics
                   WHERE subject_id = '$SUBJECT_ID'
-                    AND name LIKE 'Espacos%' LIMIT 1;" | tr -d '[:space:]')
-SESSIONS=$(psql_ "SELECT id FROM core.study_sessions
-                  WHERE topic_id = '$TOPIC_ID' LIMIT 2;" | tr -d ' ')
+                    AND name LIKE 'Espacos%' LIMIT 1;"                  "tópico 'Espacos%' do assunto recém-criado" | tr -d '[:space:]')
+# `ORDER BY scheduled_start`: sem ele o Postgres não promete ordem
+# nenhuma com LIMIT, e quais sessões são marcadas passa a variar entre
+# rodadas — com ela, a sequência de faltas da seção 6 é previsível.
+SESSIONS=$(psql_req_ "SELECT id FROM core.study_sessions
+                  WHERE topic_id = '$TOPIC_ID'
+                  ORDER BY scheduled_start LIMIT 2;"                  "sessões do tópico de recalibração" | tr -d ' ')
 
 LAST_CAL=""
 for sid in $SESSIONS; do
@@ -335,10 +381,29 @@ head_ "6. Pular sessão e o gatilho de 3 faltas (§5.9.8)"
 
 # `s.id` qualificado: sem o alias, `id` e ambiguo no JOIN e o psql
 # devolve a mensagem de erro, que ia direto para a URL do curl.
-SKIP_IDS=$(psql_ "SELECT s.id FROM core.study_sessions s
+# `ORDER BY` por dois motivos. Previsibilidade, como acima; e porque
+# `_skip_streak` conta faltas CONSECUTIVAS por `recorded_at DESC` até
+# achar um `done` — marcar sessões em ordem arbitrária é pedir que o
+# streak quebre no meio por motivo legítimo, e a asserção acusaria o
+# produto por um defeito do teste.
+SKIP_IDS=$(psql_req_ "SELECT s.id FROM core.study_sessions s
                   JOIN core.study_topics t ON t.id = s.topic_id
                   WHERE t.subject_id = '$SUBJECT_ID'
-                    AND s.status = 'planned' LIMIT 3;" | tr -d ' ')
+                    AND s.status = 'planned'
+                  ORDER BY s.scheduled_start LIMIT 3;"                  "3 sessões ainda 'planned' para pular" | tr -d ' ')
+
+# Três, não "até três": o gatilho de §5.9.8 é exatamente 3, e rodar com
+# duas produziria `skip_streak: 2` — um falso negativo que parece bug do
+# produto. Era o sintoma relatado.
+if [ "$(printf '%s
+' $SKIP_IDS | grep -c .)" -lt 3 ]; then
+  bad "só $(printf '%s
+' $SKIP_IDS | grep -c .) sessões 'planned' disponíveis; o gatilho de 3 faltas precisa de 3"
+  printf '
+[31mM3 incompleto: estado de banco inesperado.[0m
+
+'; exit 1
+fi
 
 LAST_SKIP=""
 for sid in $SKIP_IDS; do

@@ -11,6 +11,8 @@ dois com comandos diferentes a partir da mesma imagem.
 from __future__ import annotations
 
 import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 import jwt
 from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, status
@@ -19,6 +21,7 @@ from redis.asyncio import Redis
 from sqlalchemy import text
 
 # Importar registra os adaptadores no registry (§3.1).
+from app import tracing
 from app.adapters.llm import deepseek, mock, openai  # noqa: F401
 from app.adapters.llm.registry import available_providers, build_llm
 from app.config import get_settings
@@ -26,13 +29,24 @@ from app.db import get_engine
 from app.ports.llm import AuthenticationError, LLMError
 from app.publishers import turn_cancel_key
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='{"level":"%(levelname)s","logger":"%(name)s","msg":"%(message)s"}',
-)
+# Formato e filtro juntos: separados, o formato entrou sem o filtro
+# chegar aos handlers e todo log do `arq` morreu com `ValueError`.
+tracing.configure_logging(logging.INFO)
 log = logging.getLogger("ai-worker.api")
 
-app = FastAPI(title="Age — ai-worker (interno)", version="0.1.0")
+@asynccontextmanager
+async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    # De novo aqui: o uvicorn aplica o LOGGING_CONFIG dele DEPOIS de
+    # importar a app, desconfigurando `uvicorn.access`. O `lifespan`
+    # roda depois disso, então é o último a falar.
+    tracing.configure_logging(logging.INFO)
+    yield
+
+
+app = FastAPI(
+    title="Age — ai-worker (interno)", version="0.1.0", lifespan=lifespan
+)
+app.add_middleware(tracing.TraceMiddleware)
 
 
 async def require_service_token(

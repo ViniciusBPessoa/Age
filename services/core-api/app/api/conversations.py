@@ -29,6 +29,7 @@ from app.core.deps import CurrentUser, DbSession
 from app.core.rate_limit import enforce
 from app.core.redis import get_arq, get_redis, turn_cancel_key, turn_stream_key
 from app.core.security import create_service_token
+from app.core.tracing import current_trace_id
 from app.models import Conversation, Message
 from app.services.turn_sync import (
     apply_pending_titles,
@@ -543,7 +544,6 @@ async def send_message(
     body: SendMessage,
     user: CurrentUser,
     db: DbSession,
-    request: Request,
 ) -> TurnAccepted:
     """Persiste a mensagem, enfileira o turno e responde na hora.
 
@@ -643,7 +643,12 @@ async def send_message(
     # recusa job duplicado com o mesmo id.
 
     is_first_exchange = conversation.message_count <= 1
-    trace_id = request.headers.get("X-Trace-Id")
+    # Do contexto, não do header: `TraceMiddleware` já sanitizou o valor
+    # e gerou um quando a requisição chegou sem nenhum. Ler o header
+    # cru aqui faria o job viajar com `None` em toda chamada que não
+    # passa pelo BFF — smoke test, `curl`, `/docs` — que são justamente
+    # as que alguém roda para depurar.
+    trace_id = current_trace_id()
 
     arq = await get_arq()
     await arq.enqueue_job(

@@ -28,6 +28,7 @@ from age_contracts import (
 )
 from sqlalchemy import text
 
+from app import tracing
 from app.adapters.llm.registry import build_llm
 from app.calendar_client import CalendarClient
 from app.config import get_settings
@@ -70,8 +71,21 @@ async def run_turn(ctx: dict, payload: dict) -> dict:
     user_id = UUID(payload["user_id"])
     conversation_id = UUID(payload["conversation_id"])
 
+    # Primeira linha do job, de propósito: daqui para baixo toda linha de
+    # log — deste arquivo, do orquestrador, de cada tool, e também de
+    # `httpx` e `sqlalchemy` — sai com o trace que começou no clique do
+    # usuário (§12). É o ponto onde o trace deixava de existir: o
+    # payload trazia `trace_id` desde o M0 e ninguém o lia.
+    trace = tracing.bind(payload, user_id=str(user_id))
+
     pub = TurnPublisher(ctx["redis"], turn_id)
     settings = get_settings()
+
+    # Um registro por turno com o id correlacionável, antes de qualquer
+    # trabalho: se o turno pendurar e nunca mais logar, esta linha é a
+    # única prova de que ele começou — e §12 lista "turnos em `running`
+    # há mais de 5 min" como métrica justamente desse caso.
+    log.info("turno %s iniciado (trace=%s)", turn_id, trace)
 
     try:
         # --- 1. Idempotência: job reentregue não refaz o turno ---

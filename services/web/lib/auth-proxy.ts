@@ -48,13 +48,19 @@ export async function proxyTokenRoute(
   req: NextRequest,
   path: string,
 ): Promise<Response> {
+  // Um valor só para a ida e para a volta: gerar o trace dentro do
+  // objeto de headers o deixaria inacessível para as respostas que esta
+  // função monta — e a de 503 é a que mais precisa dele, porque nela
+  // não existe nenhuma linha de log do core-api para procurar.
+  const trace = req.headers.get("x-trace-id") ?? crypto.randomUUID();
+
   let upstream: Response;
   try {
     upstream = await fetch(new URL(`/api/v1/${path}`, CORE_API_URL), {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "x-trace-id": req.headers.get("x-trace-id") ?? crypto.randomUUID(),
+        "x-trace-id": trace,
         "User-Agent": req.headers.get("user-agent") ?? "",
         "X-Forwarded-For": req.headers.get("x-forwarded-for") ?? "",
       },
@@ -62,14 +68,22 @@ export async function proxyTokenRoute(
       cache: "no-store",
     });
   } catch {
-    return Response.json(UPSTREAM_DOWN, { status: 503 });
+    return Response.json(UPSTREAM_DOWN, {
+      status: 503,
+      headers: { "x-trace-id": trace },
+    });
   }
 
   if (!upstream.ok) {
     // Erro volta como veio: a mensagem do core-api já é em pt-BR, e no
     // caso de credencial inválida já é deliberadamente vaga sobre o que
     // falhou (e-mail ou senha).
-    const erro = new Headers({ "Content-Type": "application/json" });
+    const erro = new Headers({
+      "Content-Type": "application/json",
+      // O trace do core-api, não o nosso: num 401 ou num 429 ele
+      // respondeu, e é a linha de log DELE que interessa procurar.
+      "x-trace-id": upstream.headers.get("x-trace-id") ?? trace,
+    });
 
     // `Retry-After` precisa atravessar, e esta é a única rota de erro
     // onde isso não acontecia de graça: o catch-all de `[...path]` copia
@@ -88,7 +102,10 @@ export async function proxyTokenRoute(
 
   const token = (await upstream.json()) as TokenResponse;
 
-  const headers = new Headers({ "Content-Type": "application/json" });
+  const headers = new Headers({
+    "Content-Type": "application/json",
+    "x-trace-id": upstream.headers.get("x-trace-id") ?? trace,
+  });
   const refreshCookie = upstream.headers.get("set-cookie");
   if (refreshCookie) headers.append("Set-Cookie", refreshCookie);
   headers.append("Set-Cookie", accessSetCookie(token));

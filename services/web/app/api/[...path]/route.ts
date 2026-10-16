@@ -79,7 +79,23 @@ const HOP_BY_HOP = new Set([
   "authorization",
 ]);
 
-function forwardHeaders(req: NextRequest, accessToken: string | null): Headers {
+/**
+ * O trace da requisição: o que o cliente mandou, ou um novo.
+ *
+ * Calculado FORA de `forwardHeaders` porque o valor é necessário
+ * também nas respostas que o BFF produz sozinho — o 503 de core-api
+ * inacessível, que é justamente a falha em que alguém vai querer um id
+ * para procurar no log e não vai encontrar nenhuma linha do core-api.
+ */
+function traceOf(req: NextRequest): string {
+  return req.headers.get("x-trace-id") ?? crypto.randomUUID();
+}
+
+function forwardHeaders(
+  req: NextRequest,
+  accessToken: string | null,
+  trace: string,
+): Headers {
   const headers = new Headers();
   req.headers.forEach((value, key) => {
     if (!HOP_BY_HOP.has(key.toLowerCase())) headers.set(key, value);
@@ -87,9 +103,7 @@ function forwardHeaders(req: NextRequest, accessToken: string | null): Headers {
   if (accessToken) headers.set("Authorization", `Bearer ${accessToken}`);
   // Rastreabilidade ponta a ponta: o trace_id nasce aqui e é propagado
   // até o worker, inclusive dentro do payload da fila (§12).
-  if (!headers.has("x-trace-id")) {
-    headers.set("x-trace-id", crypto.randomUUID());
-  }
+  headers.set("x-trace-id", trace);
   return headers;
 }
 
@@ -99,6 +113,14 @@ const UPSTREAM_DOWN = {
     message: "O serviço está indisponível. Tente em alguns segundos.",
   },
 };
+
+/** 503 com o trace no header, para a falha ficar localizável. */
+function upstreamDown(trace: string): Response {
+  return Response.json(UPSTREAM_DOWN, {
+    status: 503,
+    headers: { "x-trace-id": trace },
+  });
+}
 
 /**
  * Rotas de auth que o BFF trata de forma especial, porque a resposta
@@ -135,10 +157,11 @@ async function proxy(req: NextRequest, path: string[]): Promise<Response> {
   const hasBody = req.method !== "GET" && req.method !== "HEAD";
   const body = hasBody ? await req.arrayBuffer() : undefined;
 
+  const trace = traceOf(req);
   const send = (token: string | null) =>
     fetch(target, {
       method: req.method,
-      headers: forwardHeaders(req, token),
+      headers: forwardHeaders(req, token, trace),
       body,
       cache: "no-store",
       redirect: "manual",
@@ -148,7 +171,7 @@ async function proxy(req: NextRequest, path: string[]): Promise<Response> {
   try {
     upstream = await send(accessToken);
   } catch {
-    return Response.json(UPSTREAM_DOWN, { status: 503 });
+    return upstreamDown(trace);
   }
 
   // §4.1.2: renova e repete uma vez. O stream também passa por aqui —
@@ -170,7 +193,7 @@ async function proxy(req: NextRequest, path: string[]): Promise<Response> {
         try {
           upstream = await send(result.token.access_token);
         } catch {
-          return Response.json(UPSTREAM_DOWN, { status: 503 });
+          return upstreamDown(trace);
         }
       }
     }

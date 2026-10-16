@@ -1053,6 +1053,129 @@ do chat que ignorava `streaming`, e o cabeçalho desalinhado.
       data (§9.5), degradação de provedor (§3.3.2) e o nome acessível da
       caixa de marcação
 
+### O `trace_id` que atravessava a fila e morria na entrada
+
+§14.2 lista como **risco número um** a complexidade operacional de três
+serviços para um dev solo, e nomeia a mitigação: *"tracing com
+`trace_id` propagado do BFF até o worker (§12) — sem isso, depurar 'o
+token não chegou' é adivinhação."*
+
+Medido antes de escrever qualquer coisa, o estado era mais estranho que
+"não existe":
+
+| Salto | Antes |
+|---|---|
+| navegador → BFF → core-api | funcionava (header `x-trace-id`) |
+| core-api → fila | funcionava (`trace_id` no payload) |
+| fila → worker | **chegava e era descartado** |
+| worker → core-api (HTTP interno) | **ausente**: começava um trace novo |
+| qualquer um deles no log | **ausente**: nada logava o campo |
+
+A tubulação estava assentada desde o M0 — `age_contracts.jobs`
+declarava `trace_id` em `_BasePayload`, e o `core-api` o preenchia. O
+que faltava era alguém **bebendo** dela: `run_turn` lia três campos do
+payload e ignorava o quarto. Um trace que cruza a fila e morre na
+entrada do consumidor dá o mesmo trabalho de um que nunca cruzou.
+
+**A decisão de desenho que fez o trabalho caber em dois arquivos.** O
+id vive num `ContextVar` e entra no log por um filtro, não por
+parâmetro. Passar adiante exigiria mudar a assinatura de toda função
+que loga, e — pior — cada função nova nasceria sem o parâmetro, com o
+esquecimento invisível: a linha sai sem trace e ninguém nota até
+precisar dela. Com o filtro, **todo `log.info` já escrito** nos dois
+serviços ganhou o campo sem edição no ponto de chamada.
+
+**Três defeitos reais, nenhum deles encontrado por teste.** Os três
+apareceram ao rodar e ler `docker logs`:
+
+1. **O log se apagava.** `install()` punha o filtro no *logger* raiz,
+   mas um `logging.Filter` num logger só roda para registros emitidos
+   *naquele* logger — os que sobem por propagação (`uvicorn.access`,
+   `arq.worker`, `sqlalchemy.engine`) vão direto ao handler. Com
+   `%(trace_id)s` no formato e o filtro no lugar errado, cada uma dessas
+   linhas morria com `ValueError: Formatting field not found in
+   record`. O modo de falha é o que torna isso grave: a linha não saía
+   sem trace, **não saía** — a instrumentação apagava justamente o log
+   que se usaria para investigar. O filtro foi para os handlers, e o
+   formatter passou a preencher o campo ausente por conta própria, para
+   que o defeito não possa voltar a essa forma.
+2. **O uvicorn retomava o controle.** Ele aplica o `LOGGING_CONFIG`
+   próprio ao **subir**, depois de o módulo ser importado, e dá a
+   `uvicorn.access` um handler com `propagate: False`. Resultado
+   medido: as nossas linhas saíam em JSON e as de acesso em texto puro,
+   sem trace — o log mais volumoso do serviço, o que diz qual
+   requisição chegou, ficava de fora. A correção reconfigura no
+   `lifespan`, que roda depois, e devolve esses loggers ao nosso
+   handler.
+3. **O envelope JSON não era JSON.** O formato era uma string com
+   `%(message)s` dentro de chaves, o que *parece* serialização e não é:
+   nada escapa o conteúdo. A linha de acesso do uvicorn contém aspas
+   (`"GET /healthz HTTP/1.1"`), e saía como JSON inválido —
+   descartável por qualquer agregador, **em silêncio**, porque log
+   malformado não dá erro em quem o emite. Trocado por `json.dumps`,
+   que escapa por construção e levou o `trace_id` sanitizado a ser
+   defesa em profundidade em vez da única.
+
+**Injeção de log, tratada como entrada externa.** O valor nasce de um
+header, e atravessar a fila não o torna confiável — só o transporta.
+Sem limpeza, um `X-Trace-Id: ","level":"CRITICAL","msg":"` forja linhas
+de log inteiras, com o nível que o atacante quiser. O alvo não é o
+serviço, é quem **lê** o log. `sanitize` reduz a hex, hífen e
+sublinhado (o que cobre UUID e os ids do OpenTelemetry, para o dia em
+que §12 for cumprido por inteiro) e trunca em 64.
+
+**Medido pelo navegador, com um id escolhido a dedo.** Um `grep` de um
+valor dá a operação inteira:
+
+```
+{"logger": "uvicorn.access", "trace_id": "trace-final-…", "user_id": "-",           "msg": "POST /api/v1/auth/login … 200"}
+{"logger": "uvicorn.access", "trace_id": "trace-final-…", "user_id": "63d2f8e7-…", "msg": "POST /api/v1/conversations … 201"}
+{"logger": "uvicorn.access", "trace_id": "trace-final-…", "user_id": "63d2f8e7-…", "msg": "POST …/messages … 202"}
+{"logger": "ai-worker.run_turn", "trace_id": "trace-final-…", "user_id": "63d2f8e7-…", "msg": "turno 18f8b63a-… iniciado"}
+```
+
+O `user_id` ausente no login e presente depois não é falha: ele é
+gravado quando a autenticação resolve, e o login acontece antes. O
+salto interno (worker → core-api) foi exercitado à parte, com uma
+leitura de agenda real: a linha de `/internal/calendar/events` sai com
+o trace do turno que a provocou, onde antes mostraria um id novo e sem
+ligação.
+
+### O `smoke-m3` instável: o defeito era no teste, não no produto
+
+Estava documentado como instabilidade pré-existente — 30/0 numa rodada,
+27/3 na seguinte, com o mesmo código, falhando em checagens que mudavam
+de execução para execução. **Não consegui reproduzir a falha** (12
+rodadas limpas), então não posso dizer "observei falhar e passar a
+passar". O que fiz foi ler o script e medir o banco, e aí três defeitos
+reais apareceram:
+
+1. **`psql_` misturava stderr no resultado** (`2>&1`). Qualquer aviso do
+   Docker ou do psql entrava no "resultado" da consulta: uma lista de
+   UUIDs virava texto de aviso, o laço que a consome não marcava nada, e
+   a falha aparecia **três seções adiante**, como `sequência de faltas:
+   2`. Era essa indireção que fazia o smoke parecer instável — o sintoma
+   mudava de lugar conforme qual consulta tinha sido contaminada.
+2. **Dois `LIMIT` sem `ORDER BY`.** O Postgres não promete ordem
+   nenhuma, e `_skip_streak` conta faltas **consecutivas** por
+   `recorded_at DESC` até achar um `done`. Marcar sessões em ordem
+   arbitrária é pedir que o streak quebre no meio por motivo legítimo —
+   e a asserção acusaria o produto por um defeito do teste.
+3. **Um `UPDATE` cuja ausência de efeito passava calada.** Ele empurra
+   as sessões para o passado e é a base de tudo que vem depois; com
+   `>/dev/null`, zero linhas afetadas seguia adiante em silêncio.
+
+A evidência de que isso é a causa certa veio do banco, não do
+raciocínio: das 28 execuções acumuladas, 26 mostram o padrão saudável
+`2 done / 3 skipped`, e **duas** deviam — uma com `2/0` e uma com
+`0/0`. São exatamente os dois modos de falha que as consultas vazias
+produzem.
+
+A correção não foi "tentar de novo até passar": o script agora **aborta
+no ponto certo**. Verificado por sabotagem — com um `SUBJECT_ID`
+inválido, ele para em *"só 0 sessões movidas para o passado"* em vez de
+reportar um `sequência de faltas: 2` enganoso lá na frente.
+
 ### Adiado, de propósito
 - [ ] Gaveta de conversas abaixo de `md:` — hoje a lista só existe a
       partir de 768px, então no celular não há como trocar de
@@ -1074,21 +1197,24 @@ do chat que ignorava `streaming`, e o cabeçalho desalinhado.
 
 ## Estado atual
 
-**Os sete marcos estão concluídos e validados**: 286 verificações de
-smoke contra containers reais (22 + 35 + 27 + 30 + 38 + 56 + 78), 345
-testes no backend (263 no core-api, 82 no ai-worker) e 110 no front, lint limpo nos três serviços,
-`tsc --noEmit` e `prettier --check` sem erros, e `next build` passando.
+**Os sete marcos estão concluídos e validados**: 290 verificações de
+smoke contra containers reais (22 + 35 + 27 + 30 + 38 + 56 + 82), 378
+testes no backend (285 no core-api, 93 no ai-worker) e 110 no front,
+lint limpo nos três serviços, `tsc --noEmit` e `prettier --check` sem
+erros, e `next build` passando.
 
-**Uma instabilidade pré-existente no `smoke-m3`**, encontrada ao rodar
-a bateria inteira em sequência: ele falha de forma intermitente e em
-checagens que mudam de execução para execução — "preferência não foi
-salva" numa, "sequência de faltas: 2 (esperado >= 3)" e "gatilho de 3
-faltas não acionou" noutra. Medido com o MESMO código: 30/0 numa
-rodada e 27/3 na seguinte. Não é regressão de nada recente (reproduz
-com as mudanças guardadas no stash), e o padrão — checagens que
-dependem de contagem acumulada — sugere estado de execuções anteriores
-no banco, não um bug de produto. Fica anotado porque um smoke que falha
-por acaso é pior que um que não existe: ele treina a ignorar falha.
+**O `smoke-m3` deixou de ser instável**, e a causa não era o produto:
+eram três defeitos no próprio script — stderr misturado no resultado
+das consultas, dois `LIMIT` sem `ORDER BY`, e um `UPDATE` cujo efeito
+nulo passava calado. Ele agora aborta no ponto certo em vez de
+reportar uma falha de domínio três seções adiante. 12 rodadas limpas,
+com a ressalva honesta de que a falha original nunca foi reproduzida —
+o que se corrigiu foram os mecanismos que a tornavam enganosa.
+
+**O `trace_id` atravessa os três serviços**, que §14.2 nomeia como a
+mitigação do risco número um. Um `grep` de um id dá a operação inteira,
+do clique no navegador ao turno no worker, inclusive o salto pela fila
+e a chamada HTTP interna de volta.
 
 As telas foram conferidas no navegador, não só no código — foi assim
 que apareceram o desalinhamento do cabeçalho, o estado vazio que não
