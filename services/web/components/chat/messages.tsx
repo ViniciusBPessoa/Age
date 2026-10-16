@@ -323,7 +323,7 @@ function ToolTrail({ traces, collapsed }: { traces: ToolTrace[]; collapsed: bool
               <span className="min-w-0">
                 <span className="text-ink-2">{trace.label}</span>
                 {trace.summary ? (
-                  <span className="text-muted"> — {trace.summary}</span>
+                  <span className="text-muted">: {trace.summary}</span>
                 ) : null}
               </span>
             </li>

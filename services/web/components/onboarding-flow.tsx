@@ -291,8 +291,8 @@ function StepModel({
       </h1>
       <p className="mt-2.5 text-sm leading-relaxed text-muted">
         {casaPaga
-          ? "O uso já está incluído — não precisa configurar nada para conversar. Se preferir usar sua própria chave de API, pode colar abaixo e aí não há limite de uso."
-          : "O Age usa sua própria chave de API. Você paga só pelo que usar, direto no provedor — nós não cobramos nada e não vemos suas conversas."}
+          ? "O uso já está incluído, não precisa configurar nada para conversar. Se preferir usar sua própria chave de API, pode colar abaixo e aí não há limite de uso."
+          : "O Age usa sua própria chave de API. Você paga só pelo que usar, direto no provedor. Nós não cobramos nada e não vemos suas conversas."}
       </p>
 
       {/* O caminho sem atrito, em primeiro lugar na tela: quem só quer
@@ -305,7 +305,7 @@ function StepModel({
             <strong>Uso incluído</strong>
             {keySource?.limit_usd
               ? ` — até US$ ${keySource.limit_usd.toFixed(2)} por mês, por conta da casa.`
-              : " — por conta da casa."}
+              : ", por conta da casa."}
           </p>
           <Button variant="primary" className="mt-3.5" onClick={onDone}>
             Começar a usar

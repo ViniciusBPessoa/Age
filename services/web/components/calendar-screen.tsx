@@ -56,9 +56,9 @@ const VIEWS = [
 ];
 
 const FLEX_LABEL: Record<Flexibility, string> = {
-  fixed: "Fixo — não movo",
-  semi_flexible: "Semi-flexível — movo avisando",
-  flexible: "Flexível — movo quando precisar",
+  fixed: "Fixo: não movo",
+  semi_flexible: "Semi-flexível: movo avisando",
+  flexible: "Flexível: movo quando precisar",
 };
 
 export function CalendarScreen({ timezone }: { timezone: string }) {

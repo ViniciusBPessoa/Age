@@ -56,9 +56,9 @@ import type {
 } from "@/lib/types";
 
 const TARGET_LABEL: Record<Target, string> = {
-  event: "Agenda — com hora marcada",
-  task: "Lista — sem ocupar horário",
-  both: "Ambos — tarefa e bloco de tempo",
+  event: "Agenda: com hora marcada",
+  task: "Lista: sem ocupar horário",
+  both: "Ambos: tarefa e bloco de tempo",
   ask: "Perguntar a cada vez",
 };
 
@@ -258,8 +258,8 @@ function CredentialsSection() {
       title="Credenciais de LLM"
       description={
         keySource.data?.source === "instance"
-          ? "O uso já está incluído — a chave própria é opcional e remove o limite. Qualquer chave que você colar é cifrada antes de ir para o banco e nunca volta numa resposta da API."
-          : "Sua chave, seu custo. O Age não cobra nada e não vê suas conversas — a chave é cifrada antes de ir para o banco e nunca volta numa resposta da API."
+          ? "O uso já está incluído. A chave própria é opcional e remove o limite. Qualquer chave que você colar é cifrada antes de ir para o banco e nunca volta numa resposta da API."
+          : "Sua chave, seu custo. O Age não cobra nada e não vê suas conversas. A chave é cifrada antes de ir para o banco e nunca volta numa resposta da API."
       }
     >
       <div className="space-y-2">

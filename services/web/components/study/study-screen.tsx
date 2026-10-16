@@ -411,11 +411,11 @@ function MarkDoneDialog({
             onChange={(e) => setDifficulty(e.target.value)}
           >
             <option value="">não dizer</option>
-            <option value="1">1 — tranquilo</option>
+            <option value="1">1, tranquilo</option>
             <option value="2">2</option>
-            <option value="3">3 — na média</option>
+            <option value="3">3, na média</option>
             <option value="4">4</option>
-            <option value="5">5 — difícil</option>
+            <option value="5">5, difícil</option>
           </Select>
         </Field>
       </div>

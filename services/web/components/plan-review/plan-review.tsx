@@ -96,12 +96,18 @@ export function PlanReview({
   applying,
   onApply,
   onReject,
+  onReschedule,
+  onAskChange,
 }: {
   plan: Plan;
   timezone: string;
   applying?: boolean;
   onApply: (itemIds: string[], confirmBlocking: boolean) => void;
   onReject: () => void;
+  /** Remarca um item antes de aprovar. Ausente = o ajuste some. */
+  onReschedule?: (itemId: string, start: string, end: string) => Promise<void>;
+  /** Manda o pedido de mudança de volta ao Age, em palavras. */
+  onAskChange?: (texto: string) => void;
 }) {
   // Tudo marcado por padrão: o plano é uma proposta coerente, e obrigar
   // a marcar seis caixas para aceitar o que foi pedido é atrito contra
@@ -111,6 +117,16 @@ export function PlanReview({
     () => new Set(plan.items.filter((i) => i.status === "pending").map((i) => i.id)),
   );
   const [confirmBlocking, setConfirmBlocking] = useState(false);
+  /*
+   * O campo de "pede do seu jeito".
+   *
+   * Ajustar horário resolve o que é mecânico; isto resolve o resto:
+   * "tira os de sábado", "prefiro de manhã", "corta pela metade". Sem
+   * ele, a única saída para um pedido assim é rejeitar tudo e
+   * redigitar a conversa inteira desde o começo.
+   */
+  const [pedindoAjuste, setPedindoAjuste] = useState(false);
+  const [textoAjuste, setTextoAjuste] = useState("");
 
   const pending = plan.items.filter((item) => item.status === "pending");
 
@@ -212,6 +228,7 @@ export function PlanReview({
             checked={selected.has(item.id)}
             linked={item.links.length > 0}
             onToggle={() => toggle(item)}
+            onReschedule={onReschedule}
           />
         ))}
       </ul>
@@ -241,6 +258,54 @@ export function PlanReview({
         </div>
       ) : null}
 
+      {pedindoAjuste && onAskChange ? (
+        <div className="border-t border-line bg-surface-2/60 px-4 py-3.5 md:px-5">
+          <label
+            htmlFor={`ajuste-${plan.id}`}
+            className="mb-1.5 block text-xs text-muted"
+          >
+            O que você quer diferente? Eu refaço a proposta.
+          </label>
+          <textarea
+            id={`ajuste-${plan.id}`}
+            value={textoAjuste}
+            onChange={(e) => setTextoAjuste(e.target.value)}
+            onKeyDown={(e) => {
+              // Enter envia, Shift+Enter quebra linha: é a convenção do
+              // formato, e quem escreve uma frase curta não quer
+              // procurar o botão.
+              if (e.key === "Enter" && !e.shiftKey && textoAjuste.trim()) {
+                e.preventDefault();
+                onAskChange(textoAjuste.trim());
+                setTextoAjuste("");
+                setPedindoAjuste(false);
+              }
+            }}
+            rows={2}
+            autoFocus
+            placeholder="ex.: tira os de sábado e deixa 1h em vez de 2h"
+            className="w-full resize-none rounded-lg border border-line-strong bg-surface px-3 py-2 text-sm text-ink placeholder:text-faint"
+          />
+          <div className="mt-2 flex gap-2">
+            <Button
+              size="sm"
+              variant="primary"
+              disabled={!textoAjuste.trim()}
+              onClick={() => {
+                onAskChange(textoAjuste.trim());
+                setTextoAjuste("");
+                setPedindoAjuste(false);
+              }}
+            >
+              Pedir
+            </Button>
+            <Button size="sm" variant="quiet" onClick={() => setPedindoAjuste(false)}>
+              Cancelar
+            </Button>
+          </div>
+        </div>
+      ) : null}
+
       <div className="flex flex-wrap items-center gap-2 border-t border-line bg-surface-2/40 px-4 py-3.5 md:px-5">
         <Button
           variant="primary"
@@ -254,9 +319,18 @@ export function PlanReview({
         <Button variant="ghost" onClick={onReject} disabled={applying}>
           Rejeitar tudo
         </Button>
+        {onAskChange ? (
+          <Button
+            variant="quiet"
+            onClick={() => setPedindoAjuste((v) => !v)}
+            disabled={applying}
+          >
+            Pedir mudança
+          </Button>
+        ) : null}
         {selected.size < pending.length && selected.size > 0 ? (
           <span className="text-xs text-muted">
-            {pending.length - selected.size} fora — dá para pedir um recálculo depois.
+            {pending.length - selected.size} fora, dá para pedir um recálculo depois.
           </span>
         ) : null}
       </div>
@@ -270,12 +344,14 @@ function ItemCard({
   checked,
   linked,
   onToggle,
+  onReschedule,
 }: {
   item: PlanItem;
   timezone: string;
   checked: boolean;
   linked: boolean;
   onToggle: () => void;
+  onReschedule?: (itemId: string, start: string, end: string) => Promise<void>;
 }) {
   const before = payload(item.before);
   const after = payload(item.after);
@@ -418,6 +494,136 @@ function ItemCard({
           ) : null}
         </span>
       </label>
+
+      {/*
+       * Ajustar sem sair da tela.
+       *
+       * Antes só havia marcar e desmarcar: "esse bloco serve, mas não
+       * às 8h15" obrigava a rejeitar tudo e redigitar o pedido, o que
+       * gasta um turno do modelo para mover meia hora.
+       *
+       * Fora do `<label>` de propósito: dentro dele, qualquer clique
+       * alterna a caixa de marcação, e abrir o ajuste desmarcaria o
+       * item que a pessoa está querendo manter.
+       */}
+      {onReschedule && !isTask && subject?.start && subject.end ? (
+        <AjusteDeHorario
+          item={item}
+          inicio={subject.start}
+          fim={subject.end}
+          onSalvar={onReschedule}
+        />
+      ) : null}
     </li>
+  );
+}
+
+function AjusteDeHorario({
+  item,
+  inicio,
+  fim,
+  onSalvar,
+}: {
+  item: PlanItem;
+  inicio: string;
+  fim: string;
+  onSalvar: (itemId: string, start: string, end: string) => Promise<void>;
+}) {
+  const [aberto, setAberto] = useState(false);
+  const [salvando, setSalvando] = useState(false);
+  const [erro, setErro] = useState<string | null>(null);
+  // `datetime-local` não aceita offset de fuso, então o valor é a hora
+  // local já formatada, sem o `-03:00` do fim da string.
+  const [quando, setQuando] = useState(() => inicio.slice(0, 16));
+  const [minutos, setMinutos] = useState(() =>
+    Math.max(
+      5,
+      Math.round((new Date(fim).getTime() - new Date(inicio).getTime()) / 60000),
+    ),
+  );
+
+  async function salvar() {
+    setSalvando(true);
+    setErro(null);
+    try {
+      const comeco = new Date(quando);
+      if (Number.isNaN(comeco.getTime())) {
+        setErro("Data inválida.");
+        return;
+      }
+      await onSalvar(
+        item.id,
+        comeco.toISOString(),
+        new Date(comeco.getTime() + minutos * 60000).toISOString(),
+      );
+      setAberto(false);
+    } catch {
+      setErro("Não consegui salvar. Tente de novo.");
+    } finally {
+      setSalvando(false);
+    }
+  }
+
+  if (!aberto) {
+    return (
+      <div className="px-4 pb-3 pl-[46px] md:px-5 md:pl-[50px]">
+        <button
+          onClick={() => setAberto(true)}
+          className="text-xs font-medium text-brand transition-opacity hover:opacity-80"
+        >
+          Ajustar horário
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="border-t border-line bg-surface-2/60 px-4 py-3 pl-[46px] md:px-5 md:pl-[50px]">
+      <div className="flex flex-wrap items-end gap-2">
+        <span className="flex flex-col gap-1">
+          <label htmlFor={`quando-${item.id}`} className="text-2xs text-muted">
+            Começa
+          </label>
+          <input
+            id={`quando-${item.id}`}
+            type="datetime-local"
+            value={quando}
+            onChange={(e) => setQuando(e.target.value)}
+            className="h-8 rounded-lg border border-line-strong bg-surface px-2 text-xs text-ink"
+          />
+        </span>
+        <span className="flex flex-col gap-1">
+          <label htmlFor={`dura-${item.id}`} className="text-2xs text-muted">
+            Minutos
+          </label>
+          <input
+            id={`dura-${item.id}`}
+            type="number"
+            min={5}
+            step={5}
+            value={minutos}
+            onChange={(e) => setMinutos(Number(e.target.value))}
+            className="h-8 w-20 rounded-lg border border-line-strong bg-surface px-2 text-xs text-ink"
+          />
+        </span>
+        <Button
+          size="sm"
+          variant="secondary"
+          onClick={() => void salvar()}
+          disabled={salvando}
+        >
+          {salvando ? "Salvando…" : "Salvar"}
+        </Button>
+        <Button
+          size="sm"
+          variant="quiet"
+          onClick={() => setAberto(false)}
+          disabled={salvando}
+        >
+          Cancelar
+        </Button>
+      </div>
+      {erro ? <p className="mt-2 text-xs text-danger">{erro}</p> : null}
+    </div>
   );
 }

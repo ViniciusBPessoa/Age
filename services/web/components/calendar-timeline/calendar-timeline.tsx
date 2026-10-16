@@ -181,7 +181,7 @@ export function CalendarTimeline({
           {event.payload.flexibility === "fixed" ? (
             <IconLock
               aria-hidden={false}
-              aria-label="fixo — o Age não move"
+              aria-label="fixo: o Age não move"
               className="h-3 w-3 shrink-0 opacity-80"
             />
           ) : null}

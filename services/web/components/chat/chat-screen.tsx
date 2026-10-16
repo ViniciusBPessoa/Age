@@ -83,6 +83,22 @@ interface ConversationPage {
  * (`/chat` e `/chat/[id]` são páginas diferentes), o estado do turno
  * zera e o EventSource é fechado pela limpeza do efeito.
  */
+/**
+ * O endereço das ações de um plano (§5.8).
+ *
+ * Existe como função nomeada por um motivo específico: o bug que ela
+ * corrige foi usar o id ERRADO numa URL, e uma URL montada inline não
+ * tem como ser testada sem subir a tela inteira e espionar a rede.
+ *
+ * O id do plano e o id do turno que o propôs são dois UUIDs
+ * diferentes. Os dois estão no mesmo componente, a poucas linhas um do
+ * outro, e um deles se chamava `planId` sem ser o id do plano. Oito
+ * cliques do usuário viraram oito respostas 404.
+ */
+export function rotaDoPlano(plano: Plan, acao: "apply" | "reject") {
+  return `/plans/${plano.id}/${acao}`;
+}
+
 export function podeNavegarParaNova(
   streaming: boolean,
   novaConversa: string | null,
@@ -118,7 +134,7 @@ export function ChatScreen({
   const [streaming, setStreaming] = useState(false);
   const [streamingText, setStreamingText] = useState("");
   const [traces, setTraces] = useState<ToolTrace[]>([]);
-  const [planId, setPlanId] = useState<string | null>(null);
+  const [turnoComPlano, setTurnoComPlano] = useState<string | null>(null);
   const [applying, setApplying] = useState(false);
   const [turnError, setTurnError] = useState<string | null>(null);
   const unsubscribe = useRef<(() => void) | null>(null);
@@ -217,7 +233,7 @@ export function ChatScreen({
   });
 
   /*
-   * `planId` aqui é o id do TURNO, não do plano (ver o cabeçalho). Ele
+   * `turnoComPlano` é o id do TURNO que propôs algo, não do plano. Ele
    * serve como gatilho e como chave de cache — muda a cada turno, então
    * um plano novo não reaproveita a resposta do anterior — mas o
    * endereço do plano tem de ser descoberto.
@@ -227,7 +243,7 @@ export function ChatScreen({
    * plano que o worker acabou de propor.
    */
   const plan = useQuery({
-    queryKey: ["plan", "por-turno", planId],
+    queryKey: ["plan", "por-turno", turnoComPlano],
     queryFn: async () => {
       const propostos = await api.get<Plan[]>("/plans?status=proposed");
       // Desta conversa, e o mais recente: a lista já vem ordenada por
@@ -235,7 +251,7 @@ export function ChatScreen({
       // o que acabou de ser proposto aqui.
       return propostos.find((p) => p.conversation_id === idAtivo) ?? null;
     },
-    enabled: planId !== null,
+    enabled: turnoComPlano !== null,
   });
 
   const handleEvent = useCallback(
@@ -271,7 +287,7 @@ export function ChatScreen({
           setStreamingText((previous) => previous + event.delta);
           break;
         case "plan":
-          setPlanId(event.plan_id);
+          setTurnoComPlano(event.plan_id);
           break;
         case "done":
           setStreaming(false);
@@ -294,7 +310,7 @@ export function ChatScreen({
     setTurnError(null);
     setTraces([]);
     setStreamingText("");
-    setPlanId(null);
+    setTurnoComPlano(null);
 
     let targetId = idAtivo;
     try {
@@ -325,7 +341,7 @@ export function ChatScreen({
         onError: () => {
           setStreaming(false);
           setTurnError(
-            "Perdi a conexão com a resposta. O turno pode ter continuado — recarregue para ver.",
+            "Perdi a conexão com a resposta. O turno pode ter continuado, recarregue para ver.",
           );
         },
       });
@@ -337,15 +353,61 @@ export function ChatScreen({
     }
   }
 
+  /**
+   * Recusar a proposta inteira.
+   *
+   * Recebe o id na renderização, quando `plan.data` comprovadamente
+   * existe, em vez de ler `plan.data?.id` dentro do callback: entre o
+   * clique e a chamada a consulta pode ter sido invalidada, e o
+   * TypeScript estava certo em reclamar.
+   *
+   * O erro é exibido. Antes havia um `.catch(() => undefined)` aqui, e
+   * foi ele que deixou o 404 passar despercebido oito vezes seguidas.
+   */
+  function rejeitarPlano(plano: Plan) {
+    return async () => {
+      try {
+        await api.post(rotaDoPlano(plano, "reject"));
+        setTurnoComPlano(null);
+      } catch (err) {
+        setTurnError(
+          err instanceof RequestFailed
+            ? err.message
+            : "Não consegui descartar esta proposta.",
+        );
+      }
+    };
+  }
+
   async function applyPlan(itemIds: string[], confirmBlocking: boolean) {
-    if (!planId) return;
+    /*
+     * `plan.data.id`, NUNCA `turnoComPlano`.
+     *
+     * O id do plano é outro, descoberto pela consulta acima. Esta
+     * linha usava o id do turno, então todo clique em "Aprovar"
+     * mandava o número errado para `/plans/<id>/apply` e levava 404.
+     * A variável se chamava `planId`, e o nome foi metade da causa.
+     *
+     * O relato foi "apareceu o pop-up para selecionar, só que não
+     * funcionou, deu algum erro". No log: 8 tentativas, 8 respostas
+     * 404 — a pessoa clicou oito vezes porque a tela nunca disse o
+     * que havia de errado.
+     */
+    const plano = plan.data;
+    if (!plano) {
+      setTurnError(
+        "Perdi a referência desta proposta. Recarregue a página para " +
+          "vê-la de novo; nada foi agendado.",
+      );
+      return;
+    }
     setApplying(true);
     try {
-      const result = await api.post<ApplyResult>(`/plans/${planId}/apply`, {
+      const result = await api.post<ApplyResult>(rotaDoPlano(plano, "apply"), {
         item_ids: itemIds,
         confirm_blocking: confirmBlocking,
       });
-      setPlanId(null);
+      setTurnoComPlano(null);
       // A agenda e a lista mudaram: invalidar tudo que as mostra.
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["events"] }),
@@ -515,9 +577,19 @@ export function ChatScreen({
                 timezone={timezone}
                 applying={applying}
                 onApply={applyPlan}
-                onReject={async () => {
-                  await api.post(`/plans/${planId}/reject`).catch(() => undefined);
-                  setPlanId(null);
+                onReject={rejeitarPlano(plan.data)}
+                onReschedule={async (itemId, start, end) => {
+                  await api.patch(`/plans/items/${itemId}`, { start, end });
+                  // Recarrega o plano: os horários exibidos vêm do
+                  // servidor, e manter o valor antigo na tela depois de
+                  // salvar faria a pessoa duvidar se gravou.
+                  await plan.refetch();
+                }}
+                onAskChange={(texto) => {
+                  // Vira uma mensagem comum: o Age já sabe que a
+                  // proposta está na tela, então "tira os de sábado"
+                  // chega com o contexto inteiro do turno anterior.
+                  void send(texto);
                 }}
               />
             ) : null}
