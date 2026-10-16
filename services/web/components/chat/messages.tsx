@@ -88,19 +88,30 @@ export function MessageList({
 
   return (
     /*
-     * `justify-end` com `min-h-full` no miolo: a conversa fica
-     * ancorada embaixo, junto do compositor, e so empurra para cima
-     * quando passa da altura da tela.
+     * A conversa fica ancorada embaixo, junto do compositor, e só
+     * empurra para cima quando passa da altura da tela. Sem isso, duas
+     * mensagens ficavam coladas no topo com um vazio de 600px até o
+     * campo de texto — e o olho procura a conversa onde ela está sendo
+     * escrita, não no alto da página.
      *
-     * Sem isso, duas mensagens ficavam coladas no topo com um vazio de
-     * 600px ate o campo de texto — e o olho procura a conversa onde
-     * ela esta sendo escrita, nao no alto da pagina.
+     * O ancoramento é `mt-auto` NA LISTA, não `justify-end` neste
+     * contêiner, e a diferença não é estilística. `justify-end` com
+     * `overflow-y-auto` é um bug conhecido do flexbox: quando o
+     * conteúdo passa da altura, o alinhamento empurra o INÍCIO da
+     * lista para fora da área rolável, e o navegador não deixa rolar
+     * até lá. O histórico fica inacessível — foi exatamente o que
+     * aconteceu, e numa conversa real (resposta longa do modelo) a
+     * pessoa não conseguia ler a própria resposta.
+     *
+     * `mt-auto` resolve as duas coisas: sobra espaço, a margem
+     * automática empurra para baixo; falta espaço, a margem colapsa
+     * para zero e a rolagem alcança o topo.
      */
     <div
       ref={container}
-      className="flex flex-1 flex-col justify-end overflow-y-auto px-4 py-6 md:px-6"
+      className="flex flex-1 flex-col overflow-y-auto px-4 py-6 md:px-6"
     >
-      <ul className="mx-auto w-full max-w-3xl space-y-7">
+      <ul className="mx-auto mt-auto w-full max-w-3xl space-y-7">
         {visible.map((message) => (
           <li key={message.id} className="animate-fade-up">
             <Bubble
