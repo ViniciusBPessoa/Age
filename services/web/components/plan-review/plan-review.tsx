@@ -157,8 +157,23 @@ export function PlanReview({
   );
 
   const needsConfirm = blockingSelected.length > 0;
+  /*
+   * `!applying` faz parte da condição, e faltava.
+   *
+   * O botão de aprovar continuava clicável durante a aplicação, então
+   * dois cliques mandavam dois `apply` do mesmo plano e podiam criar o
+   * evento duas vezes na agenda. O de rejeitar, ao lado, já conferia
+   * `applying` — a assimetria passou despercebida porque a tela
+   * "parece" ocupada.
+   *
+   * Um clique a mais aqui escreve no calendário da pessoa, que é o que
+   * o produto promete não fazer sem aprovação (§5.2).
+   */
   const canApply =
-    selected.size > 0 && (!needsConfirm || confirmBlocking) && !plan.is_expired;
+    selected.size > 0 &&
+    (!needsConfirm || confirmBlocking) &&
+    !plan.is_expired &&
+    !applying;
   const allSelected = selected.size === pending.length;
 
   if (plan.is_expired) {

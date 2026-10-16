@@ -99,10 +99,23 @@ async def _limpar(user_id: uuid.UUID) -> None:
     engine = _engine_dono()
     try:
         async with engine.begin() as conn:
+            # `app.user_id` precisa existir nesta transação: as
+            # políticas de RLS de `ai.*` leem o GUC, e sem o
+            # `set_config` o DELETE estoura com "unrecognized
+            # configuration parameter".
+            await conn.execute(
+                text("SELECT set_config('app.user_id', :u, true)"),
+                {"u": str(user_id)},
+            )
+            # A ORDEM importa, e `ai.turns` faltava na minha primeira
+            # versão: `plan_drafts.turn_id` tem FK para `ai.turns`, e
+            # apagar só o usuário deixou 17 linhas órfãs no banco que o
+            # usuário usa de verdade. Filhos primeiro, pai depois.
             for tabela in (
                 "core.plan_items",
                 "core.plans",
                 "ai.plan_drafts",
+                "ai.turns",
                 "core.conversations",
             ):
                 await conn.execute(
