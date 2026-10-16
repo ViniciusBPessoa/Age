@@ -189,3 +189,46 @@ class TestOPromptSegueMontandoDireito:
         prompt = build_system_prompt()
 
         assert "\\n" not in prompt
+
+
+class TestRevisoesNaoEntramEscondidas:
+    """`include_reviews` tem default `true`, e ninguém avisava o modelo.
+
+    Medido na conta do usuário: ele pediu 3 blocos de 1h, segunda,
+    quarta e sexta às 16h. A resposta na tela dizia "deixei as revisões
+    curtas de fora para ficar exatamente nas 3 que você pediu", a
+    chamada foi sem `include_reviews`, e o plano nasceu com 24 sessões
+    às 8h15, incluindo sábado e domingo.
+
+    O texto prometeu uma coisa e a ferramenta fez outra. É o mesmo
+    defeito de "anunciar trabalho não feito", mas com a ferramenta
+    trabalhando ESCONDIDO em vez de não trabalhar.
+    """
+
+    def test_avisa_que_o_default_acrescenta_revisoes(self) -> None:
+        prompt = build_system_prompt()
+
+        assert "include_reviews" in prompt
+        # O número importa: "acrescenta revisões" não comunica que o
+        # plano triplica.
+        assert "vinte e quatro sessões" in prompt
+
+    def test_manda_passar_false_quando_a_quantidade_foi_combinada(self) -> None:
+        prompt = build_system_prompt()
+
+        assert "include_reviews: false" in prompt
+        assert "Quantidade combinada é quantidade final" in prompt
+
+    def test_exige_respeitar_os_dias_e_o_horario_pedidos(self) -> None:
+        """24 sessões às 8h15 quando o pedido era 16h. O horário não é
+        detalhe de apresentação: é o que faz o plano caber na vida."""
+        prompt = build_system_prompt()
+
+        assert "não pode virar todo dia às 8h15" in prompt
+
+    def test_oferece_as_revisoes_em_vez_de_impor(self) -> None:
+        """Revisão espaçada ajuda de verdade, então a regra não é
+        "nunca": é "não sem a pessoa saber"."""
+        prompt = build_system_prompt()
+
+        assert "9 sessões em vez de 3" in prompt

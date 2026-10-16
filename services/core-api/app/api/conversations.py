@@ -31,6 +31,7 @@ from app.core.redis import get_arq, get_redis, turn_cancel_key, turn_stream_key
 from app.core.security import create_service_token
 from app.core.tracing import current_trace_id
 from app.models import Conversation, Message
+from app.services.plan_store import promote_drafts
 from app.services.turn_sync import (
     apply_pending_titles,
     apply_title_suggestion,
@@ -493,6 +494,22 @@ async def list_messages(
     # Copia o que o worker produziu e aplica o título sugerido (§6.2.2).
     await drain_turn_outputs(db, user.id, conversation_id)
     await apply_title_suggestion(db, user.id, conversation_id)
+
+    # Promove rascunhos de plano aqui também, e não só no `GET /plans`.
+    #
+    # A promoção era preguiçosa de um jeito que dependia do RELÓGIO DO
+    # NAVEGADOR: a tela buscava `/plans` ao receber o evento `plan`, e
+    # se essa busca chegasse antes do rascunho ser gravado, nada mais
+    # buscava e a proposta ficava invisível para sempre.
+    #
+    # Medido na conta do usuário: busca às 20:24:12.77, rascunho às
+    # 20:24:15 — 2,2 s de diferença, e o `promoted` ficou `false` até
+    # eu ir ver. Três rascunhos estavam presos assim.
+    #
+    # Esta rota é chamada no `done` de todo turno, então promover aqui
+    # tira o navegador da equação: quando a resposta aparece na tela, o
+    # plano já existe.
+    await promote_drafts(db, user.id)
 
     stmt = select(Message).where(
         Message.conversation_id == conversation_id, Message.deleted_at.is_(None)
