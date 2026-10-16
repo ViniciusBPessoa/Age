@@ -91,6 +91,7 @@ export function ConversationSidebar({
   const [selecting, setSelecting] = useState(false);
   const [chosen, setChosen] = useState<Set<string>>(new Set());
   const [confirming, setConfirming] = useState(false);
+  const [apagandoUma, setApagandoUma] = useState<Conversation | null>(null);
   const [erasing, setErasing] = useState(false);
 
   // Só o que o usuário VÊ pode ser selecionado: aplicar "selecionar
@@ -171,7 +172,10 @@ export function ConversationSidebar({
     },
     onPin: () => onPin(c.id, !c.pinned_at),
     onArchive: () => onArchive(c.id),
-    onDelete: () => onDelete(c.id),
+    // Pede confirmação em vez de apagar direto. Apagar pelo menu de
+    // três pontos era a única ação destrutiva da tela sem pergunta, e
+    // o item fica a um pixel de "Arquivar", que é reversível.
+    onDelete: () => setApagandoUma(c),
     onFork: () => onFork(c.id),
   });
 
@@ -321,6 +325,34 @@ export function ConversationSidebar({
           ) : null}
         </div>
       ) : null}
+
+      <Dialog
+        open={apagandoUma !== null}
+        onClose={() => setApagandoUma(null)}
+        title="Apagar esta conversa?"
+        description={apagandoUma?.title ?? "Sem título"}
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setApagandoUma(null)}>
+              Cancelar
+            </Button>
+            <Button
+              variant="danger"
+              onClick={() => {
+                if (apagandoUma) onDelete(apagandoUma.id);
+                setApagandoUma(null);
+              }}
+            >
+              Apagar
+            </Button>
+          </>
+        }
+      >
+        <p className="text-sm leading-relaxed text-ink-2">
+          O que você já aprovou continua na agenda e nas tarefas. Some só o histórico da
+          conversa, e dá para recuperar por 30 dias.
+        </p>
+      </Dialog>
 
       {/* Confirmação explícita: apagar em lote é a ação mais destrutiva
           desta tela, e o diálogo diz QUANTAS e o que NÃO é perdido —

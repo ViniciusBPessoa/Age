@@ -34,9 +34,7 @@ describe("exemplos da tela vazia", () => {
      * essa semana?" é pergunta na forma e consulta na intenção.
      */
     montar();
-    const dicas = screen
-      .getAllByRole("button")
-      .map((b) => b.textContent ?? "");
+    const dicas = screen.getAllByRole("button").map((b) => b.textContent ?? "");
 
     const temConselho = dicas.some(
       (t) => t.includes("agenda depois") || t.includes("ajuda a priorizar"),

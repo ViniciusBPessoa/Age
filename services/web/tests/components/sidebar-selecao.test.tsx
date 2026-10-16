@@ -195,8 +195,12 @@ describe("confirmação antes de apagar", () => {
     await clicar(screen.getByLabelText("Selecionar todas"));
     await clicar(screen.getByRole("button", { name: /^Apagar 3/ }));
 
-    expect(screen.getByText(/continua na agenda/)).toBeTruthy();
-    expect(screen.getByText(/30 dias/)).toBeTruthy();
+    // Busca dentro do diálogo aberto: os dois confirmadores (lote e
+    // individual) dizem a mesma coisa, de propósito, e uma busca
+    // global encontraria os dois.
+    const dialogo = screen.getByRole("dialog");
+    expect(within(dialogo).getByText(/continua na agenda/)).toBeTruthy();
+    expect(within(dialogo).getByText(/30 dias/)).toBeTruthy();
   });
 
   it("cancelar no diálogo não apaga", async () => {
@@ -220,5 +224,65 @@ describe("quando apagar em lote não está disponível", () => {
     // não deve ganhar um botão que não faz nada.
     montar();
     expect(screen.queryByText("Selecionar conversas")).toBeNull();
+  });
+});
+
+describe("apagar uma conversa pelo menu", () => {
+  it("pergunta antes, em vez de apagar no clique", async () => {
+    /*
+     * Era a única ação destrutiva da tela sem confirmação, e fica a um
+     * pixel de "Arquivar", que é reversível. O lote já perguntava; a
+     * individual, não.
+     */
+    const onDelete = vi.fn();
+    render(
+      <ConversationSidebar
+        conversations={TRES}
+        counts={{}}
+        activeId={null}
+        timezone={TZ}
+        onNew={vi.fn()}
+        onSearch={vi.fn()}
+        onRename={vi.fn()}
+        onPin={vi.fn()}
+        onArchive={vi.fn()}
+        onDelete={onDelete}
+        onFork={vi.fn()}
+      />,
+    );
+
+    await clicar(screen.getByLabelText("Ações de Prova de matemática"));
+    await clicar(screen.getByRole("menuitem", { name: "Apagar" }));
+
+    expect(onDelete).not.toHaveBeenCalled();
+    expect(screen.getByText("Apagar esta conversa?")).toBeTruthy();
+  });
+
+  it("apaga a conversa certa depois de confirmar", async () => {
+    // O id tem de ser o da linha escolhida, não o da primeira da
+    // lista: com o diálogo no meio, é fácil perder a referência.
+    const onDelete = vi.fn();
+    render(
+      <ConversationSidebar
+        conversations={TRES}
+        counts={{}}
+        activeId={null}
+        timezone={TZ}
+        onNew={vi.fn()}
+        onSearch={vi.fn()}
+        onRename={vi.fn()}
+        onPin={vi.fn()}
+        onArchive={vi.fn()}
+        onDelete={onDelete}
+        onFork={vi.fn()}
+      />,
+    );
+
+    await clicar(screen.getByLabelText("Ações de Dentista quinta"));
+    await clicar(screen.getByRole("menuitem", { name: "Apagar" }));
+    const dialogo = screen.getByRole("dialog");
+    await clicar(within(dialogo).getByRole("button", { name: "Apagar" }));
+
+    expect(onDelete).toHaveBeenCalledWith("c");
   });
 });
