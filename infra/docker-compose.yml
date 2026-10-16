@@ -159,6 +159,11 @@ services:
     build:
       context: ..
       dockerfile: infra/Dockerfile.web
+      # Desenvolvimento, com hot-reload. Para usar a aplicação de
+      # verdade, suba o serviço `web-prod` de
+      # `docker-compose.prod-web.yml`: ele serve 18x menos JavaScript
+      # (516 KB contra 9,3 MB) e foi o que resolveu a lentidão de "3 a
+      # 4 segundos para abrir cada tela".
       target: dev
     environment:
       # Nome de serviço, não localhost: o BFF roda no servidor do Next e
@@ -169,7 +174,11 @@ services:
     depends_on:
       core-api: { condition: service_healthy }
     ports:
-      - "3000:3000"
+      # Variavel porque o modo de producao (`docker-compose.prod-web.yml`)
+      # ocupa a 3000: listas de `ports` são MESCLADAS entre arquivos de
+      # compose, nao substituidas, entao um override somaria as duas e o
+      # container falharia com "port is already allocated".
+      - "${WEB_DEV_PORT:-3000}:3000"
     volumes:
       - ../services/web:/app:cached
       - /app/node_modules

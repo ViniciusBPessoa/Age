@@ -1,0 +1,65 @@
+# Serve o front em modo de produção, para medir e para usar de verdade.
+#
+# Uso:
+#   docker compose -f infra/docker-compose.yml \
+#                  -f infra/docker-compose.prod-web.yml \
+#                  --env-file .env up -d --build web-prod
+#
+# Depois, a aplicação rápida fica em http://localhost:3000 e o modo de
+# desenvolvimento (se estiver de pé) em http://localhost:3001.
+#
+# ## Por que um serviço NOVO e não um override do `web`
+#
+# Tentei primeiro sobrescrever o `web` com `target: prod` e
+# `volumes: []`. Não funciona, e o modo de falha é claro:
+# `Cannot find module '/app/server.js'`.
+#
+# O Compose **mescla** listas de volumes entre arquivos em vez de
+# substituí-las, então `volumes: []` não remove nada. Os binds de
+# desenvolvimento continuavam montados, e o bind de `../services/web`
+# em `/app` cobria justamente o diretório onde o build de produção
+# colocou o `server.js`.
+#
+# Um serviço separado não herda nada, o que torna o resultado óbvio em
+# vez de dependente da semântica de mesclagem.
+#
+# ## O ganho, medido na página de login
+#
+#   dev    8 chunks, 9.340 KB de JavaScript, ~300 ms
+#   prod  12 chunks,   516 KB de JavaScript,  ~50 ms
+#
+# 18x menos JavaScript. A lentidão de "3 a 4 segundos para abrir cada
+# tela" vem daí, não da máquina: `next dev` compila cada rota no
+# primeiro acesso e serve tudo sem minificar.
+#
+# O que se perde: hot-reload. Mudança no front exige reconstruir a
+# imagem (`up -d --build web-prod`).
+
+services:
+  # Nota: o `web` de desenvolvimento precisa sair da porta 3000 para
+  # nao disputar com este. Isso NAO pode ser feito aqui — listas de
+  # `ports` sao mescladas entre arquivos, nao substituidas, e o
+  # resultado seria "port is already allocated". Use a variavel:
+  #
+  #   WEB_DEV_PORT=3001 docker compose -f ... up -d web web-prod
+  #
+  # Ou simplesmente nao suba o `web` quando usar este arquivo.
+  web-prod:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.web
+      target: prod
+    environment:
+      # Nome de serviço, não localhost: o BFF roda no servidor do Next
+      # e resolve pela rede do Compose (§2.4.1).
+      CORE_API_URL: http://core-api:8000
+      NODE_ENV: production
+      NEXT_TELEMETRY_DISABLED: "1"
+      # O build `standalone` do Next ouve em 0.0.0.0 só com isto.
+      HOSTNAME: "0.0.0.0"
+      PORT: "3000"
+    depends_on:
+      core-api: { condition: service_healthy }
+    ports:
+      - "3000:3000"
+    restart: unless-stopped

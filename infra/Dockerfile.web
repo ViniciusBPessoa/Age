@@ -7,8 +7,23 @@ ENV NEXT_TELEMETRY_DISABLED=1
 
 # ---------------------------------------------------------------
 FROM base AS deps
-COPY services/web/package.json ./
-RUN npm install --no-audit --no-fund
+# O lockfile VAI junto, e `npm ci` em vez de `npm install`.
+#
+# Sem ele, o npm resolvia as versões de novo dentro do container e
+# escolhia as mais recentes que o `package.json` permite: pegava
+# `vite@7` (via `@vitejs/plugin-react`), que exige
+# `@types/node >= 22.12`, enquanto o projeto fixa `22.10.1`. O build da
+# imagem falhava com ERESOLVE — e o `age.ps1` caía no fallback "subindo
+# com as imagens já construídas", então a falha passava como aviso e o
+# container seguia em modo de desenvolvimento.
+#
+# Localmente, com o lockfile, `vite` é 6.4.4 e não há conflito nenhum.
+# Ou seja: o conflito era do processo de build, não das dependências.
+#
+# `npm ci` instala exatamente o que o lock diz e falha se os dois
+# arquivos divergirem — que é o comportamento desejado numa imagem.
+COPY services/web/package.json services/web/package-lock.json ./
+RUN npm ci --no-audit --no-fund
 
 # ---------------------------------------------------------------
 FROM deps AS dev

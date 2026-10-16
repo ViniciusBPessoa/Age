@@ -33,6 +33,7 @@ import {
   Spinner,
   cx,
 } from "@/components/ui";
+import { RichText } from "@/components/chat/rich-text";
 import { timeOf } from "@/lib/format";
 import type { Message } from "@/lib/types";
 
@@ -136,14 +137,14 @@ export function MessageList({
                     o texto conforme chega, sem interromper o que já
                     estava sendo lido. */}
                 {streamingText ? (
-                  <div
-                    aria-live="polite"
-                    className={cx(
-                      "whitespace-pre-wrap text-base leading-[1.7] text-ink-2",
-                      streaming && "age-caret",
-                    )}
-                  >
-                    {streamingText}
+                  // Formatado já durante o streaming, e não só ao
+                  // terminar: com texto cru aqui, a resposta aparecia
+                  // com ``` e ** na tela e "se arrumava" de repente no
+                  // `done` — um salto visual a cada turno. `RichText`
+                  // tolera Markdown incompleto (bloco de código sem a
+                  // cerca final ainda não digitada).
+                  <div aria-live="polite" className={cx(streaming && "age-caret")}>
+                    <RichText text={streamingText} />
                   </div>
                 ) : streaming && traces.length === 0 ? (
                   <ThinkingDots />
@@ -318,7 +319,11 @@ function Bubble({
     <div className="group flex gap-3">
       <Avatar />
       <div className="min-w-0 flex-1 pt-0.5">
-        <p className="whitespace-pre-wrap text-base leading-[1.7] text-ink-2">{text}</p>
+        {/* `RichText` só do lado do Age: o modelo escreve em Markdown, e
+            exibi-lo cru deixava ``` e ** literais na tela. A mensagem
+            do usuário continua texto puro de propósito — reinterpretar
+            o que a pessoa digitou mudaria o que ela escreveu. */}
+        <RichText text={text} />
         <time className="mt-1.5 block text-2xs text-faint opacity-0 transition-opacity group-hover:opacity-100">
           {at}
         </time>

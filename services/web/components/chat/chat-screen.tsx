@@ -11,10 +11,29 @@
  *   5. plan                 -> busca o plano e mostra o diff
  *   6. done                 -> recarrega a conversa e encerra
  *
- * O passo 5 merece nota: o evento `plan` traz só `plan_id` e
- * `item_count`. O diff completo vem por `GET /plans/{id}`, e não pelo
- * stream, porque ele é grande e porque o endereço do plano é o que
- * permite recarregar a página sem perder a proposta.
+ * O passo 5 merece nota, e já custou um bug que chegou ao usuário.
+ * O diff completo vem por HTTP, não pelo stream, porque ele é grande e
+ * porque ter endereço é o que permite recarregar a página sem perder a
+ * proposta. Mas o `plan_id` do evento **não serve** como endereço:
+ *
+ * O worker publica `plan_id=turn_id` (ver `run_turn.py`, com o
+ * comentário "resolvido na promoção"), porque ele não pode saber o id
+ * final — quem converte o rascunho em plano é o core-api, em
+ * `promote_drafts`, gerando um id NOVO. A resolução que o comentário
+ * prometia nunca existiu aqui, então esta tela pedia
+ * `GET /plans/{turn_id}`, levava 404, e o cartão de aprovação
+ * simplesmente não aparecia.
+ *
+ * O efeito para quem usa foi pior que uma tela vazia: o Age respondia
+ * em texto que ia agendar as coisas, e nada aparecia para aprovar.
+ * Parecia que tinha agendado sozinho, sem pedir licença — exatamente o
+ * contrário do que §5.8 garante. (Nada era escrito na agenda; medido:
+ * zero eventos até o `/apply`.)
+ *
+ * A correção busca o plano `proposed` mais recente DESTA conversa, que
+ * é o que o `GET /plans?status=proposed` já promove e ordena. Filtrar
+ * por conversa importa: um plano antigo não resolvido em outra
+ * conversa faria esta tela mostrar a proposta errada.
  */
 
 "use client";
@@ -134,9 +153,25 @@ export function ChatScreen({
     refetchOnWindowFocus: false,
   });
 
+  /*
+   * `planId` aqui é o id do TURNO, não do plano (ver o cabeçalho). Ele
+   * serve como gatilho e como chave de cache — muda a cada turno, então
+   * um plano novo não reaproveita a resposta do anterior — mas o
+   * endereço do plano tem de ser descoberto.
+   *
+   * `status=proposed` faz o core-api promover os rascunhos pendentes
+   * antes de listar, então esta chamada é também o que materializa o
+   * plano que o worker acabou de propor.
+   */
   const plan = useQuery({
-    queryKey: ["plan", planId],
-    queryFn: () => api.get<Plan>(`/plans/${planId}`),
+    queryKey: ["plan", "por-turno", planId],
+    queryFn: async () => {
+      const propostos = await api.get<Plan[]>("/plans?status=proposed");
+      // Desta conversa, e o mais recente: a lista já vem ordenada por
+      // `created_at DESC`, e um plano pendente de outra conversa não é
+      // o que acabou de ser proposto aqui.
+      return propostos.find((p) => p.conversation_id === conversationId) ?? null;
+    },
     enabled: planId !== null,
   });
 
