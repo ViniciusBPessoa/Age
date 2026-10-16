@@ -126,6 +126,48 @@ class TestConducaoDeConversa:
         assert "mais cedo" in prompt
 
 
+    def test_proibe_dizer_que_propos_sem_chamar_a_ferramenta(self) -> None:
+        """Medido: diante de "marca dentista quinta 15h", um turno leu a
+        agenda, conferiu o horário livre e escreveu "propus quinta 22,
+        das 15h às 16h". Nenhuma ferramenta de escrita foi chamada e
+        não havia cartão nenhum para aprovar.
+
+        A regra antiga falava de ferramenta que "falhou", e não cobria
+        o caso de nem chamar.
+        """
+        prompt = build_system_prompt()
+
+        assert "Achar o horário não é propor" in prompt
+        assert '"staged": true' in prompt
+
+    def test_manda_executar_pedido_direto_no_mesmo_turno(self) -> None:
+        """O risco da regra acima é o modelo passar a perguntar sempre.
+        "Marca X quinta 15h" tem o quê e o quando: devolver "quer que eu
+        prepare?" é repetir a pergunta que a pessoa já respondeu."""
+        prompt = build_system_prompt()
+
+        assert "Pedido direto e completo é para executar" in prompt
+
+    def test_manda_descartar_a_proposta_antiga_ao_corrigir(self) -> None:
+        """Medido: "na verdade 16h, e só 30 min" depois de um dentista
+        proposto às 15h deixou DOIS cartões de dentista na tela.
+
+        Não existe ferramenta que edite proposta pendente, então
+        corrigir é descartar e propor de novo, nessa ordem.
+        """
+        prompt = build_system_prompt()
+
+        assert "DUPLICA" in prompt
+        assert "discard_proposals" in prompt
+        assert "title_contains" in prompt
+
+    def test_pede_resposta_do_tamanho_da_pergunta(self) -> None:
+        """Medido: um pedido de uma linha recebeu quatro parágrafos
+        cobrindo quatro assuntos diferentes."""
+        prompt = build_system_prompt()
+
+        assert "Responda o que foi perguntado" in prompt
+
 class TestOPromptSegueMontandoDireito:
     def test_o_fuso_entra_no_texto(self) -> None:
         """Guarda contra uma edição que quebre a interpolação: sem o

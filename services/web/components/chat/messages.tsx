@@ -399,22 +399,32 @@ function Bubble({
  * isso ela aprova um plano e só depois descobre que foi para o lugar
  * errado.
  */
+/*
+ * Os quatro eram todos de execução ("marca isso", "o que eu tenho"), e
+ * ensinavam que o Age só serve para dar ordem. A capacidade que ninguém
+ * descobria sozinho é a outra: perguntar antes de decidir, e deixar a
+ * agenda para depois.
+ *
+ * Por isso o primeiro agora é uma pergunta aberta, e o rótulo diz o que
+ * acontece: ele responde a dúvida, e só monta agenda se você quiser.
+ * Quem já sabe o que quer tem os outros três logo ao lado.
+ */
 const EXAMPLES = [
+  {
+    text: "quero aprender machine learning, por onde começo?",
+    hint: "responde primeiro, agenda depois se você quiser",
+  },
   {
     text: "preciso estudar cálculo II, prova dia 20",
     hint: "divide a matéria em sessões até a data",
-  },
-  {
-    text: "quero academia 3x por semana",
-    hint: "cria uma rotina e acha os horários",
   },
   {
     text: "o que eu tenho pra fazer essa semana?",
     hint: "lê a agenda e a lista de tarefas",
   },
   {
-    text: "minha semana que vem tá pesada?",
-    hint: "mede a carga e diz onde aperta",
+    text: "tô afogado, não sei por onde começar",
+    hint: "olha sua semana e ajuda a priorizar",
   },
 ];
 
@@ -433,8 +443,8 @@ export function ChatEmptyState({
             O que você quer organizar?
           </h2>
           <p className="mx-auto mt-2 max-w-md text-sm leading-relaxed text-muted">
-            Descreva em palavras suas. O Age lê sua agenda, propõe um plano e espera
-            você aprovar antes de escrever qualquer coisa.
+            Pergunte, peça conselho ou mande marcar. Nada entra na sua agenda sem você
+            aprovar antes.
           </p>
         </div>
 

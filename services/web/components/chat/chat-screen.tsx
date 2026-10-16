@@ -137,6 +137,22 @@ export function ChatScreen({
   const [turnoComPlano, setTurnoComPlano] = useState<string | null>(null);
   const [applying, setApplying] = useState(false);
   const [turnError, setTurnError] = useState<string | null>(null);
+  /*
+   * O que acabou de ser aprovado, para oferecer desfazer.
+   *
+   * `/plans/<id>/undo` existe no core-api desde o M3, com janela de 7
+   * dias, e a tela nunca ofereceu o botão: quem aprovava sem querer
+   * tinha que apagar item por item na agenda.
+   *
+   * Vive no estado do turno, não numa lista persistente: desfazer é
+   * reação ao que acabou de acontecer. Passou da conversa, o caminho
+   * é a tela de agenda.
+   */
+  const [aplicado, setAplicado] = useState<{
+    planId: string;
+    count: number;
+  } | null>(null);
+  const [desfazendo, setDesfazendo] = useState(false);
   const unsubscribe = useRef<(() => void) | null>(null);
 
   /*
@@ -308,6 +324,10 @@ export function ChatScreen({
 
   async function send(text: string) {
     setTurnError(null);
+    // O aviso de "entrou na agenda" vale para o que acabou de
+    // acontecer. Mantê-lo durante o turno seguinte o transformaria em
+    // mobília, e o botão de desfazer apontaria para um plano velho.
+    setAplicado(null);
     setTraces([]);
     setStreamingText("");
     setTurnoComPlano(null);
@@ -390,7 +410,7 @@ export function ChatScreen({
      *
      * O relato foi "apareceu o pop-up para selecionar, só que não
      * funcionou, deu algum erro". No log: 8 tentativas, 8 respostas
-     * 404 — a pessoa clicou oito vezes porque a tela nunca disse o
+     * 404, e a pessoa clicou oito vezes porque a tela nunca disse o
      * que havia de errado.
      */
     const plano = plan.data;
@@ -408,6 +428,9 @@ export function ChatScreen({
         confirm_blocking: confirmBlocking,
       });
       setTurnoComPlano(null);
+      if (result.applied_count > 0) {
+        setAplicado({ planId: plano.id, count: result.applied_count });
+      }
       // A agenda e a lista mudaram: invalidar tudo que as mostra.
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["events"] }),
@@ -595,6 +618,64 @@ export function ChatScreen({
             ) : null}
           </MessageList>
         )}
+
+        {/*
+         * Desfazer logo depois de aprovar.
+         *
+         * A rota `/plans/<id>/undo` existe desde o M3 e a tela nunca a
+         * ofereceu: quem aprovava sem querer tinha que ir à agenda e
+         * apagar item por item.
+         *
+         * Aparece junto do campo de escrever, que é onde o olho está
+         * quando a aprovação termina, e some no primeiro envio
+         * seguinte. Desfazer é reação ao que acabou de acontecer.
+         */}
+        {aplicado ? (
+          <div className="px-4 md:px-6">
+            <div
+              role="status"
+              className="mx-auto mb-2 flex max-w-3xl flex-wrap items-center gap-x-3 gap-y-1.5 rounded-xl bg-ok/10 px-3.5 py-2.5 text-sm ring-1 ring-inset ring-ok/25"
+            >
+              <span className="min-w-0 flex-1 leading-relaxed text-ink-2">
+                {aplicado.count === 1
+                  ? "1 item entrou na sua agenda."
+                  : `${aplicado.count} itens entraram na sua agenda.`}
+              </span>
+              <button
+                disabled={desfazendo}
+                onClick={async () => {
+                  setDesfazendo(true);
+                  try {
+                    await api.post(`/plans/${aplicado.planId}/undo`);
+                    setAplicado(null);
+                    await Promise.all([
+                      queryClient.invalidateQueries({ queryKey: ["events"] }),
+                      queryClient.invalidateQueries({ queryKey: ["tasks"] }),
+                    ]);
+                  } catch (err) {
+                    setTurnError(
+                      err instanceof RequestFailed
+                        ? err.message
+                        : "Não consegui desfazer.",
+                    );
+                  } finally {
+                    setDesfazendo(false);
+                  }
+                }}
+                className="shrink-0 font-medium text-brand transition-opacity hover:opacity-80 disabled:opacity-50"
+              >
+                {desfazendo ? "Desfazendo…" : "Desfazer"}
+              </button>
+              <button
+                onClick={() => setAplicado(null)}
+                aria-label="Dispensar aviso"
+                className="shrink-0 text-xs text-muted transition-colors hover:text-ink"
+              >
+                dispensar
+              </button>
+            </div>
+          </div>
+        ) : null}
 
         {turnError ? (
           <div className="px-4 md:px-6">
