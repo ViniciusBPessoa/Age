@@ -33,6 +33,7 @@ import {
   cx,
 } from "@/components/ui";
 import { auth } from "@/lib/api-client";
+import { lerUltimaConversa } from "@/lib/ultimo-lugar";
 import type { Me } from "@/lib/types";
 
 const AREAS = [
@@ -50,6 +51,28 @@ export function AppNav({ me }: { me: Me }) {
 
   const isActive = (href: string) =>
     pathname === href || pathname.startsWith(`${href}/`);
+
+  /*
+   * "Conversa" volta para a conversa que estava aberta (§8.1).
+   *
+   * Antes o `href` era `/chat` fixo, então sair para a agenda e voltar
+   * sempre caía na tela vazia: a conversa continuava existindo na
+   * lista, mas era preciso achá-la e clicar de novo.
+   *
+   * Lido num efeito e guardado em estado porque `localStorage` não
+   * existe no servidor, e usá-lo direto no `href` durante a
+   * renderização daria divergência de hidratação.
+   */
+  const [ultimaConversa, setUltimaConversa] = useState<string | null>(null);
+
+  useEffect(() => {
+    setUltimaConversa(lerUltimaConversa());
+    // Reage à navegação: ao voltar da agenda o valor guardado pode ter
+    // mudado, e um array de dependências vazio congelaria o primeiro.
+  }, [pathname]);
+
+  const destino = (href: string) =>
+    href === "/chat" && ultimaConversa ? `/chat/${ultimaConversa}` : href;
 
   async function logout() {
     await auth.logout().catch(() => undefined);
@@ -85,7 +108,7 @@ export function AppNav({ me }: { me: Me }) {
                   />
                 ) : null}
                 <Link
-                  href={href}
+                  href={destino(href)}
                   aria-current={active ? "page" : undefined}
                   className={cx(
                     "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors duration-150",
@@ -152,7 +175,7 @@ export function AppNav({ me }: { me: Me }) {
           return (
             <Link
               key={href}
-              href={href}
+              href={destino(href)}
               aria-current={active ? "page" : undefined}
               className={cx(
                 "flex flex-1 flex-col items-center gap-1 pb-2 pt-2.5 text-[10px] font-medium transition-colors",

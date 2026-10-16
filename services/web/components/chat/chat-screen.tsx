@@ -53,6 +53,11 @@ import { PlanReview } from "@/components/plan-review/plan-review";
 import { Button, IconAlert, IconInfo, IconX, LoadError, cx } from "@/components/ui";
 import { RequestFailed, api } from "@/lib/api-client";
 import { subscribeToTurn, toolLabel, type StreamEvent } from "@/lib/sse";
+import {
+  esquecerUltimaConversa,
+  guardarUltimaConversa,
+  lerUltimaConversa,
+} from "@/lib/ultimo-lugar";
 import type {
   ApplyResult,
   CalendarRef,
@@ -97,6 +102,42 @@ interface ConversationPage {
  */
 export function rotaDoPlano(plano: Plan, acao: "apply" | "reject") {
   return `/plans/${plano.id}/${acao}`;
+}
+
+/**
+ * A proposta existe no servidor mas ainda não apareceu na listagem.
+ *
+ * Erro e não `null` porque é o que faz o `retry` do react-query
+ * tentar de novo. Depois das tentativas o cartão simplesmente não
+ * aparece: é melhor não mostrar nada do que mostrar um cartão vazio.
+ */
+export class PlanoAindaNaoVisivel extends Error {
+  constructor() {
+    super("A proposta ainda não está visível.");
+    this.name = "PlanoAindaNaoVisivel";
+  }
+}
+
+/**
+ * Qual plano proposto pertence a esta conversa.
+ *
+ * Mora fora do componente para poder ser testada: o cartão de
+ * aprovação não apareceu numa conversa real mesmo com o plano correto
+ * no banco, e a decisão de exibir ou não passava por aqui, inline,
+ * onde nenhum teste alcançava.
+ *
+ * O filtro por conversa existe porque uma proposta pendente de OUTRA
+ * conversa não é o que acabou de ser proposto aqui — mostrá-la
+ * convidaria a aprovar, no meio de um assunto, algo pedido em outro.
+ */
+export function planoDaConversa(
+  propostos: Plan[],
+  idAtivo: string | null,
+): Plan | null {
+  if (idAtivo === null) return null;
+  // A lista chega ordenada por `created_at DESC`, então o primeiro que
+  // casar é o mais recente.
+  return propostos.find((p) => p.conversation_id === idAtivo) ?? null;
 }
 
 export function podeNavegarParaNova(
@@ -185,6 +226,18 @@ export function ChatScreen({
     }
   }, [conversationId, novaConversa]);
 
+  /*
+   * Lembra qual conversa estava aberta, para o item "Conversa" da
+   * navegação voltar para ela em vez da tela vazia (§8.1).
+   *
+   * Guarda só quando a conversa já tem id na URL: durante o primeiro
+   * turno o id vive em `novaConversa`, e gravar ali faria a navegação
+   * apontar para uma conversa que ainda pode falhar.
+   */
+  useEffect(() => {
+    if (conversationId) guardarUltimaConversa(conversationId);
+  }, [conversationId]);
+
   // A URL só muda depois que o turno termina. Remontar a tela aqui é
   // inofensivo: não há mais stream aberto nem texto parcial a perder, e
   // a mensagem já foi recarregada do banco.
@@ -262,12 +315,34 @@ export function ChatScreen({
     queryKey: ["plan", "por-turno", turnoComPlano],
     queryFn: async () => {
       const propostos = await api.get<Plan[]>("/plans?status=proposed");
-      // Desta conversa, e o mais recente: a lista já vem ordenada por
-      // `created_at DESC`, e um plano pendente de outra conversa não é
-      // o que acabou de ser proposto aqui.
-      return propostos.find((p) => p.conversation_id === idAtivo) ?? null;
+      const achado = planoDaConversa(propostos, idAtivo);
+      /*
+       * `throw` e não `return null`: o `retry` do react-query só atua
+       * sobre erro, e devolver `null` encerraria a busca com "não há
+       * proposta" exatamente no caso em que ela está a caminho.
+       *
+       * O evento `plan` é a promessa de que existe algo para aprovar,
+       * então a ausência aqui é uma inconsistência temporária, não uma
+       * resposta válida.
+       */
+      if (achado === null) throw new PlanoAindaNaoVisivel();
+      return achado;
     },
     enabled: turnoComPlano !== null,
+    /*
+     * A promoção de `ai.plan_drafts` para `core.plans` é preguiçosa:
+     * acontece DENTRO do `GET /plans` (§2.3.2). O worker grava o
+     * rascunho antes de publicar o evento `plan`, então uma busca só
+     * deveria bastar — mas quando ela falha, falha em silêncio, e a
+     * pessoa fica olhando uma resposta que diz "esperando sua
+     * aprovação" sem nada para aprovar. Foi o relato.
+     *
+     * Duas tentativas curtas custam uma requisição a mais no pior
+     * caso e removem a necessidade de F5, que foi como o usuário
+     * descobriu que a proposta existia.
+     */
+    retry: 2,
+    retryDelay: 400,
   });
 
   const handleEvent = useCallback(
@@ -507,6 +582,10 @@ export function ChatScreen({
           }
           onDelete={async (id) => {
             await mutateConversation(() => api.del(`/conversations/${id}`));
+            // Esquece antes de navegar: a navegação lê o valor
+            // guardado, e apontar para uma conversa apagada daria tela
+            // de erro no lugar do chat.
+            if (id === lerUltimaConversa()) esquecerUltimaConversa();
             if (id === idAtivo) router.replace("/chat");
           }}
           onDeleteMany={async (ids) => {
@@ -522,6 +601,8 @@ export function ChatScreen({
               await api.del(`/conversations/${id}`).catch(() => undefined);
             }
             await queryClient.invalidateQueries({ queryKey: ["conversations"] });
+            const lembrada = lerUltimaConversa();
+            if (lembrada && ids.includes(lembrada)) esquecerUltimaConversa();
             if (idAtivo && ids.includes(idAtivo)) {
               router.replace("/chat");
             }

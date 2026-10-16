@@ -26,7 +26,7 @@ import {
   startOfWeek,
 } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import {
   CalendarTimeline,
@@ -47,6 +47,7 @@ import {
 } from "@/components/ui";
 import { api } from "@/lib/api-client";
 import { range } from "@/lib/format";
+import { guardarUltimaVista, lerUltimaVista } from "@/lib/ultimo-lugar";
 import type { AgeEvent, Flexibility, Plan } from "@/lib/types";
 
 const VIEWS = [
@@ -63,9 +64,31 @@ const FLEX_LABEL: Record<Flexibility, string> = {
 
 export function CalendarScreen({ timezone }: { timezone: string }) {
   const queryClient = useQueryClient();
-  const [view, setView] = useState<TimelineView>("week");
+  const [view, setViewState] = useState<TimelineView>("week");
   const [cursor, setCursor] = useState(() => new Date());
   const [selected, setSelected] = useState<AgeEvent | null>(null);
+
+  /*
+   * A visualização volta como a pessoa deixou (§8.1).
+   *
+   * Lido num efeito, não no `useState`: o servidor pré-renderiza esta
+   * tela e não tem `localStorage`, então ler durante a renderização
+   * daria divergência de hidratação. É o mesmo cuidado do tema.
+   *
+   * A DATA não é restaurada de propósito — sempre abre em hoje.
+   */
+  useEffect(() => {
+    const salva = lerUltimaVista();
+    if (salva !== null) setViewState(salva);
+  }, []);
+
+  // Troca de visualização passa por aqui para ser lembrada. Um
+  // `setViewState` solto em qualquer um dos dois pontos de troca
+  // voltaria a esquecer, e em silêncio.
+  const setView = useCallback((proxima: TimelineView) => {
+    setViewState(proxima);
+    guardarUltimaVista(proxima);
+  }, []);
 
   // A janela buscada é maior que a visível: `react-big-calendar` mostra
   // dias da semana anterior e seguinte nas bordas do mês, e buscar só o
