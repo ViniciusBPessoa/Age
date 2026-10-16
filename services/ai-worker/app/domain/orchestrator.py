@@ -35,6 +35,34 @@ from app.ports.llm import (
 
 log = logging.getLogger("ai-worker.orchestrator")
 
+
+def _juntar_segmentos(partes: list[str]) -> str:
+    """Junta o texto das várias iterações do laço.
+
+    Era `"".join(partes)`, e isso produzia texto grudado numa resposta
+    real: o modelo escreveu "deixa eu ver o que tem lá." ANTES de
+    chamar a ferramenta e "Olhei de 16/10 a 16/11..." depois, e o
+    usuário leu `lá.Olhei`.
+
+    Cada parte vem de uma iteração diferente (§5.1): o modelo fala,
+    pede ferramenta, recebe o resultado e volta a falar. São parágrafos
+    distintos de um mesmo texto, não a continuação de uma frase, então
+    o separador é linha em branco.
+
+    Não acrescenta separador quando a parte anterior já termina em
+    quebra de linha, para não abrir um buraco de três linhas quando o
+    modelo mesmo já formatou.
+    """
+    saida: list[str] = []
+    for parte in partes:
+        if not parte:
+            continue
+        if saida and not saida[-1].endswith("\n"):
+            saida.append("\n\n")
+        saida.append(parte)
+    return "".join(saida)
+
+
 # Callbacks que o chamador fornece para publicar no stream.
 EmitText = Callable[[str], Awaitable[None]]
 EmitToolStart = Callable[[str], Awaitable[None]]
@@ -111,6 +139,19 @@ async def run_conversation_turn(
                 max_tokens=caps.max_output_tokens,
             ):
                 if chunk.text_delta:
+                    # Separador no PRIMEIRO delta desta iteração, e só
+                    # se já havia texto antes: o que o modelo escreveu
+                    # antes de pedir a ferramenta e o que escreve depois
+                    # são parágrafos distintos. Sem isto, a tela mostra
+                    # "lá.Olhei de 16/10" enquanto o texto chega — e
+                    # emitir no fim não serviria, porque o usuário lê
+                    # durante o streaming.
+                    if (
+                        not text_parts
+                        and accumulated_text
+                        and not accumulated_text[-1].endswith("\n")
+                    ):
+                        await emit_text("\n\n")
                     text_parts.append(chunk.text_delta)
                     await emit_text(chunk.text_delta)
 
@@ -206,7 +247,7 @@ async def run_conversation_turn(
         appended.append(final)
 
     return TurnResult(
-        text="".join(accumulated_text),
+        text=_juntar_segmentos(accumulated_text),
         usage=total_usage,
         finish_reason=finish_reason,
         iterations=iteration,

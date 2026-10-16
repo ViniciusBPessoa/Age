@@ -146,8 +146,36 @@ export function MessageList({
                   <div aria-live="polite" className={cx(streaming && "age-caret")}>
                     <RichText text={streamingText} />
                   </div>
-                ) : streaming && traces.length === 0 ? (
-                  <ThinkingDots />
+                ) : null}
+
+                {/*
+                 * O indicador de atividade, enquanto não há texto.
+                 *
+                 * A condição era `streaming && traces.length === 0`, e
+                 * isso deixava DOIS vãos sem nada se mexendo na tela:
+                 *
+                 *  1. tool rodando e nenhum texto ainda: aparecia só a
+                 *     linha da ferramenta, parada, sem dizer que havia
+                 *     trabalho em curso;
+                 *  2. entre a última tool terminar e o primeiro token
+                 *     chegar — que é o vão MAIS LONGO, porque é o
+                 *     modelo redigindo a resposta inteira.
+                 *
+                 * O relato foi "mostre quando a máquina estiver
+                 * pensando, para o usuário não ficar só esperando". Com
+                 * `!streamingText`, o indicador cobre o turno todo até
+                 * a primeira palavra sair, e aí dá lugar ao texto.
+                 */}
+                {streaming && !streamingText ? (
+                  <ThinkingDots
+                    etapa={
+                      traces.length === 0
+                        ? "lendo"
+                        : traces.every((t) => t.done)
+                          ? "redigindo"
+                          : "consultando"
+                    }
+                  />
                 ) : null}
               </div>
             </div>
@@ -172,24 +200,50 @@ function Avatar() {
   );
 }
 
+/** Em que ponto do turno o indicador está. */
+type Etapa = "lendo" | "consultando" | "redigindo";
+
+/*
+ * O texto de cada etapa, em primeira pessoa.
+ *
+ * Dizer QUAL trabalho está em curso, e não só "pensando", porque a
+ * espera do Age tem três naturezas bem diferentes e a mais longa é a
+ * última: o modelo redige a resposta inteira antes do primeiro token
+ * sair, e são os segundos em que a tela ficava completamente imóvel.
+ *
+ * "Escrevendo a resposta" também informa que não há mais consulta a
+ * fazer, ou seja, que o fim está perto. É a diferença entre esperar
+ * sabendo e esperar no escuro.
+ */
+const ETAPAS: Record<Etapa, string> = {
+  lendo: "Lendo seu pedido",
+  consultando: "Consultando sua agenda",
+  redigindo: "Escrevendo a resposta",
+};
+
 /**
  * "Pensando" como três pontos, não como spinner.
  *
  * Um spinner diz "travado"; os pontos em cascata dizem "em curso".
  * É a convenção de todo chat, e a diferença de percepção é real.
  */
-function ThinkingDots() {
+function ThinkingDots({ etapa = "lendo" }: { etapa?: Etapa }) {
+  const rotulo = ETAPAS[etapa];
   return (
-    <p className="flex items-center gap-1.5 py-1 text-sm text-muted">
-      <span className="sr-only">O Age está pensando…</span>
-      {[0, 1, 2].map((i) => (
-        <span
-          key={i}
-          aria-hidden
-          className="h-1.5 w-1.5 animate-bounce rounded-full bg-muted"
-          style={{ animationDelay: `${i * 140}ms`, animationDuration: "1s" }}
-        />
-      ))}
+    <p className="flex items-center gap-2 py-1 text-sm text-muted">
+      {/* `aria-live="polite"`: o leitor de tela anuncia a troca de
+          etapa sem cortar o que já estava lendo (§8.2). O texto é o
+          mesmo que o olho vê, então não há `sr-only` duplicando. */}
+      <span aria-live="polite">{rotulo}</span>
+      <span aria-hidden className="flex items-center gap-1">
+        {[0, 1, 2].map((i) => (
+          <span
+            key={i}
+            className="h-1.5 w-1.5 animate-bounce rounded-full bg-muted"
+            style={{ animationDelay: `${i * 140}ms`, animationDuration: "1s" }}
+          />
+        ))}
+      </span>
     </p>
   );
 }
