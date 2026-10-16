@@ -1176,6 +1176,90 @@ no ponto certo**. Verificado por sabotagem — com um `SUBJECT_ID`
 inválido, ele para em *"só 0 sessões movidas para o passado"* em vez de
 reportar um `sequência de faltas: 2` enganoso lá na frente.
 
+### O primeiro uso real, e os quatro defeitos que ele revelou
+
+Com a chave do DeepSeek no `.env`, o produto foi usado pela primeira
+vez por uma pessoa de verdade. Quatro problemas apareceram em minutos —
+nenhum deles pego por teste, e três deles invisíveis em qualquer
+medição que não fosse abrir a tela e usar.
+
+**1. Não era possível rolar para cima no chat.** `justify-end` no
+contêiner com `overflow-y-auto`: quando o conteúdo passa da altura, o
+alinhamento empurra o início para fora da área rolável e o navegador
+não deixa chegar lá. O histórico — e o topo da resposta que estava
+sendo lida — ficava inalcançável. Corrigido com `mt-auto` na lista, que
+preserva a intenção original (conversa ancorada embaixo) sem cortar o
+topo.
+
+**2. O texto saía cru.** A resposta era `{text}` num `<p>`, e o modelo
+escreve em Markdown — todo LLM escreve. A tela mostrava ```` ``` ````,
+`**` e `|---|` literais. O relato foi direto: *"completamente mal
+formatado, absurdamente mal formatado, completamente incompreensível"*.
+
+`RichText` renderiza o subconjunto que um LLM produz num chat — bloco
+de código, negrito, itálico, código inline, lista, título, tabela — sem
+dependência nova, porque somar pacote a um build que ainda não fechava
+seria somar risco. Nada usa `dangerouslySetInnerHTML`: tudo vira
+elemento React, então `<script>` vindo do modelo aparece como texto.
+
+Formata **durante** o streaming, não só no `done`: com texto cru ali, a
+resposta "se arrumava" de repente no fim, um salto visual por turno.
+
+**3. O cartão de aprovação nunca aparecia.** Este é o mais sério, e o
+diagnóstico importou mais que a correção.
+
+O worker publica `plan_id=turn_id`, com o comentário "resolvido na
+promoção" — porque ele não pode saber o id final: quem converte
+rascunho em plano é o core-api, gerando id novo. **A resolução
+prometida nunca foi implementada no front**, que pedia
+`GET /plans/{turn_id}` e levava 404.
+
+O efeito para quem usa foi pior que uma tela vazia: o Age dizia em
+texto que ia agendar, nada aparecia para aprovar, e parecia que tinha
+agendado sozinho — o oposto do que §5.8 garante. Daí o relato: *"não
+perguntou de aprovação, não perguntou nada, apenas marcou"*.
+
+Antes de corrigir, verifiquei se a garantia estava de fato rompida.
+Não estava: **zero eventos na agenda antes do `/apply`, quatro
+depois.** O contrato nunca foi violado — a tela só não dava a chance de
+exercê-lo. Uma rotina em `core.routines` é criada na promoção, e isso é
+desenho documentado: é a declaração do compromisso, não reserva de
+tempo.
+
+**4. "Tudo demorando 3 a 4 segundos."** A suspeita natural era a
+máquina, com dois Dockers abertos. Medir mostrou outra coisa: APIs em
+170–190 ms, páginas em 220–460 ms. O custo estava no navegador.
+
+| | JavaScript enviado | Resposta |
+|---|---|---|
+| `next dev` | **9.340 KB** | ~300 ms |
+| `next build` | **516 KB** | ~50 ms |
+
+18× menos. `next dev` compila cada rota no primeiro acesso e serve sem
+minificar — é para desenvolver, não para usar.
+
+A imagem de produção não fechava, e a causa era boba: o Dockerfile
+copiava só o `package.json`, **nunca o lockfile**. O npm resolvia tudo
+de novo no container e escolhia `vite@7` (exige `@types/node >= 22.12`)
+contra o `22.10.1` do projeto. Localmente, com o lock, `vite` é 6.4.4 e
+não há conflito algum — **o conflito era do processo de build, não das
+dependências**. Com `COPY package-lock.json` + `npm ci`, passa.
+
+Duas armadilhas do Compose no caminho, ambas da mesma raiz: **listas
+são mescladas entre arquivos, não substituídas.** `volumes: []` não
+removeu os binds de desenvolvimento (e o bind de `/app` cobria o
+`server.js` do build, dando `Cannot find module`), e `ports` somou
+3000 e 3001 até dar "port is already allocated". Resolvido com um
+serviço `web-prod` separado, que não herda nada, e `WEB_DEV_PORT` no
+arquivo base. `.ge.ps1 prod` faz o conjunto.
+
+**O que esses quatro têm em comum:** todos passaram por 345 testes,
+286 verificações de smoke e `tsc` limpo. Dois eram CSS de uma linha,
+um era um id trocado, um era modo de execução. Nenhum tipo de teste
+automatizado que o projeto tinha olharia para eles — é o argumento de
+[[interface-precisa-ser-vista]] cobrado na prática, e a razão de os
+testes de componente terem passado de 10 para 29.
+
 ### Adiado, de propósito
 - [ ] Gaveta de conversas abaixo de `md:` — hoje a lista só existe a
       partir de 768px, então no celular não há como trocar de
@@ -1199,7 +1283,7 @@ reportar um `sequência de faltas: 2` enganoso lá na frente.
 
 **Os sete marcos estão concluídos e validados**: 290 verificações de
 smoke contra containers reais (22 + 35 + 27 + 30 + 38 + 56 + 82), 378
-testes no backend (285 no core-api, 93 no ai-worker) e 110 no front,
+testes no backend (285 no core-api, 93 no ai-worker) e 129 no front,
 lint limpo nos três serviços, `tsc --noEmit` e `prettier --check` sem
 erros, e `next build` passando.
 
