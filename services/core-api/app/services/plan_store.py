@@ -45,6 +45,26 @@ async def promote_drafts(db: AsyncSession, user_id: UUID) -> list[UUID]:
     """Converte rascunhos do worker em planos validados.
 
     Idempotente: rascunho já promovido é ignorado.
+
+    `FOR UPDATE SKIP LOCKED` não é otimização, é correção.
+
+    Desde que `GET /conversations/{id}/messages` também promove, DUAS
+    rotas chamam esta função, e no fim de um turno a tela chama as duas
+    quase juntas. Medido na conta do usuário: `/plans` às 23:57:47.938
+    e `/messages` às 23:57:47.944 — **6 milissegundos** de diferença.
+
+    As duas transações leram o mesmo rascunho com `promoted = false`,
+    as duas promoveram, e o usuário ficou com DOIS planos idênticos de
+    7 itens: 12 cartões onde deviam haver 6. Foi o que ele relatou como
+    "ele marcou coisa duplicada, fez uma lambança".
+
+    `SKIP LOCKED` e não só `FOR UPDATE`: quem perde a corrida pula o
+    rascunho em vez de esperar e promover depois. Esperar daria o mesmo
+    resultado duplicado, só mais devagar — o `UPDATE` do vencedor ainda
+    não estaria visível para a outra transação.
+
+    Meu teste de idempotência não pegou isto porque rodava as duas
+    promoções EM SEQUÊNCIA, e em sequência o código antigo acertava.
     """
     rows = await db.execute(
         text(
@@ -53,6 +73,7 @@ async def promote_drafts(db: AsyncSession, user_id: UUID) -> list[UUID]:
             FROM ai.plan_drafts
             WHERE user_id = :uid AND promoted = false
             ORDER BY created_at
+            FOR UPDATE SKIP LOCKED
             """
         ),
         {"uid": str(user_id)},

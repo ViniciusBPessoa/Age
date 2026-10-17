@@ -13,6 +13,14 @@ O dreno é **idempotente** e roda na leitura (`GET /messages` e
 `GET /conversations`). Não há job periódico para isso de propósito: o
 dado só importa quando alguém vai ler, e drenar na leitura garante que
 nunca se veja uma conversa incompleta.
+
+A idempotência depende de `FOR UPDATE ... SKIP LOCKED` no SELECT, e
+isso não é detalhe: sem o lock, duas leituras CONCORRENTES veem a
+mesma linha com `consumed = false` e as duas copiam. No fim de um
+turno a tela chama `/messages` e `/plans` quase juntas — medi 6
+milissegundos de diferença na conta do usuário — e o resultado foi a
+conversa dele com cada mensagem aparecendo DUAS vezes, pergunta e
+resposta.
 """
 
 from __future__ import annotations
@@ -56,6 +64,7 @@ async def drain_turn_outputs(
                 LEFT JOIN ai.turn_usage u ON u.turn_id = o.turn_id
                 WHERE o.user_id = :uid AND o.consumed = false {scope_aliased}
                 ORDER BY o.created_at, o.sequence
+                FOR UPDATE OF o SKIP LOCKED
             ), inserted AS (
                 INSERT INTO core.messages
                   (user_id, conversation_id, role, content, tool_calls,
