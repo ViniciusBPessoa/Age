@@ -525,8 +525,29 @@ export function ChatScreen({
   }
 
   async function mutateConversation(run: () => Promise<unknown>) {
-    await run().catch(() => undefined);
-    await queryClient.invalidateQueries({ queryKey: ["conversations"] });
+    /*
+     * Renomear, fixar, arquivar e apagar passam por aqui.
+     *
+     * O erro aparece em vez de desaparecer. Com o `.catch(() =>
+     * undefined)` que havia antes, um rename que falhasse voltava ao
+     * título antigo no refetch, sem nada explicando: parecia que o
+     * clique não pegou, e a pessoa tentava de novo.
+     *
+     * A invalidação roda nos dois casos, de propósito: se falhou, a
+     * lista volta ao estado real do servidor.
+     */
+    try {
+      await run();
+      setTurnError(null);
+    } catch (err) {
+      setTurnError(
+        err instanceof RequestFailed
+          ? err.message
+          : "Não consegui salvar essa mudança na conversa.",
+      );
+    } finally {
+      await queryClient.invalidateQueries({ queryKey: ["conversations"] });
+    }
   }
 
   const primaryCalendar =

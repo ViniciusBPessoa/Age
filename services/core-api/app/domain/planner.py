@@ -70,10 +70,23 @@ class PlannedSession:
         """Título do evento, legível na agenda.
 
         Inclui o assunto porque o usuário vê isso no Google Calendar
-        junto de tudo mais — "Espaços vetoriais" sozinho não diz de que
+        junto de tudo mais: "Espaços vetoriais" sozinho não diz de que
         matéria é.
+
+        O prefixo é condicional porque o nome do tópico vem do modelo,
+        e ele às vezes já manda o assunto dentro. Prefixar sem olhar
+        produziu "Funções em Python: Funções em Python: parâmetro x
+        argumento" na agenda de um usuário, que viu o título repetido
+        no cartão.
         """
-        base = f"{subject}: {self.topic_name}"
+        topico = self.topic_name.strip()
+        alvo = subject.strip()
+        # `casefold` e não `lower`: compara acento e caixa de forma
+        # correta em português ("Funções" x "FUNÇÕES").
+        if alvo and topico.casefold().startswith(alvo.casefold()):
+            base = topico
+        else:
+            base = f"{alvo}: {topico}" if alvo else topico
         if self.kind == SessionKind.REVIEW:
             return f"{base} (revisão)"
         if self.of_parts > 1:

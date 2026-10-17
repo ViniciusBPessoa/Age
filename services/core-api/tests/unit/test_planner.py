@@ -425,3 +425,57 @@ def test_respects_preferred_hours() -> None:
     assert plan.sessions
     hour = plan.sessions[0].start.astimezone(SP).hour
     assert 14 <= hour < 18
+
+
+class TestTituloNaoRepeteOAssunto:
+    """O título é o que a pessoa lê no cartão e na agenda.
+
+    `title()` prefixava o assunto sem olhar, e o nome do tópico vem do
+    modelo, que às vezes já manda o assunto dentro. O resultado na
+    agenda de um usuário foi "Funções em Python: Funções em Python:
+    parâmetro x argumento, retorno, escopo", com o assunto duas vezes.
+    """
+
+    def _sessao(self, topico: str):
+        from datetime import UTC
+
+        from app.domain.planner import PlannedSession
+
+        inicio = datetime(2026, 10, 17, 15, 0, tzinfo=UTC)
+        return PlannedSession(
+            topic_name=topico,
+            start=inicio,
+            end=inicio + timedelta(minutes=90),
+            kind=SessionKind.STUDY,
+        )
+
+    def test_nao_duplica_quando_o_topico_ja_tem_o_assunto(self) -> None:
+        sessao = self._sessao("Funções em Python: parâmetro x argumento")
+
+        titulo = sessao.title("Funções em Python")
+
+        assert titulo == "Funções em Python: parâmetro x argumento"
+        assert titulo.count("Funções em Python") == 1
+
+    def test_prefixa_quando_o_topico_nao_tem_o_assunto(self) -> None:
+        # O contrapeso: sem ele, "nunca prefixar" passaria no teste de
+        # cima e tiraria a matéria de todos os títulos. Quem olha o
+        # Google Calendar precisa saber de que matéria é o bloco.
+        sessao = self._sessao("Espaços vetoriais")
+
+        assert sessao.title("Álgebra linear") == "Álgebra linear: Espaços vetoriais"
+
+    def test_compara_ignorando_caixa_e_acento_corretamente(self) -> None:
+        # `casefold` e não `lower`: é o que trata caixa em português de
+        # forma correta.
+        sessao = self._sessao("FUNÇÕES EM PYTHON: lambda")
+
+        assert sessao.title("Funções em Python") == "FUNÇÕES EM PYTHON: lambda"
+
+    def test_assunto_vazio_nao_deixa_dois_pontos_solto(self) -> None:
+        # Um assunto vazio produziria ": lambda", que é lixo visível no
+        # cartão.
+        sessao = self._sessao("lambda e map")
+
+        assert sessao.title("") == "lambda e map"
+        assert sessao.title("   ") == "lambda e map"

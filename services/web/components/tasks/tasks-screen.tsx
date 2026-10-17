@@ -30,7 +30,7 @@ import {
   Select,
   SkeletonList,
 } from "@/components/ui";
-import { api } from "@/lib/api-client";
+import { RequestFailed, api } from "@/lib/api-client";
 import { duration } from "@/lib/format";
 import type {
   ApplyResult,
@@ -196,8 +196,27 @@ export function TasksScreen({ timezone }: { timezone: string }) {
             applying={applying}
             onApply={applyPlan}
             onReject={async () => {
-              await api.post(`/plans/${pendingPlanId}/reject`).catch(() => undefined);
-              setPendingPlanId(null);
+              /*
+               * O erro aparece, e `setPendingPlanId(null)` só acontece
+               * se o servidor confirmou.
+               *
+               * Havia um `.catch(() => undefined)` aqui, o mesmo
+               * padrão que escondeu oito respostas 404 na tela de
+               * conversa. Com ele, um `reject` que falhasse parecia ter
+               * dado certo: o cartão saía da tela e a proposta
+               * continuava pendente no banco, reaparecendo depois sem
+               * explicação.
+               */
+              try {
+                await api.post(`/plans/${plan.data.id}/reject`);
+                setPendingPlanId(null);
+              } catch (err) {
+                setApplyError(
+                  err instanceof RequestFailed
+                    ? err.message
+                    : "Não consegui descartar a reserva. Tente de novo.",
+                );
+              }
             }}
           />
         ) : null}

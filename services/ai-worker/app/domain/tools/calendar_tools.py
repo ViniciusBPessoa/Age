@@ -12,7 +12,12 @@ duas coisas no mesmo horário.
 
 from __future__ import annotations
 
+import logging
+from datetime import datetime
+
 from app.domain.tools.registry import ToolCategory, ToolContext, register_tool
+
+log = logging.getLogger("ai-worker.calendar_tools")
 
 _ISO = "data-hora ISO 8601 com fuso, ex. 2026-10-15T14:00:00-03:00"
 
@@ -140,12 +145,37 @@ async def discard_proposals(ctx: ToolContext, args: dict) -> dict:
         end=args["end"],
         title_contains=args.get("title_contains"),
     )
-    if not data.get("discarded"):
+
+    # Também o que ESTE turno acabou de encenar.
+    #
+    # A rota do core-api mexe em `core.plan_items`, ou seja, no que já
+    # foi promovido. O que o turno encenou agora vive só no
+    # `plan_builder`, e era invisível para ela.
+    #
+    # Sem isto, "propõe, descarta, propõe de novo" dentro de um turno
+    # guardava as DUAS versões: foi assim que um plano de funções em
+    # Python ficou com 5 sessões, duas no mesmo horário de sábado,
+    # enquanto a resposta dizia "refiz como bloco único".
+    no_turno = 0
+    if ctx.plan_builder is not None:
+        try:
+            no_turno = ctx.plan_builder.drop_in_window(
+                datetime.fromisoformat(args["start"]),
+                datetime.fromisoformat(args["end"]),
+                args.get("title_contains"),
+            )
+        except (ValueError, AttributeError) as exc:
+            # Data malformada vinda do modelo não deve derrubar o turno:
+            # o descarte do banco já aconteceu e vale.
+            log.warning("descarte no staging falhou: %s", exc)
+
+    total = int(data.get("discarded") or 0) + no_turno
+    if not total:
         return {
             "discarded": 0,
             "hint": "Não havia proposta pendente nesse período.",
         }
-    return data
+    return {**data, "discarded": total, "discarded_this_turn": no_turno}
 
 
 @register_tool(

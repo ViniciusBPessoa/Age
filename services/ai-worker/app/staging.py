@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -317,6 +318,51 @@ class StagingBuilder:
         )
         self.items.append(item)
         return str(item.id)
+
+    def drop_in_window(
+        self, start: datetime, end: datetime, title_contains: str | None = None
+    ) -> int:
+        """Remove itens JÁ ENCENADOS neste turno, dentro da janela.
+
+        Existe por uma sobreposição real na agenda de um usuário. Ele
+        pediu um plano de estudo, achou o tempo exagerado e pediu 1h30;
+        no mesmo turno o modelo chamou `propose_study_plan`, depois
+        `discard_proposals`, depois `propose_study_plan` de novo. A
+        resposta dizia "refiz como bloco único".
+
+        Só que `discard_proposals` mexe em `core.plan_items`, isto é,
+        no que JÁ foi promovido. O que o turno acabou de encenar está
+        aqui, nesta lista, e era invisível para ele. Resultado: as duas
+        versões sobreviveram no mesmo plano, cinco sessões onde devia
+        haver uma, e duas delas no mesmo horário de sábado (12h15 às
+        12h40 e 12h15 às 13h45).
+
+        Devolve quantos itens saíram, para a ferramenta somar ao que o
+        banco descartou e contar a verdade ao modelo.
+        """
+        def fora(item: StagedItem) -> bool:
+            # Item sem horário (remoção, tarefa sem prazo) não pertence
+            # a janela nenhuma: descartar por tempo o levaria embora
+            # junto sem o modelo ter pedido isso.
+            bruto = item.payload.get("start")
+            if not bruto:
+                return True
+            try:
+                quando = datetime.fromisoformat(str(bruto))
+            except ValueError:
+                return True
+            if not (start <= quando < end):
+                return True
+            if title_contains:
+                titulo = str(item.payload.get("title") or "")
+                # `casefold` para comparar acento e caixa de forma
+                # correta, igual ao filtro do core-api.
+                return title_contains.casefold() not in titulo.casefold()
+            return False
+
+        antes = len(self.items)
+        self.items = [i for i in self.items if fora(i)]
+        return antes - len(self.items)
 
     @property
     def is_empty(self) -> bool:

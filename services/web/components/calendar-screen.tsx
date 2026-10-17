@@ -45,7 +45,7 @@ import {
   Select,
   cx,
 } from "@/components/ui";
-import { api } from "@/lib/api-client";
+import { RequestFailed, api } from "@/lib/api-client";
 import { range } from "@/lib/format";
 import { guardarUltimaVista, lerUltimaVista } from "@/lib/ultimo-lugar";
 import type { AgeEvent, Flexibility, Plan } from "@/lib/types";
@@ -158,6 +158,8 @@ export function CalendarScreen({ timezone }: { timezone: string }) {
   const [remarcando, setRemarcando] = useState<Proposal | null>(null);
   const [novoInicio, setNovoInicio] = useState("");
   const [ocupado, setOcupado] = useState(false);
+  // O que falhou ao descartar. Sem isto, falha de rede virava "pronto".
+  const [erroDescarte, setErroDescarte] = useState<string | null>(null);
 
   async function recarregarPropostas() {
     await queryClient.invalidateQueries({ queryKey: ["plans", "proposed"] });
@@ -165,9 +167,18 @@ export function CalendarScreen({ timezone }: { timezone: string }) {
 
   async function descartar(itemId: string) {
     setOcupado(true);
+    setErroDescarte(null);
     try {
       await api.del(`/plans/items/${itemId}`);
       await recarregarPropostas();
+    } catch (err) {
+      // Sem este `catch` a exceção subia e a pessoa via o painel
+      // intacto, sem nenhuma indicação de que o descarte não foi.
+      setErroDescarte(
+        err instanceof RequestFailed
+          ? err.message
+          : "Não consegui descartar essa proposta. Tente de novo.",
+      );
     } finally {
       setOcupado(false);
     }
@@ -179,10 +190,30 @@ export function CalendarScreen({ timezone }: { timezone: string }) {
       // Em série: o rate limit do core-api responde 429 ao excedente, e
       // um lote paralelo deixaria parte das propostas na tela depois do
       // "descartei tudo".
+      //
+      // O erro de UMA proposta não interrompe as outras (a pessoa pediu
+      // para descartar todas), mas é contado: antes o `catch` engolia
+      // tudo e a tela fechava dizendo que descartou mesmo que as 8
+      // chamadas tivessem falhado.
+      let falhas = 0;
       for (const proposta of proposals) {
-        await api.del(`/plans/items/${proposta.id}`).catch(() => undefined);
+        try {
+          await api.del(`/plans/items/${proposta.id}`);
+        } catch {
+          falhas += 1;
+        }
       }
       await recarregarPropostas();
+      if (falhas > 0) {
+        setErroDescarte(
+          falhas === proposals.length
+            ? "Não consegui descartar as propostas. Tente de novo."
+            : `Descartei parte delas: ${falhas} não saíram.`,
+        );
+        // O painel fica aberto: fechar esconderia o que não saiu.
+        return;
+      }
+      setErroDescarte(null);
       setGerenciando(false);
     } finally {
       setOcupado(false);
@@ -392,6 +423,15 @@ export function CalendarScreen({ timezone }: { timezone: string }) {
           </>
         }
       >
+        {erroDescarte ? (
+          <p
+            role="alert"
+            className="mb-3 rounded-xl bg-danger/10 px-3.5 py-2.5 text-xs leading-relaxed text-danger ring-1 ring-inset ring-danger/25"
+          >
+            {erroDescarte}
+          </p>
+        ) : null}
+
         {proposals.length === 0 ? (
           <p className="text-sm text-muted">Nenhuma proposta pendente.</p>
         ) : (

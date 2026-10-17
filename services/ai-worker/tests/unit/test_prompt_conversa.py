@@ -232,3 +232,106 @@ class TestRevisoesNaoEntramEscondidas:
         prompt = build_system_prompt()
 
         assert "9 sessões em vez de 3" in prompt
+
+
+class TestRespostaUsaTabela:
+    """A tela renderiza tabela de Markdown e nunca recebia uma.
+
+    O pedido foi direto: "acho que dá para as respostas ficarem mais
+    bonitas, utilizar mais tabelas, como o DeepSeek me devolve os
+    dados". E a causa estava no prompt, que mandava "dado estruturado
+    em bloco de texto alinhado" — isto é, ``` com espaços, que vira
+    fonte monoespaçada cinza e desalinha no celular.
+
+    `rich-text.tsx` já detectava tabela desde antes (linha com `|`
+    seguida de `|---|`). O renderizador estava pronto, o prompt é que
+    pedia o formato pior.
+    """
+
+    def test_manda_usar_tabela_para_dado_com_colunas(self) -> None:
+        prompt = build_system_prompt()
+
+        assert "Tabela quando há colunas" in prompt
+        # A linha de separação é o que a tela usa para reconhecer a
+        # tabela: sem ela o texto vira parágrafo com barras.
+        assert "|---|" in prompt
+
+    def test_proibe_bloco_de_codigo_para_organizar_dado(self) -> None:
+        """Era o formato antigo, e some sozinho se o prompt não disser
+        explicitamente que ``` é só para código."""
+        prompt = build_system_prompt()
+
+        assert "nunca para organizar dados" in prompt
+
+    def test_limita_as_colunas_por_causa_do_celular(self) -> None:
+        prompt = build_system_prompt()
+
+        assert "no máximo 4 colunas" in prompt
+
+    def test_traz_um_exemplo_de_tabela_montada(self) -> None:
+        """Demonstração ensina mais que instrução: o prompt que proibia
+        travessão usando travessão é a prova disso."""
+        prompt = build_system_prompt()
+
+        assert "| Dia | Horário | Sessão |" in prompt
+
+
+class TestCortarTempoMostraORecorte:
+    """Ir direto para a proposta depois de "1h30 basta" pula a conversa.
+
+    Relato: "acho que ele já foi para a finalização rápido demais. Eu
+    falei que dá para fazer em uma hora e meia, ele não retornou: ok,
+    vai ficar em uma hora e meia, seria nesse caso assim que você
+    estruturaria."
+
+    Reduzir o tempo não é mudar um número, é pedir um plano diferente:
+    em 1h30 não cabe o que caberia em 3h30, então algo sai, e quem
+    decide o que vale cortar é a pessoa.
+    """
+
+    def test_manda_mostrar_o_recorte_antes_de_propor(self) -> None:
+        prompt = build_system_prompt()
+
+        assert "Cortar o tempo muda o conteúdo" in prompt
+        assert "algo sai ou encurta" in prompt
+
+    def test_exige_dizer_o_que_ficou_de_fora(self) -> None:
+        """É a informação que permite discordar. Sem ela, a pessoa
+        descobre no dia do estudo que o assunto que mais precisava não
+        está no bloco."""
+        prompt = build_system_prompt()
+
+        assert "o que ficou de fora" in prompt
+
+    def test_so_propoe_depois_do_aval(self) -> None:
+        prompt = build_system_prompt()
+
+        assert 'Só depois do "pode"' in prompt
+
+
+class TestCorrecaoValeParaPlanoDeEstudo:
+    """A regra de descartar antes de repropor existia e não transferiu.
+
+    Todos os exemplos eram de `propose_event` (um compromisso). O caso
+    real foi `propose_study_plan`: o plano de funções em Python saiu em
+    4 dias, a pessoa pediu 1h30 em um dia, a resposta disse "refiz como
+    bloco único" e apenas ACRESCENTOU. Sobraram 5 sessões, duas no
+    mesmo horário de sábado (12h15 às 12h40 e 12h15 às 13h45).
+    """
+
+    def test_diz_que_a_regra_vale_para_plano_de_estudo(self) -> None:
+        prompt = build_system_prompt()
+
+        assert "Vale igual para plano de estudo" in prompt
+
+    def test_manda_cobrir_a_janela_inteira_do_plano(self) -> None:
+        """Um plano tem sessões em vários dias: descartar só o dia da
+        primeira sessão deixa o resto para trás, que é o bug."""
+        prompt = build_system_prompt()
+
+        assert "janela inteira do plano" in prompt
+
+    def test_proibe_dizer_refiz_sem_ter_descartado(self) -> None:
+        prompt = build_system_prompt()
+
+        assert "você não refez nada" in prompt
