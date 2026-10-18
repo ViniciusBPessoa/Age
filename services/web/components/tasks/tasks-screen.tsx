@@ -29,6 +29,7 @@ import {
   PageHeader,
   Select,
   SkeletonList,
+  cx,
 } from "@/components/ui";
 import { RequestFailed, api } from "@/lib/api-client";
 import { duration } from "@/lib/format";
@@ -166,16 +167,48 @@ export function TasksScreen({ timezone }: { timezone: string }) {
         {/* §5.9.5: o cruzamento que as duas portas habilitam. */}
         {overview.data && overview.data.total_open > 0 ? (
           <div className="card overflow-hidden">
-            <div className="flex items-start gap-3 px-4 py-4 md:px-5">
+            {/*
+             * Numeros, nao o paragrafo pronto.
+             *
+             * Aqui ficava o `summary_text` inteiro do backend, em
+             * `whitespace-pre-wrap`: um bloco de texto corrido que
+             * REPETIA, linha por linha, a lista de tarefas logo
+             * abaixo, e no lugar mais nobre da tela. Visto no
+             * navegador, era a coisa menos legivel da pagina.
+             *
+             * A frase continua util para a CONVERSA, onde o Age fala.
+             * Numa tela que ja mostra as tarefas, o que falta e o
+             * agregado: quantas atrasadas, quantas vencendo, quanto
+             * tempo sem horario. Isso se le de relance.
+             */}
+            <div className="flex flex-wrap items-center gap-x-6 gap-y-3 px-4 py-4 md:px-5">
               <span
                 aria-hidden
-                className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-brand/12 text-brand"
+                className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-brand/12 text-brand"
               >
                 <IconTasks className="h-[18px] w-[18px]" />
               </span>
-              <p className="min-w-0 whitespace-pre-wrap text-sm leading-relaxed text-ink-2">
-                {overview.data.summary_text}
-              </p>
+              {overview.data.overdue.length > 0 ? (
+                <Numero
+                  valor={overview.data.overdue.length}
+                  rotulo="atrasada"
+                  tom="danger"
+                />
+              ) : null}
+              {overview.data.due_soon.length > 0 ? (
+                <Numero
+                  valor={overview.data.due_soon.length}
+                  rotulo="vence em breve"
+                  tom="warn"
+                />
+              ) : null}
+              {overview.data.without_due_count > 0 ? (
+                <Numero
+                  valor={overview.data.without_due_count}
+                  rotulo="sem prazo"
+                  tom="muted"
+                />
+              ) : null}
             </div>
             {overview.data.estimated_minutes_unscheduled > 0 ? (
               <p className="flex items-center gap-2 border-t border-warn/20 bg-warn/8 px-4 py-2.5 text-xs font-medium text-warn md:px-5">
@@ -478,5 +511,34 @@ function CreateTaskDialog({
         </Field>
       </div>
     </Dialog>
+  );
+}
+
+/**
+ * Um numero grande com o rotulo embaixo.
+ *
+ * A escala tipografica do projeto vai ate `text-4xl` e quase nada
+ * passava de `text-base`: numero que importa merece corpo, senao a
+ * tela inteira tem o mesmo peso e nada salta.
+ */
+function Numero({
+  valor,
+  rotulo,
+  tom,
+}: {
+  valor: number;
+  rotulo: string;
+  tom: "danger" | "warn" | "muted";
+}) {
+  const cor =
+    tom === "danger" ? "text-danger" : tom === "warn" ? "text-warn" : "text-ink-2";
+  return (
+    <span className="flex flex-col">
+      <span className={cx("text-2xl font-semibold tabular-nums", cor)}>{valor}</span>
+      <span className="text-2xs uppercase tracking-[0.08em] text-muted">
+        {rotulo}
+        {valor === 1 || rotulo.includes("vence") ? "" : "s"}
+      </span>
+    </span>
   );
 }
