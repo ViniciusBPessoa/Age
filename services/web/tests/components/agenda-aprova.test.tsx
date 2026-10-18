@@ -108,6 +108,25 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+describe("a data de hoje so e decidida no cliente", () => {
+  it("renderiza a grade depois do efeito, sem quebrar", async () => {
+    /*
+     * `cursor` era `useState(() => new Date())`, que roda no servidor
+     * E no navegador com relogios diferentes. O React avisava "server
+     * rendered HTML didn t match" apontando para `date={Date}` da
+     * timeline, e o aviso so aparecia nesta rota.
+     *
+     * Nenhum teste olha o console: isto so foi achado capturando as
+     * telas com o navegador. O teste aqui garante o contrario do que
+     * quebraria se alguem voltasse a inicializar no render, porque com
+     * `cursor` nulo e sem o efeito a tela ficaria vazia para sempre.
+     */
+    montar([]);
+
+    expect(await screen.findByRole("heading")).toBeTruthy();
+  });
+});
+
 describe("o painel de propostas permite aprovar", () => {
   it("mostra um botao de aplicar", async () => {
     /*

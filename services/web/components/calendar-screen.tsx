@@ -67,7 +67,21 @@ const FLEX_LABEL: Record<Flexibility, string> = {
 export function CalendarScreen({ timezone }: { timezone: string }) {
   const queryClient = useQueryClient();
   const [view, setViewState] = useState<TimelineView>("week");
-  const [cursor, setCursor] = useState(() => new Date());
+  /*
+   * A data de hoje so e decidida no CLIENTE.
+   *
+   * `new Date()` durante a renderizacao roda duas vezes, no servidor e
+   * no navegador, e os dois relogios nao batem: o React avisava
+   * "server rendered HTML didn't match the client properties" apontando
+   * para `date={Date}` da timeline. O aviso so aparecia nesta rota, e
+   * so foi achado capturando as telas, porque nenhum teste olha o
+   * console.
+   *
+   * `null` ate o efeito rodar: a tela so desenha a grade quando ja sabe
+   * que dia e hoje. E o mesmo cuidado que a visualizacao logo abaixo ja
+   * tomava com o `localStorage`.
+   */
+  const [cursor, setCursor] = useState<Date | null>(null);
   const [selected, setSelected] = useState<AgeEvent | null>(null);
 
   /*
@@ -82,6 +96,7 @@ export function CalendarScreen({ timezone }: { timezone: string }) {
   useEffect(() => {
     const salva = lerUltimaVista();
     if (salva !== null) setViewState(salva);
+    setCursor(new Date());
   }, []);
 
   // Troca de visualização passa por aqui para ser lembrada. Um
@@ -95,16 +110,24 @@ export function CalendarScreen({ timezone }: { timezone: string }) {
   // A janela buscada é maior que a visível: `react-big-calendar` mostra
   // dias da semana anterior e seguinte nas bordas do mês, e buscar só o
   // mês exato deixaria esses dias vazios na tela.
+  /*
+   * Enquanto `cursor` e nulo (so no primeiro render, antes do efeito),
+   * os hooks abaixo precisam de ALGUMA data: hook nao pode rodar
+   * condicionalmente. A tela em si nao e desenhada nesse instante, o
+   * guarda logo antes do `return` cuida disso.
+   */
+  const dia = cursor ?? new Date(0);
+
   const window = useMemo(() => {
     const base =
       view === "month"
-        ? { from: startOfMonth(cursor), to: endOfMonth(cursor) }
-        : { from: cursor, to: cursor };
+        ? { from: startOfMonth(dia), to: endOfMonth(dia) }
+        : { from: dia, to: dia };
     return {
       start: startOfWeek(base.from, { locale: ptBR }).toISOString(),
       end: endOfWeek(base.to, { locale: ptBR }).toISOString(),
     };
-  }, [cursor, view]);
+  }, [dia, view]);
 
   const events = useQuery({
     queryKey: ["events", window.start, window.end],
@@ -331,23 +354,31 @@ export function CalendarScreen({ timezone }: { timezone: string }) {
    * quando é o mesmo seria ruído.
    */
   const periodLabel = useMemo(() => {
-    if (view === "month") return format(cursor, "MMMM yyyy", { locale: ptBR });
-    if (view === "day") return format(cursor, "EEEE, d 'de' MMMM", { locale: ptBR });
-    const from = startOfWeek(cursor, { locale: ptBR });
+    if (view === "month") return format(dia, "MMMM yyyy", { locale: ptBR });
+    if (view === "day") return format(dia, "EEEE, d 'de' MMMM", { locale: ptBR });
+    const from = startOfWeek(dia, { locale: ptBR });
     const to = addDays(from, 6);
     return from.getMonth() === to.getMonth()
       ? `${format(from, "d")} – ${format(to, "d 'de' MMMM", { locale: ptBR })}`
       : `${format(from, "d 'de' MMM", { locale: ptBR })} – ${format(to, "d 'de' MMM", {
           locale: ptBR,
         })}`;
-  }, [cursor, view]);
+  }, [dia, view]);
 
   function shift(direction: -1 | 1) {
-    setCursor((current) =>
-      view === "month"
-        ? addMonths(current, direction)
-        : addWeeks(current, view === "day" ? direction / 7 : direction),
-    );
+    setCursor((current) => {
+      const base = current ?? new Date();
+      return view === "month"
+        ? addMonths(base, direction)
+        : addWeeks(base, view === "day" ? direction / 7 : direction);
+    });
+  }
+
+  // A grade so e desenhada quando o CLIENTE ja disse que dia e hoje.
+  // Desenhar antes com a data do servidor era a divergencia de
+  // hidratacao que o React apontava em `date={Date}`.
+  if (cursor === null) {
+    return <div className="flex h-dvh flex-col pb-16 md:pb-0" />;
   }
 
   return (
