@@ -269,7 +269,13 @@ export interface Plan {
 export interface ApplyResult {
   status: string;
   applied_count: number;
-  failed: { item_id?: string; reason?: string }[];
+  /*
+   * O backend manda `error`, nunca `reason`: `ApplyOut.failed` e
+   * montado com {"item_id": ..., "error": ...}. Com as duas chaves
+   * opcionais, ler `failed[0].reason` devolvia `undefined` sem um
+   * unico erro de tipo. Nao-opcional agora, para o compilador cobrar.
+   */
+  failed: { item_id: string; error: string }[];
   manual_fix_needed: string[];
   message: string;
 }

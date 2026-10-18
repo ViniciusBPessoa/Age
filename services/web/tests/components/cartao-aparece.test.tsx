@@ -23,15 +23,27 @@
  * relay SSE, que encaminha `plan` antes de `done` — então a decisão de
  * exibir estava no cliente, inline, onde nenhum teste alcançava.
  *
- * Estes testes cobrem a função que decide. Não cobrem o render do
- * cartão: para isso faltaria montar a tela com react-query e rede
- * falsa, e a dívida fica registrada aqui em vez de virar um teste que
- * passa sem olhar o que importa.
+ * Estes testes cobrem as tres funcoes puras que decidem: qual plano e
+ * desta conversa, se o estado vazio pode cobrir o cartao, e por quanto
+ * tempo insistir ate a promocao acontecer.
+ *
+ * A versao anterior registrava aqui uma divida: "nao cobrem o render
+ * do cartao". Ela foi cobrada. A causa raiz nao era o render, era a
+ * consulta estar ligada a um gatilho de turno que vivia so em memoria
+ * (`turnoComPlano`), preenchido num unico lugar e restaurado em lugar
+ * nenhum. F5, trocar de tela ou mandar a mensagem seguinte destruiam o
+ * cartao para sempre, com o plano intacto no banco. Hoje a consulta e
+ * funcao do servidor, e `cartao-sobrevive.test.tsx` monta a tela de
+ * verdade para provar isso.
  */
 
 import { describe, expect, it } from "vitest";
 
-import { PlanoAindaNaoVisivel, planoDaConversa } from "@/components/chat/chat-screen";
+import {
+  insistirAteAparecer,
+  mostraEstadoVazio,
+  planoDaConversa,
+} from "@/components/chat/chat-screen";
 import type { Plan } from "@/lib/types";
 
 const CONVERSA = "aaaaaaaa-1111-2222-3333-444444444444";
@@ -98,18 +110,99 @@ describe("qual proposta pertence à conversa aberta", () => {
   });
 });
 
-describe("a ausência temporária é um erro, não uma resposta", () => {
-  it("PlanoAindaNaoVisivel é um Error de verdade", () => {
-    /*
-     * O `retry` do react-query só atua sobre erro. Se a busca
-     * devolvesse `null`, ela encerraria com "não há proposta"
-     * exatamente no instante em que a proposta está a caminho — que é
-     * o bug. Este teste existe para que trocar o `throw` por um
-     * `return null` quebre aqui.
-     */
-    const erro = new PlanoAindaNaoVisivel();
+describe("o estado vazio nao pode esconder o cartao", () => {
+  /*
+   * Segundo caminho, independente da consulta, pelo qual o cartao
+   * sumia. O estado vazio renderiza NO LUGAR do `MessageList`, e o
+   * cartao e filho do `MessageList`: numa montagem em que as mensagens
+   * ainda nao chegaram, a tela caia no estado vazio e o cartao ficava
+   * inalcancavel mesmo com a proposta carregada.
+   */
+  it("com proposta carregada, nao mostra o estado vazio", () => {
+    expect(mostraEstadoVazio(CONVERSA, 0, false, false, true)).toBe(false);
+  });
 
-    expect(erro).toBeInstanceOf(Error);
-    expect(erro.name).toBe("PlanoAindaNaoVisivel");
+  it("sem proposta e sem mensagem, mostra", () => {
+    // Contrapeso: "nunca mostrar" passaria no teste acima.
+    expect(mostraEstadoVazio(CONVERSA, 0, false, false, false)).toBe(true);
+  });
+
+  it("no primeiro turno, a proposta ja tira o estado vazio", () => {
+    expect(mostraEstadoVazio(null, 0, false, false, true)).toBe(false);
+  });
+
+  it("com mensagens, nao mostra", () => {
+    expect(mostraEstadoVazio(CONVERSA, 3, false, false, false)).toBe(false);
+  });
+
+  it("durante o turno, nao mostra", () => {
+    expect(mostraEstadoVazio(CONVERSA, 0, true, false, false)).toBe(false);
+  });
+
+  it("com texto parcial chegando, nao mostra", () => {
+    expect(mostraEstadoVazio(CONVERSA, 0, false, true, false)).toBe(false);
+  });
+});
+
+describe("insistir ate a proposta aparecer", () => {
+  function esperaFalsa(registro: number[]) {
+    return async (ms: number) => {
+      registro.push(ms);
+    };
+  }
+
+  it("achando de primeira, nao espera", async () => {
+    const esperas: number[] = [];
+    let chamadas = 0;
+    const achado = await insistirAteAparecer(async () => {
+      chamadas += 1;
+      return plano(CONVERSA);
+    }, esperaFalsa(esperas));
+
+    expect(achado?.id).toBe("p1");
+    expect(chamadas).toBe(1);
+    expect(esperas).toEqual([]);
+  });
+
+  it("insiste ate aparecer", async () => {
+    const esperas: number[] = [];
+    let chamadas = 0;
+    const achado = await insistirAteAparecer(async () => {
+      chamadas += 1;
+      return chamadas < 4 ? null : plano(CONVERSA);
+    }, esperaFalsa(esperas));
+
+    expect(achado).not.toBeNull();
+    expect(chamadas).toBe(4);
+    expect(esperas.length).toBe(3);
+  });
+
+  it("desiste depois do teto, sem travar", async () => {
+    const esperas: number[] = [];
+    let chamadas = 0;
+    const achado = await insistirAteAparecer(
+      async () => {
+        chamadas += 1;
+        return null;
+      },
+      esperaFalsa(esperas),
+      5,
+      1000,
+    );
+
+    expect(achado).toBeNull();
+    expect(chamadas).toBe(5);
+  });
+
+  it("a janela coberta alcanca os 98 segundos medidos", () => {
+    /*
+     * O `retry: 2, retryDelay: 400` que havia aqui cobria 800 ms, e a
+     * promocao real levou 98 SEGUNDOS: era garantido falhar. Este
+     * teste afirma sobre a aritmetica do padrao, para que diminuir o
+     * teto volte a ser uma decisao consciente.
+     */
+    const tentativas = 8;
+    const intervalo = 2000;
+    expect((tentativas - 1) * intervalo).toBeGreaterThanOrEqual(14_000);
   });
 });

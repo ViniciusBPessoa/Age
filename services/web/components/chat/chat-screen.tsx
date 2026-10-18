@@ -52,6 +52,7 @@ import { ConversationSidebar } from "@/components/conversation-list/sidebar";
 import { PlanReview } from "@/components/plan-review/plan-review";
 import { Button, IconAlert, IconInfo, IconX, LoadError, cx } from "@/components/ui";
 import { RequestFailed, api } from "@/lib/api-client";
+import { mensagemDeFalha } from "@/lib/resultado-do-apply";
 import { subscribeToTurn, toolLabel, type StreamEvent } from "@/lib/sse";
 import {
   esquecerUltimaConversa,
@@ -105,17 +106,60 @@ export function rotaDoPlano(plano: Plan, acao: "apply" | "reject") {
 }
 
 /**
- * A proposta existe no servidor mas ainda não apareceu na listagem.
+ * Insiste ate a proposta aparecer, com teto.
  *
- * Erro e não `null` porque é o que faz o `retry` do react-query
- * tentar de novo. Depois das tentativas o cartão simplesmente não
- * aparece: é melhor não mostrar nada do que mostrar um cartão vazio.
+ * A promocao de `ai.plan_drafts` para `core.plans` roda DENTRO do
+ * `GET /plans`, e ja foi medida em 98 segundos na conta de verdade. O
+ * que havia aqui era `retry: 2, retryDelay: 400`: cerca de 800 ms, e
+ * foi por isso que o usuario descobriu a proposta dando F5.
+ *
+ * Teto, e nao laco infinito: se depois disto nao apareceu, algo
+ * quebrou no worker, e girar para sempre esconderia o defeito. Nada se
+ * perde, porque a consulta nao depende mais deste caminho e o cartao
+ * aparece na proxima montagem da tela.
+ *
+ * `esperar` entra por parametro para o teste rodar instantaneo e sem
+ * relogio falso.
  */
-export class PlanoAindaNaoVisivel extends Error {
-  constructor() {
-    super("A proposta ainda não está visível.");
-    this.name = "PlanoAindaNaoVisivel";
+export async function insistirAteAparecer(
+  buscar: () => Promise<Plan | null>,
+  esperar: (ms: number) => Promise<void> = (ms) =>
+    new Promise((ok) => setTimeout(ok, ms)),
+  tentativas = 8,
+  intervalo = 2000,
+): Promise<Plan | null> {
+  for (let i = 0; i < tentativas; i += 1) {
+    const achado = await buscar();
+    if (achado !== null) return achado;
+    if (i < tentativas - 1) await esperar(intervalo);
   }
+  return null;
+}
+
+/**
+ * A tela deve mostrar o estado vazio (os quatro exemplos)?
+ *
+ * Existe como funcao nomeada e exportada porque e um booleano de
+ * quatro termos que decide se a SUPERFICIE DE APROVACAO e alcancavel:
+ * o estado vazio renderiza NO LUGAR do `MessageList`, e o cartao de
+ * proposta e filho do `MessageList`.
+ *
+ * O termo `temProposta` e o conserto. Numa montagem em que as
+ * mensagens ainda nao chegaram (`messages.data` indefinido, logo
+ * comprimento 0), a tela caia no estado vazio e o cartao ficava
+ * inalcancavel mesmo com a proposta ja carregada. Era um segundo
+ * caminho, independente da consulta, para o cartao nunca aparecer.
+ */
+export function mostraEstadoVazio(
+  idAtivo: string | null,
+  quantasMensagens: number,
+  streaming: boolean,
+  temTextoParcial: boolean,
+  temProposta: boolean,
+): boolean {
+  if (temProposta) return false;
+  if (streaming || temTextoParcial) return false;
+  return idAtivo === null || quantasMensagens === 0;
 }
 
 /**
@@ -175,7 +219,6 @@ export function ChatScreen({
   const [streaming, setStreaming] = useState(false);
   const [streamingText, setStreamingText] = useState("");
   const [traces, setTraces] = useState<ToolTrace[]>([]);
-  const [turnoComPlano, setTurnoComPlano] = useState<string | null>(null);
   const [applying, setApplying] = useState(false);
   const [turnError, setTurnError] = useState<string | null>(null);
   /*
@@ -302,47 +345,32 @@ export function ChatScreen({
   });
 
   /*
-   * `turnoComPlano` é o id do TURNO que propôs algo, não do plano. Ele
-   * serve como gatilho e como chave de cache — muda a cada turno, então
-   * um plano novo não reaproveita a resposta do anterior — mas o
-   * endereço do plano tem de ser descoberto.
+   * A proposta pendente DESTA conversa, buscada sempre.
+   *
+   * Era `enabled: turnoComPlano !== null`, e o `turnoComPlano` so era
+   * preenchido num lugar: o evento `plan` do SSE. Nada o restaurava.
+   * O resultado e o relato "tu nunca confirma porra nenhuma": dar F5,
+   * trocar de tela, ou mandar a mensagem seguinte (que limpava o
+   * estado) destruia o cartao de aprovacao para sempre, mesmo com o
+   * plano vivo e `proposed` no banco, respondendo em
+   * `GET /plans?status=proposed`. A tela so parava de perguntar.
+   *
+   * Agora a presenca do cartao e funcao do SERVIDOR, nao de um estado
+   * de turno que so existe em memoria. O evento `plan` virou gatilho
+   * de refetch: ele diz "olha de novo agora", nao "pode olhar".
    *
    * `status=proposed` faz o core-api promover os rascunhos pendentes
-   * antes de listar, então esta chamada é também o que materializa o
+   * antes de listar, entao esta chamada e tambem o que materializa o
    * plano que o worker acabou de propor.
    */
   const plan = useQuery({
-    queryKey: ["plan", "por-turno", turnoComPlano],
+    queryKey: ["plan", "proposto-da-conversa", idAtivo],
     queryFn: async () => {
       const propostos = await api.get<Plan[]>("/plans?status=proposed");
-      const achado = planoDaConversa(propostos, idAtivo);
-      /*
-       * `throw` e não `return null`: o `retry` do react-query só atua
-       * sobre erro, e devolver `null` encerraria a busca com "não há
-       * proposta" exatamente no caso em que ela está a caminho.
-       *
-       * O evento `plan` é a promessa de que existe algo para aprovar,
-       * então a ausência aqui é uma inconsistência temporária, não uma
-       * resposta válida.
-       */
-      if (achado === null) throw new PlanoAindaNaoVisivel();
-      return achado;
+      return planoDaConversa(propostos, idAtivo);
     },
-    enabled: turnoComPlano !== null,
-    /*
-     * A promoção de `ai.plan_drafts` para `core.plans` é preguiçosa:
-     * acontece DENTRO do `GET /plans` (§2.3.2). O worker grava o
-     * rascunho antes de publicar o evento `plan`, então uma busca só
-     * deveria bastar — mas quando ela falha, falha em silêncio, e a
-     * pessoa fica olhando uma resposta que diz "esperando sua
-     * aprovação" sem nada para aprovar. Foi o relato.
-     *
-     * Duas tentativas curtas custam uma requisição a mais no pior
-     * caso e removem a necessidade de F5, que foi como o usuário
-     * descobriu que a proposta existia.
-     */
-    retry: 2,
-    retryDelay: 400,
+    enabled: idAtivo !== null,
+    staleTime: 10_000,
   });
 
   const handleEvent = useCallback(
@@ -378,7 +406,25 @@ export function ChatScreen({
           setStreamingText((previous) => previous + event.delta);
           break;
         case "plan":
-          setTurnoComPlano(event.plan_id);
+          /*
+           * Gatilho, nao porta.
+           *
+           * A promocao de `ai.plan_drafts` para `core.plans` e preguicosa
+           * e roda DENTRO do `GET /plans`, entao a primeira busca pode
+           * chegar antes de o plano existir. Antes isso era fatal, porque
+           * este evento era a UNICA coisa que ligava a consulta; agora a
+           * consulta vive por conta propria e isto so apressa a descoberta.
+           */
+          void insistirAteAparecer(async () => {
+            await queryClient.invalidateQueries({ queryKey: ["plan"] });
+            return (
+              queryClient.getQueryData<Plan | null>([
+                "plan",
+                "proposto-da-conversa",
+                idAtivo,
+              ]) ?? null
+            );
+          });
           break;
         case "done":
           setStreaming(false);
@@ -405,8 +451,15 @@ export function ChatScreen({
     setAplicado(null);
     setTraces([]);
     setStreamingText("");
-    setTurnoComPlano(null);
-
+    /*
+     * O cartao de aprovacao NAO e limpo aqui.
+     *
+     * Havia um `setTurnoComPlano(null)` nesta linha, e ele era um dos
+     * caminhos do relato: fazer uma pergunta de acompanhamento ("e se
+     * fosse mais cedo?") apagava da tela a proposta pendente, embora
+     * ela continuasse viva no banco. Quem decide se o cartao fica e o
+     * servidor, pelo status do plano.
+     */
     let targetId = idAtivo;
     try {
       // Primeira mensagem sem conversa: cria uma. O título vem depois,
@@ -463,7 +516,9 @@ export function ChatScreen({
     return async () => {
       try {
         await api.post(rotaDoPlano(plano, "reject"));
-        setTurnoComPlano(null);
+        // Quem decide se o cartao sai e o servidor: o plano passa a
+        // `rejected` e deixa de aparecer na lista de propostos.
+        await queryClient.invalidateQueries({ queryKey: ["plan"] });
       } catch (err) {
         setTurnError(
           err instanceof RequestFailed
@@ -502,19 +557,34 @@ export function ChatScreen({
         item_ids: itemIds,
         confirm_blocking: confirmBlocking,
       });
-      setTurnoComPlano(null);
       if (result.applied_count > 0) {
         setAplicado({ planId: plano.id, count: result.applied_count });
       }
-      // A agenda e a lista mudaram: invalidar tudo que as mostra.
+      /*
+       * A agenda, a lista e A PROPOSTA mudaram.
+       *
+       * `["plan"]` entrou aqui porque o cartao deixou de ser apagado a
+       * mao: se o plano continuar `proposed` (foi o que acontece numa
+       * recusa por conflito), ele VOLTA, que e o certo. Antes um
+       * `setTurnoComPlano(null)` apagava o cartao mesmo quando nada
+       * tinha sido aplicado.
+       */
       await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["plan"] }),
+        queryClient.invalidateQueries({ queryKey: ["plans"] }),
         queryClient.invalidateQueries({ queryKey: ["events"] }),
         queryClient.invalidateQueries({ queryKey: ["tasks"] }),
         queryClient.invalidateQueries({ queryKey: ["conversations"] }),
       ]);
-      if (result.manual_fix_needed.length > 0) {
-        setTurnError(result.message);
-      }
+      /*
+       * Nada entrou tem de aparecer, SEMPRE.
+       *
+       * A condicao aqui era `manual_fix_needed.length > 0`, e um
+       * FAILED nao popula essa lista: o caso mais comum de fracasso
+       * era o unico mudo. Ver `mensagemDeFalha`.
+       */
+      const aviso = mensagemDeFalha(result);
+      if (aviso !== null) setTurnError(aviso);
     } catch (err) {
       setTurnError(
         err instanceof RequestFailed ? err.message : "Não consegui aplicar.",
@@ -676,9 +746,13 @@ export function ChatScreen({
          * durante os segundos de espera, como se o envio nao tivesse
          * acontecido.
          */}
-        {(idAtivo === null || (messages.data?.items.length ?? 0) === 0) &&
-        !streaming &&
-        !streamingText ? (
+        {mostraEstadoVazio(
+          idAtivo,
+          messages.data?.items.length ?? 0,
+          streaming,
+          streamingText !== "",
+          plan.data != null,
+        ) ? (
           <ChatEmptyState
             calendarName={primaryCalendar}
             onPick={(text) => void send(text)}
