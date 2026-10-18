@@ -26,7 +26,7 @@ import type { SVGProps } from "react";
 
 type IconProps = SVGProps<SVGSVGElement>;
 
-function Svg({ children, ...rest }: IconProps) {
+function Svg({ children, className, ...rest }: IconProps) {
   return (
     <svg
       viewBox="0 0 24 24"
@@ -40,8 +40,23 @@ function Svg({ children, ...rest }: IconProps) {
       // Quem precisar de ícone sozinho passa `aria-hidden={false}` com
       // `aria-label`.
       aria-hidden
-      className="h-4 w-4 shrink-0"
       {...rest}
+      /*
+       * O tamanho padrao MESCLA com a classe de quem chama, em vez de
+       * ser sobrescrito por ela.
+       *
+       * Antes o `className` vinha depois no `{...rest}` e substituia o
+       * padrao inteiro: quem passasse so `className="text-muted"`
+       * perdia `h-4 w-4 shrink-0` e recebia um icone do tamanho que o
+       * SVG quisesse. Na tela de Conexoes isso aparecia como um icone
+       * gigante e duplicado ao lado de "Minhas tarefas", empurrando o
+       * nome para duas linhas. Visto na captura, invisivel no codigo.
+       *
+       * Vem DEPOIS do `{...rest}` para que o padrao nao seja perdido, e
+       * quem precisar de outro tamanho continua podendo passar `h-5 w-5`,
+       * que ganha por vir por ultimo na string.
+       */
+      className={"h-4 w-4 shrink-0" + (className ? " " + className : "")}
     >
       {children}
     </svg>
