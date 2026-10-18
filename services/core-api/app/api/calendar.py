@@ -726,3 +726,149 @@ async def internal_discard_proposals(
             "discarded": len(alvos),
             "items": [nome for _, nome in alvos[:20]],
         }
+
+
+@internal.post("/apply-proposals")
+async def internal_apply_proposals(
+    user_id: WorkerUser,
+    body: dict,
+) -> dict:
+    """Aplica propostas pendentes, pela conversa.
+
+    Até aqui o Age só sabia PROPOR. Para confirmar era preciso clicar no
+    cartão, e o relato foi que isso nunca funcionava: o cartão sumia, e
+    a agenda, que mostra as propostas, não tinha botão de aprovar. Numa
+    conversa fluida, "pode confirmar" tem de bastar.
+
+    §13 da ARQUITETURA.md previu este dia em letras: "o poder existe,
+    com um limite deliberado: ele propõe e o usuário aprova em um
+    clique. Se isso incomodar na prática, a mudança é pequena e
+    localizada [...] é um ajuste de política, não de arquitetura".
+
+    **O princípio continua de pé.** Nada entra na agenda sem o usuário
+    aprovar; o que muda é o canal da aprovação, de clique para palavra.
+    As travas que mantêm isso verdadeiro:
+
+    - o worker só chama esta rota com consentimento explícito no turno
+      (a regra fica no prompt, e `test_apply_proposals.py` a cobra);
+    - a janela limita o alcance ao que acabou de ser proposto, para que
+      "pode" não alcance uma proposta esquecida de outro dia;
+    - conflito bloqueante NÃO entra por palavra: volta como pergunta
+      nomeando o choque, e o usuário decide sabendo qual é.
+
+    Reusa `apply_plan`, o mesmo executor da rota pública: duplicar a
+    ordem de aplicação, a revalidação e o registro de undo em duas
+    versões seria a forma mais cara de divergir.
+    """
+    from app.adapters.tasks.local import LocalTasks
+    from app.domain.plan_executor import (
+        PlanExpired,
+        RevalidationFailed,
+        apply_plan,
+    )
+    from app.services.plan_store import (
+        load_plan,
+        mark_applied,
+        record_undo_log,
+    )
+
+    janela_inicio = body.get("start")
+    janela_fim = body.get("end")
+    titulo = (body.get("title_contains") or "").strip().lower()
+    confirmar_bloqueante = bool(body.get("confirm_blocking"))
+
+    async with user_session(user_id) as db:
+        await promote_drafts(db, user_id)
+
+        rows = await db.execute(
+            text(
+                """
+                SELECT pi.id, pi.after, pi.plan_id
+                FROM core.plan_items pi
+                JOIN core.plans p ON p.id = pi.plan_id
+                WHERE p.user_id = :uid
+                  AND p.status = 'proposed'
+                  AND pi.status = 'pending'
+                """
+            ),
+            {"uid": str(user_id)},
+        )
+
+        # Agrupa por plano: `apply_plan` é por plano, e a janela de
+        # undo também. Juntar itens de planos diferentes num pedido só
+        # mentiria sobre atomicidade.
+        por_plano: dict[str, list[UUID]] = {}
+        nomes: list[str] = []
+        for item_id, after, plan_id in rows.all():
+            payload: dict = {}
+            if after is not None:
+                payload = after if isinstance(after, dict) else json.loads(after)
+
+            # Item sem horário (tarefa, remoção) entra quando não há
+            # filtro de janela: ele não tem como ser comparado a uma.
+            bruto = payload.get("start")
+            if janela_inicio and janela_fim:
+                if not bruto:
+                    continue
+                try:
+                    quando = datetime.fromisoformat(bruto)
+                except ValueError:
+                    continue
+                if quando < datetime.fromisoformat(
+                    janela_inicio
+                ) or quando > datetime.fromisoformat(janela_fim):
+                    continue
+
+            nome = payload.get("title") or ""
+            if titulo and titulo not in nome.lower():
+                continue
+
+            por_plano.setdefault(str(plan_id), []).append(item_id)
+            if nome:
+                nomes.append(nome)
+
+        if not por_plano:
+            return {
+                "applied": 0,
+                "items": [],
+                "message": "Nada pendente para confirmar nessa janela.",
+            }
+
+        provider = LocalCalendar(db=db, user_id=user_id)
+        tasks = LocalTasks(db=db, user_id=user_id)
+
+        total = 0
+        recusados: list[str] = []
+        for plan_id, item_ids in por_plano.items():
+            plano = await load_plan(db, user_id, UUID(plan_id))
+            if plano is None:
+                continue
+            try:
+                resultado = await apply_plan(
+                    plano,
+                    provider,
+                    tasks=tasks,
+                    item_ids=item_ids,
+                    confirm_blocking=confirmar_bloqueante,
+                )
+            except (PlanExpired, RevalidationFailed) as exc:
+                recusados.append(str(exc))
+                continue
+
+            if not resultado.refused_upfront:
+                await mark_applied(db, user_id, UUID(plan_id), resultado)
+                await record_undo_log(db, user_id, UUID(plan_id), resultado)
+            else:
+                recusados.extend(motivo for _, motivo in resultado.failed)
+            total += len(resultado.applied)
+
+        return {
+            "applied": total,
+            "items": nomes[:20],
+            "refused": recusados[:10],
+            "message": (
+                f"{total} item(ns) entraram na agenda."
+                if total
+                else "Nada entrou: " + "; ".join(recusados[:3])
+            ),
+        }

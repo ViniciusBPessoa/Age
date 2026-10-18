@@ -448,3 +448,100 @@ async def propose_recurring_event(ctx: ToolContext, args: dict) -> dict:
         reason=args["reason"],
     )
     return {"staged": True, "diff_item_id": item_id}
+
+
+@register_tool(
+    name="apply_proposals",
+    description=(
+        "Confirma propostas pendentes e as coloca DE VERDADE na agenda. "
+        "Use SOMENTE quando a pessoa disser com todas as letras que pode "
+        "ir: 'pode', 'pode confirmar', 'confirma', 'fechou', 'manda ver', "
+        "'isso mesmo, aplica'. "
+        "NUNCA use por iniciativa própria, nem porque o pedido parecia "
+        "decidido: propor é o padrão, confirmar é escolha dela. "
+        "Se a pessoa pedir para confirmar só uma parte, use "
+        "`title_contains` ou a janela para alcançar só aquilo. "
+        "Depois de usar, diga o que ENTROU na agenda, não o que você fez."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "start": {
+                "type": "string",
+                "description": f"início da janela a confirmar, {_ISO}",
+            },
+            "end": {
+                "type": "string",
+                "description": f"fim da janela a confirmar, {_ISO}",
+            },
+            "title_contains": {
+                "type": "string",
+                "description": (
+                    "opcional: confirma só o que tiver este texto no "
+                    "título, ex. 'Cálculo'"
+                ),
+            },
+            "confirm_blocking": {
+                "type": "boolean",
+                "description": (
+                    "só true se a pessoa já souber do conflito e tiver "
+                    "dito que quer assim mesmo. Nunca true por padrão"
+                ),
+            },
+        },
+        "required": ["start", "end"],
+    },
+    category=ToolCategory.READ,
+)
+async def apply_proposals(ctx: ToolContext, args: dict) -> dict:
+    """Categoria READ embora seja a escrita mais séria que existe aqui.
+
+    `ToolCategory.WRITE` significa "encena no plano para o usuário
+    aprovar depois" (§5.2). Confirmar não pode virar proposta: seria
+    pedir aprovação para aprovar, e a pessoa ficaria com um cartão novo
+    onde queria o compromisso marcado.
+
+    A aprovação já aconteceu, por palavra, antes desta chamada. A
+    diferença em relação a `propose_*` não é de permissão, é de momento:
+    aqui o consentimento é anterior, não posterior.
+
+    O que impede o abuso não é o código e sim o prompt, porque a decisão
+    de que houve consentimento é de leitura. Por isso a descrição desta
+    ferramenta lista as palavras, e por isso existe um teste afirmando
+    que o prompt proíbe chamar sem elas.
+    """
+    if ctx.read_calendar is None:
+        return {"error": "agenda não disponível neste turno"}
+
+    # O que este turno acabou de encenar ainda não virou `plan_items`:
+    # a promoção acontece do lado do core-api, dentro da rota. Avisar
+    # aqui evita a resposta "confirmei" para quem acabou de pedir a
+    # proposta no mesmo turno e ainda não viu nada.
+    data = await ctx.read_calendar(
+        "apply_proposals",
+        start=args.get("start"),
+        end=args.get("end"),
+        title_contains=args.get("title_contains"),
+        confirm_blocking=bool(args.get("confirm_blocking")),
+    )
+
+    aplicados = int(data.get("applied") or 0)
+    if aplicados == 0:
+        recusas = data.get("refused") or []
+        return {
+            **data,
+            "hint": (
+                "Nada entrou. Diga o motivo à pessoa e pergunte se ela "
+                "quer assim mesmo; não repita a chamada sem resposta."
+                if recusas
+                else "Não havia proposta pendente nessa janela."
+            ),
+        }
+
+    return {
+        **data,
+        "hint": (
+            "Entrou na agenda de verdade. Relate o resultado final "
+            "(quantos blocos, quando) e lembre que dá para desfazer."
+        ),
+    }

@@ -69,6 +69,8 @@ class CalendarClient:
                 )
             case "discard_proposals":
                 return await self.discard_proposals(**kwargs)
+            case "apply_proposals":
+                return await self.apply_proposals(**kwargs)
             case "find_free_slots":
                 return await self.find_free_slots(**kwargs)
             case "summarize_workload":
@@ -177,6 +179,35 @@ class CalendarClient:
         return await self._post(
             "/internal/calendar/discard-proposals",
             {"start": start, "end": end, "title_contains": title_contains},
+        )
+
+    async def apply_proposals(
+        self,
+        *,
+        start: str | None = None,
+        end: str | None = None,
+        title_contains: str | None = None,
+        confirm_blocking: bool = False,
+    ) -> dict:
+        """Aplica propostas pendentes, quando a pessoa confirma no chat.
+
+        A outra escrita do worker, e esta TOCA a agenda. Por isso ela
+        só existe para ser chamada depois de um "pode", "confirma",
+        "fechou" dito pela pessoa: a regra fica no prompt, e o teste
+        `test_apply_proposals.py` a cobra.
+
+        O limite de §5.2 continua valendo. Nada entra sem o usuário
+        aprovar; o que muda é o canal da aprovação, de clique no cartão
+        para palavra na conversa.
+        """
+        return await self._post(
+            "/internal/calendar/apply-proposals",
+            {
+                "start": start,
+                "end": end,
+                "title_contains": title_contains,
+                "confirm_blocking": confirm_blocking,
+            },
         )
 
     async def find_free_slots(
