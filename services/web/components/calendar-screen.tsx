@@ -45,10 +45,12 @@ import {
   Select,
   cx,
 } from "@/components/ui";
+import { PlanReview } from "@/components/plan-review/plan-review";
 import { RequestFailed, api } from "@/lib/api-client";
+import { mensagemDeFalha } from "@/lib/resultado-do-apply";
 import { range } from "@/lib/format";
 import { guardarUltimaVista, lerUltimaVista } from "@/lib/ultimo-lugar";
-import type { AgeEvent, Flexibility, Plan } from "@/lib/types";
+import type { AgeEvent, ApplyResult, Flexibility, Plan } from "@/lib/types";
 
 const VIEWS = [
   { value: "day" as const, label: "dia" },
@@ -147,6 +149,26 @@ export function CalendarScreen({ timezone }: { timezone: string }) {
     return out;
   }, [plans.data]);
 
+  /**
+   * Os planos que ainda tem item pendente: os OBJETOS, nao os itens.
+   *
+   * `proposals` acima achata tudo em itens para a timeline desenhar os
+   * blocos hachurados, e joga o plano fora. O painel herdou isso, e por
+   * isso so sabia descartar e remarcar: sem o plano nao ha id para
+   * `POST /plans/{id}/apply`, e o botao de aprovar simplesmente nao
+   * existia nesta tela.
+   *
+   * O relato era esse beco: o cartao do chat morria com a conversa, e a
+   * agenda, que MOSTRA as propostas, nao oferecia como aceita-las.
+   */
+  const planosPendentes = useMemo(
+    () =>
+      (plans.data ?? []).filter(
+        (p) => p.status === "proposed" && p.items.some((i) => i.status === "pending"),
+      ),
+    [plans.data],
+  );
+
   const byId = useMemo(() => {
     const map = new Map<string, AgeEvent>();
     for (const event of events.data?.events ?? []) map.set(event.id, event);
@@ -178,6 +200,53 @@ export function CalendarScreen({ timezone }: { timezone: string }) {
         err instanceof RequestFailed
           ? err.message
           : "Não consegui descartar essa proposta. Tente de novo.",
+      );
+    } finally {
+      setOcupado(false);
+    }
+  }
+
+  async function descartarPlano(plano: Plan) {
+    setOcupado(true);
+    setErroDescarte(null);
+    try {
+      await api.post(`/plans/${plano.id}/reject`);
+      await queryClient.invalidateQueries({ queryKey: ["plans"] });
+    } catch (err) {
+      setErroDescarte(
+        err instanceof RequestFailed
+          ? err.message
+          : "Nao consegui descartar esta proposta.",
+      );
+    } finally {
+      setOcupado(false);
+    }
+  }
+
+  async function aplicar(plano: Plan, itemIds: string[], confirmBlocking: boolean) {
+    setOcupado(true);
+    setErroDescarte(null);
+    try {
+      const result = await api.post<ApplyResult>(`/plans/${plano.id}/apply`, {
+        item_ids: itemIds,
+        confirm_blocking: confirmBlocking,
+      });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["plans"] }),
+        queryClient.invalidateQueries({ queryKey: ["events"] }),
+        queryClient.invalidateQueries({ queryKey: ["tasks"] }),
+      ]);
+      const aviso = mensagemDeFalha(result);
+      if (aviso !== null) {
+        // O painel FICA aberto quando algo nao entrou: fecha-lo
+        // esconderia o motivo, que e o defeito que estamos consertando.
+        setErroDescarte(aviso);
+      } else if (planosPendentes.length <= 1) {
+        setGerenciando(false);
+      }
+    } catch (err) {
+      setErroDescarte(
+        err instanceof RequestFailed ? err.message : "Nao consegui aplicar.",
       );
     } finally {
       setOcupado(false);
@@ -402,6 +471,7 @@ export function CalendarScreen({ timezone }: { timezone: string }) {
       <Dialog
         open={gerenciando}
         onClose={() => (ocupado ? undefined : setGerenciando(false))}
+        size="lg"
         title="Propostas esperando aprovação"
         description="Nada aqui está na sua agenda ainda."
         footer={
@@ -432,46 +502,101 @@ export function CalendarScreen({ timezone }: { timezone: string }) {
           </p>
         ) : null}
 
+        {/*
+         * O cartao de aprovacao, aqui dentro.
+         *
+         * Este painel se chamava "Propostas esperando aprovacao" e oferecia
+         * Remarcar, Descartar e Descartar todas. Aprovar, nao: um grep por
+         * `apply` neste arquivo devolvia zero. Era a segunda metade do
+         * relato, depois do cartao do chat que sumia.
+         *
+         * Reusa o `PlanReview` do chat em vez de um botao "aprovar tudo"
+         * proprio: aprovacao granular e primeira-classe (§5.8, §8.1), e uma
+         * segunda superficie com semantica mais fraca divergiria da primeira.
+         *
+         * Um cartao por plano, empilhados. `confirm_blocking`, `item_ids` e
+         * a janela de undo sao POR PLANO: juntar itens de planos diferentes
+         * num cartao so mentiria sobre atomicidade.
+         */}
+        {planosPendentes.length > 0 ? (
+          <div className="mb-4 space-y-3">
+            {planosPendentes.length > 1 ? (
+              <p className="text-xs text-muted">
+                {planosPendentes.length} propostas separadas. Cada uma e aprovada por
+                conta.
+              </p>
+            ) : null}
+            {planosPendentes.map((plano) => (
+              <PlanReview
+                key={plano.id}
+                plan={plano}
+                timezone={timezone}
+                applying={ocupado}
+                onApply={(itemIds, confirmBlocking) =>
+                  void aplicar(plano, itemIds, confirmBlocking)
+                }
+                onReject={() => void descartarPlano(plano)}
+              />
+            ))}
+          </div>
+        ) : null}
+
+        {/*
+         * A lista abaixo existe so para REMARCAR, que o cartao nao faz.
+         *
+         * Ao ver a tela pronta, as mesmas propostas apareciam duas vezes:
+         * uma no cartao, com caixa de selecao, e outra aqui com Remarcar e
+         * Descartar. Aprovar e descartar agora moram no cartao, entao aqui
+         * fica so o que falta, sem repetir a decisao.
+         */}
         {proposals.length === 0 ? (
           <p className="text-sm text-muted">Nenhuma proposta pendente.</p>
         ) : (
-          <ul className="max-h-80 space-y-1.5 overflow-y-auto">
-            {proposals.map((proposta) => (
-              <li
-                key={proposta.id}
-                className="flex items-center gap-2 rounded-lg border border-line px-2.5 py-2"
-              >
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm text-ink">{proposta.title}</p>
-                  <p className="text-2xs text-muted">
-                    {range(proposta.start, proposta.end, timezone)}
-                  </p>
-                </div>
-                <Button
-                  variant="quiet"
-                  size="sm"
-                  disabled={ocupado}
-                  onClick={() => {
-                    setRemarcando(proposta);
-                    // `datetime-local` não aceita offset: o valor tem de
-                    // ser a hora local já formatada, sem o fuso.
-                    setNovoInicio(proposta.start.slice(0, 16));
-                  }}
+          <>
+            <p className="mb-2 text-xs text-muted">
+              Precisa remarcar ou tirar alguma antes de aprovar?
+            </p>
+            <ul className="max-h-60 space-y-1.5 overflow-y-auto">
+              {proposals.map((proposta) => (
+                <li
+                  key={proposta.id}
+                  className="flex items-center gap-2 rounded-lg border border-line px-2.5 py-2"
                 >
-                  Remarcar
-                </Button>
-                <Button
-                  variant="quiet"
-                  size="sm"
-                  disabled={ocupado}
-                  onClick={() => void descartar(proposta.id)}
-                  aria-label={`Descartar ${proposta.title}`}
-                >
-                  Descartar
-                </Button>
-              </li>
-            ))}
-          </ul>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm text-ink">{proposta.title}</p>
+                    <p className="text-2xs text-muted">
+                      {range(proposta.start, proposta.end, timezone)}
+                    </p>
+                  </div>
+                  <Button
+                    variant="quiet"
+                    size="sm"
+                    disabled={ocupado}
+                    onClick={() => {
+                      setRemarcando(proposta);
+                      // `datetime-local` não aceita offset: o valor tem de
+                      // ser a hora local já formatada, sem o fuso.
+                      setNovoInicio(proposta.start.slice(0, 16));
+                    }}
+                  >
+                    Remarcar
+                  </Button>
+                  {/* Descartar UM item continua util aqui: no cartao, tirar
+                    um item e desmarcar a caixa, que o deixa pendente em
+                    vez de remove-lo. */}
+                  <Button
+                    variant="quiet"
+                    size="sm"
+                    disabled={ocupado}
+                    onClick={() => void descartar(proposta.id)}
+                    aria-label={`Descartar ${proposta.title}`}
+                  >
+                    Descartar
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          </>
         )}
       </Dialog>
 

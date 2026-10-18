@@ -71,8 +71,8 @@
 }
 
 .age-timeline .rbc-header {
-  padding: 0.625rem 0.25rem;
-  font-size: 0.6875rem;
+  padding: 0.75rem 0.25rem;
+  font-size: 0.75rem;
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -88,20 +88,36 @@
   overflow: hidden;
 }
 
+/* 0.75rem, nao 0.6875rem: eram 11px, a menor tipografia do app, na
+ * superficie mais densa dele. */
 .age-timeline .rbc-label,
 .age-timeline .rbc-time-gutter {
-  font-size: 0.6875rem;
+  font-size: 0.75rem;
   font-variant-numeric: tabular-nums;
   color: rgb(var(--faint));
 }
 
-/* A linha de meia hora mais fraca que a da hora cheia: sem isso a
- * grade tem o mesmo peso em todo lugar e cansa de ler. */
+/* A altura de uma hora.
+ *
+ * Eram 44px, medidos no navegador, e dai saia o relato "tem um pouco
+ * de informacao demais em pouco espaco, nao sei explicar": um bloco de
+ * 30 minutos ficava com 22px, MENOR QUE UMA LINHA DE TEXTO, e o titulo
+ * do evento nao cabia. Com 64px a meia hora tem 32px e o nome aparece.
+ *
+ * O custo e honesto: cabem menos horas na tela de uma vez, e rola. O
+ * que aparece passa a ser legivel, que era o problema. */
 .age-timeline .rbc-timeslot-group {
-  min-height: 44px;
+  min-height: 64px;
 }
+
+/* A linha de meia hora quase apagada.
+ *
+ * A intencao ja estava escrita aqui ("mais fraca que a da hora
+ * cheia"), mas as duas usavam o MESMO token `--line`, entao saiam com
+ * o mesmo peso. Com tres linhas de peso igual por hora o olho nao
+ * separa estrutura de subdivisao, e a grade vira parede listrada. */
 .age-timeline .rbc-time-slot + .rbc-time-slot {
-  border-top: 1px dotted rgb(var(--line));
+  border-top: 1px dotted rgb(var(--line) / 0.45);
 }
 
 /* "Hoje" é destaque sutil: um fundo forte na coluna de hoje compete
@@ -110,6 +126,18 @@
   /* 3,5%%, não 7%%: a 7%% a coluna de hoje chamava mais atenção que os
    * eventos dentro dela, que são o conteúdo. */
   background: color-mix(in srgb, rgb(var(--brand)) 3.5%, transparent);
+}
+
+/* O cabecalho de hoje, com nome.
+ *
+ * O fundo da coluna fica fraco de proposito (acima), mas assim NENHUM
+ * dia tinha ancora: sete colunas identicas, e achar "hoje" exigia ler
+ * os numeros. O destaque vai no cabecalho, onde nao compete com os
+ * eventos. */
+.age-timeline .rbc-header.rbc-today {
+  color: rgb(var(--brand));
+  background: color-mix(in srgb, rgb(var(--brand)) 7%, transparent);
+  border-bottom: 2px solid rgb(var(--brand));
 }
 
 .age-timeline .rbc-off-range-bg {

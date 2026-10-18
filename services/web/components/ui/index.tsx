@@ -576,7 +576,10 @@ export function Dialog({
   description,
   children,
   footer,
+  size = "md",
 }: {
+  /** `lg` para conteudo que empilha cartoes, como as propostas. */
+  size?: "md" | "lg";
   open: boolean;
   onClose: () => void;
   title: string;
@@ -608,7 +611,10 @@ export function Dialog({
         if (e.target === ref.current) onClose();
       }}
       className={cx(
-        "w-[min(34rem,calc(100vw-2rem))] rounded-2xl border border-line-strong",
+        size === "lg"
+          ? "w-[min(46rem,calc(100vw-2rem))]"
+          : "w-[min(34rem,calc(100vw-2rem))]",
+        "rounded-2xl border border-line-strong",
         "bg-surface p-0 text-ink shadow-float",
         "backdrop:bg-black/65 backdrop:backdrop-blur-sm",
         "open:animate-scale-in",
@@ -633,7 +639,10 @@ export function Dialog({
           <IconXInline />
         </Button>
       </div>
-      <div className="px-6 pb-5 text-sm">{children}</div>
+      {/* O corpo rola sozinho: sem isto, dois cartoes de proposta
+          empilhados passam da altura da tela e o rodape com os botoes
+          sai de vista, deixando a acao principal inalcancavel. */}
+      <div className="max-h-[70vh] overflow-y-auto px-6 pb-5 text-sm">{children}</div>
       {footer ? (
         <div className="flex flex-wrap justify-end gap-2 border-t border-line bg-surface-2/50 px-6 py-4">
           {footer}

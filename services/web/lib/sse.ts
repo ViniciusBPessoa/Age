@@ -145,6 +145,7 @@ const TOOL_LABELS: Record<string, string> = {
   get_events: "lendo sua agenda",
   get_pending_proposals: "vendo o que espera aprovação",
   discard_proposals: "descartando as propostas",
+  apply_proposals: "colocando na sua agenda",
   find_free_slots: "procurando horários livres",
   summarize_workload: "medindo a carga da semana",
   propose_event: "montando a proposta",
