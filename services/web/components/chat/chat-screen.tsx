@@ -137,6 +137,32 @@ export async function insistirAteAparecer(
 }
 
 /**
+ * A lista de mensagens com o eco local no fim, quando houver.
+ *
+ * O eco e a mensagem que a pessoa acabou de enviar e que o servidor
+ * ainda nao devolveu. Sem ele, apertar Enter fazia o texto digitado
+ * sumir ate o turno terminar.
+ *
+ * Some sozinho: quando a lista do servidor ja contem uma mensagem do
+ * usuario com o mesmo texto, o eco nao e adicionado, e nao ha o
+ * piscar de ver a frase duas vezes.
+ */
+export function comEcoLocal(doServidor: Message[], eco: string | null): Message[] {
+  if (eco === null) return doServidor;
+  const jaChegou = doServidor.some((m) => m.role === "user" && m.content === eco);
+  if (jaChegou) return doServidor;
+  return [
+    ...doServidor,
+    {
+      id: "eco-local",
+      role: "user",
+      content: eco,
+      created_at: new Date().toISOString(),
+    } as Message,
+  ];
+}
+
+/**
  * A tela deve mostrar o estado vazio (os quatro exemplos)?
  *
  * Existe como funcao nomeada e exportada porque e um booleano de
@@ -217,6 +243,13 @@ export function ChatScreen({
   const timezone = me.timezone;
 
   const [streaming, setStreaming] = useState(false);
+  /*
+   * A mensagem que acabou de ser enviada, enquanto o servidor nao a
+   * devolve. Sem isto o texto digitado SOME ao apertar Enter: a lista
+   * vem do banco e so e recarregada depois, entao durante toda a
+   * primeira ida a rede a tela nao mostra o que a pessoa escreveu.
+   */
+  const [ecoLocal, setEcoLocal] = useState<string | null>(null);
   const [streamingText, setStreamingText] = useState("");
   const [traces, setTraces] = useState<ToolTrace[]>([]);
   const [applying, setApplying] = useState(false);
@@ -428,6 +461,8 @@ export function ChatScreen({
           break;
         case "done":
           setStreaming(false);
+          // A mensagem ja esta no banco: o eco sai para nao duplicar.
+          setEcoLocal(null);
           // Recarrega do banco: a mensagem persistida é a fonte, e o
           // texto acumulado no cliente era só a pré-visualização.
           void queryClient.invalidateQueries({ queryKey: ["messages"] });
@@ -460,6 +495,23 @@ export function ChatScreen({
      * ela continuasse viva no banco. Quem decide se o cartao fica e o
      * servidor, pelo status do plano.
      */
+    /*
+     * O turno COMECA aqui, antes de qualquer ida a rede.
+     *
+     * `setStreaming(true)` ficava depois de criar a conversa, e a
+     * criacao so acontece na PRIMEIRA mensagem. O efeito era o relato:
+     * "toda vez que um usuario inicia um chat novo, ele nao traz aquela
+     * mensagem de feedback na parte de baixo [...] so a partir da segunda
+     * mensagem que isso acontece".
+     *
+     * Era literal. Da segunda em diante o ramo de criar conversa e
+     * pulado e o indicador aparecia no mesmo tique do clique; na
+     * primeira, ele esperava duas idas a rede, e durante elas a tela
+     * continuava mostrando os quatro exemplos, como se o envio nao
+     * tivesse acontecido.
+     */
+    setStreaming(true);
+    setEcoLocal(text);
     let targetId = idAtivo;
     try {
       // Primeira mensagem sem conversa: cria uma. O título vem depois,
@@ -471,10 +523,12 @@ export function ChatScreen({
         // remontaria esta tela e mataria o turno que está por começar.
         // A URL é acertada no `done`.
         setNovaConversa(created.id);
-        await queryClient.invalidateQueries({ queryKey: ["conversations"] });
+        // Sem `await`: a lista de conversas da barra lateral nao e
+        // requisito para o turno comecar, e esperar por ela atrasava a
+        // primeira resposta por uma ida a rede inteira.
+        void queryClient.invalidateQueries({ queryKey: ["conversations"] });
       }
 
-      setStreaming(true);
       const accepted = await api.post<{ turn_id: string }>(
         `/conversations/${targetId}/messages`,
         { content: text, client_turn_id: crypto.randomUUID() },
@@ -495,6 +549,7 @@ export function ChatScreen({
       });
     } catch (err) {
       setStreaming(false);
+      setEcoLocal(null);
       setTurnError(
         err instanceof RequestFailed ? err.message : "Não consegui enviar a mensagem.",
       );
@@ -764,7 +819,7 @@ export function ChatScreen({
           />
         ) : (
           <MessageList
-            messages={messages.data?.items ?? []}
+            messages={comEcoLocal(messages.data?.items ?? [], ecoLocal)}
             streaming={streaming}
             streamingText={streamingText}
             traces={traces}
