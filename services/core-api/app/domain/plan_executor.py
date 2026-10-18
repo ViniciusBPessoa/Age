@@ -62,6 +62,11 @@ class ExecutionResult:
     # o usuário recebe para arrumar à mão.
     manual_fix_needed: list[str] = field(default_factory=list)
     revalidation_conflicts: list[str] = field(default_factory=list)
+    # Recusado ANTES de escrever qualquer coisa. Não é desfecho do
+    # plano: nada foi tentado, e a proposta continua esperando decisão.
+    # Quem chama usa isto para NÃO marcar o plano como encerrado, que
+    # era o que tornava a recusa permanente (nem o F5 trazia de volta).
+    refused_upfront: bool = False
 
     @property
     def ok(self) -> bool:
@@ -91,6 +96,7 @@ async def apply_plan(
     tasks: TaskProvider | None = None,
     item_ids: list[UUID] | None = None,
     skip_revalidation: bool = False,
+    confirm_blocking: bool = False,
 ) -> ExecutionResult:
     """Aplica os itens aceitos, na ordem segura.
 
@@ -108,12 +114,26 @@ async def apply_plan(
     if not selected:
         return ExecutionResult(status=PlanStatus.REJECTED)
 
-    # Bloqueio explícito: itens com conflito `blocking` não entram sem
-    # confirmação separada.
+    # Bloqueio explícito: item com conflito `blocking` não entra sem
+    # confirmação separada. COM a confirmação, entra.
+    #
+    # `confirm_blocking` existia como campo na rota desde sempre e era
+    # jogado fora: o parâmetro não chegava aqui, e esta função recusava
+    # incondicionalmente. O efeito era a pior resposta possível, porque
+    # ela parecia sucesso: HTTP 200, `applied_count: 0`, nenhum erro na
+    # tela, e o cartão sumia. "Tu nunca confirma porra nenhuma" é o
+    # relato, e ele estava descrevendo exatamente isto.
+    #
+    # Todos os motivos são liberáveis, por decisão de produto: a agenda
+    # é da pessoa, o app avisa qual é o choque e obedece. Quem resolve
+    # o caso de "horário no passado" não é uma recusa dura aqui, é a
+    # janela de tolerância em `plan_diff` (§5.7), que impede o conflito
+    # de nascer por causa do atraso da própria promoção.
     blocked = [i for i in selected if i.is_blocking]
-    if blocked:
+    if blocked and not confirm_blocking:
         return ExecutionResult(
             status=PlanStatus.FAILED,
+            refused_upfront=True,
             failed=[
                 (
                     i.id,
@@ -130,6 +150,7 @@ async def apply_plan(
     if any(i.target == Target.TASK for i in selected) and tasks is None:
         return ExecutionResult(
             status=PlanStatus.FAILED,
+            refused_upfront=True,
             failed=[
                 (i.id, "plano tem item de tarefa, mas nenhuma lista "
                        "está conectada para recebê-lo")

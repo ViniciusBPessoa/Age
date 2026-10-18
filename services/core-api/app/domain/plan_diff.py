@@ -234,6 +234,20 @@ class DiffItem:
 # atrás causaria estrago (§5.7).
 DEFAULT_TTL = timedelta(hours=24)
 
+# Folga antes de declarar um horário "já passou".
+#
+# A validação roda na LEITURA, com `reference = agora`, e entre o Age
+# propor e a pessoa clicar passa tempo real: a promoção de rascunho
+# para plano é preguiçosa e já foi medida em 98 segundos na conta de
+# verdade, e ainda há o tempo de ler o cartão e decidir.
+#
+# Sem esta folga, o pedido mais natural que existe ("bloqueia a próxima
+# hora pra eu estudar") nasce bloqueado por alguns minutos de atraso, e
+# a pessoa teria de confirmar conflito em plano nenhum conflito tem.
+# Dez minutos é o suficiente para ler e decidir; além disso a recusa é
+# honesta.
+PAST_GRACE = timedelta(minutes=10)
+
 
 @dataclass
 class Plan:
@@ -585,7 +599,7 @@ def validate_plan(
         occupied = item.occupies
 
         if occupied is not None:
-            if occupied.start < reference:
+            if occupied.start < reference - PAST_GRACE:
                 conflicts.append(
                     Conflict(
                         kind=ConflictKind.PAST,

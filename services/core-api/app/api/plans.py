@@ -174,6 +174,7 @@ async def apply(
             tasks=tasks,
             item_ids=body.item_ids,
             skip_revalidation=False,
+            confirm_blocking=body.confirm_blocking,
         )
     except PlanExpired as exc:
         await db.execute(
@@ -212,8 +213,20 @@ async def apply(
             },
         ) from exc
 
-    await mark_applied(db, user.id, plan_id, result)
-    await record_undo_log(db, user.id, plan_id, result)
+    # Recusa de pré-voo NÃO encerra a proposta.
+    #
+    # Isto rodava incondicionalmente, e era o que tornava o defeito
+    # permanente: uma recusa por conflito bloqueante marcava o plano
+    # como `failed`, tirando-o de `proposed`. A partir daí nem recarregar
+    # a página trazia o cartão de volta, porque `GET /plans?status=
+    # proposed` não o listava mais, e `applied_at` ficava preenchido num
+    # plano em que nada foi aplicado.
+    #
+    # Recusa por conflito é um PEDIDO de confirmação, não um desfecho:
+    # nada foi tentado, nada foi escrito, e a proposta segue esperando.
+    if not result.refused_upfront:
+        await mark_applied(db, user.id, plan_id, result)
+        await record_undo_log(db, user.id, plan_id, result)
 
     # Liga as sessões de estudo aos eventos recém-criados (§5.5). Até
     # aqui as sessões existem em `study_sessions` sem `event_ref`;
@@ -687,4 +700,15 @@ def _message_for(result) -> str:
         return base
 
     reasons = "; ".join(_user_facing_error(e) for _, e in result.failed)
+
+    # Recusa de pré-voo precisa dizer o PRÓXIMO PASSO, não só o motivo.
+    # Quem leu "conflito bloqueante" e mais nada não tem como saber que
+    # existe uma caixa de confirmação no cartão resolvendo exatamente
+    # isso, e a proposta continua ali, intacta, esperando.
+    if getattr(result, "refused_upfront", False):
+        return (
+            f"Nada foi aplicado, e a proposta continua esperando. {reasons}. "
+            "Marque a confirmação do conflito no cartão e aprove de novo."
+        )
+
     return f"Nenhuma mudança foi aplicada. {reasons}" 
