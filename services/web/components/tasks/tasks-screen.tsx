@@ -32,6 +32,7 @@ import {
   cx,
 } from "@/components/ui";
 import { RequestFailed, api } from "@/lib/api-client";
+import { mensagemDeFalha } from "@/lib/resultado-do-apply";
 import { duration } from "@/lib/format";
 import type {
   ApplyResult,
@@ -112,13 +113,29 @@ export function TasksScreen({ timezone }: { timezone: string }) {
         item_ids: itemIds,
         confirm_blocking: confirmBlocking,
       });
-      setPendingPlanId(null);
+      /*
+       * O cartao so sai quando algo REALMENTE entrou.
+       *
+       * Aqui havia `setPendingPlanId(null)` incondicional e um aviso
+       * preso a `manual_fix_needed`, que um FAILED nao preenche: era a
+       * mesma falha muda que o chat tinha, e que deixava a pessoa com
+       * o cartao sumido, nada reservado e nenhuma explicacao.
+       */
+      const aviso = mensagemDeFalha(result);
+      if (result.applied_count > 0) setPendingPlanId(null);
       refresh();
       // A agenda mudou também: o bloco reservado é um evento.
       void queryClient.invalidateQueries({ queryKey: ["events"] });
-      if (result.manual_fix_needed.length > 0) setApplyError(result.message);
-    } catch {
-      setApplyError("Não consegui aplicar a reserva. Tente de novo.");
+      if (aviso !== null) setApplyError(aviso);
+    } catch (err) {
+      // A mensagem do servidor, quando existe: ela diz QUAL conflito
+      // impediu, e trocar isso por uma frase generica foi o que fez a
+      // pessoa clicar oito vezes sem saber o que havia de errado.
+      setApplyError(
+        err instanceof RequestFailed
+          ? err.message
+          : "Não consegui aplicar a reserva. Tente de novo.",
+      );
     } finally {
       setApplying(false);
     }
