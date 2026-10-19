@@ -45,12 +45,16 @@ class Op(StrEnum):
     # numa lista (§3.3).
     COMPLETE = "COMPLETE"
     REORDER = "REORDER"
+    # Só para tarefa: liga uma tarefa que já existe a um bloco que já
+    # existe (§5.7.1). Não escreve campo em nenhuma das duas portas —
+    # a mudança é na relação, que vive em `core.task_event_links`.
+    LINK = "LINK"
 
 
 # `MOVE` tem significado diferente em cada destino, e isso está aqui
 # para quem lê o enum não supor que é a mesma coisa: em evento é mudar
 # HORÁRIO; em tarefa é mudar PRAZO ou LISTA (§5.7).
-_TASK_ONLY_OPS = frozenset({Op.COMPLETE, Op.REORDER})
+_TASK_ONLY_OPS = frozenset({Op.COMPLETE, Op.REORDER, Op.LINK})
 
 
 class ItemStatus(StrEnum):
@@ -116,6 +120,27 @@ class DiffItem:
     conflicts: tuple[Conflict, ...] = ()
     # Ids de outros itens do mesmo plano que formam unidade (§5.7.1).
     links: tuple[UUID, ...] = ()
+    # Blocos que JÁ EXISTEM na agenda e que esta tarefa passa a cobrir
+    # (§5.7.1), como par `(event_ref_kind, event_ref_id)`.
+    #
+    # Separado de `links` de propósito, e a distinção é a razão de o
+    # campo existir: `links` significa "itens DESTE plano" e alimenta
+    # `linked_group`, que é o grupo de APROVAÇÃO — aprovar um item
+    # aprova o grupo, e a falha de um reverte o resto. Um bloco que já
+    # está na agenda não entra nisso: não há o que aprovar nem o que
+    # reverter nele. Pôr o id em `links` arrastaria um evento aplicado
+    # para dentro do acordo.
+    #
+    # Foi essa ausência que deixou o Age afirmar vínculo sem criar
+    # nenhum: o modelo só conseguia ligar a bloco proposto no mesmo
+    # turno, e `_persist_task_event_links` descartava em silêncio
+    # qualquer link cujo id não fosse item do plano.
+    #
+    # O `kind` viaja junto para rotear a tabela: `local_events` e
+    # `events_shadow` têm as duas `id` uuid, então o id sozinho não
+    # diz onde procurar, e é a distinção que o CHECK de
+    # `task_event_links` exige.
+    event_refs: tuple[tuple[str, str], ...] = ()
     # Só para `REORDER`: a ordem pedida, por id de tarefa. Fica fora de
     # `after` porque reordenar não muda nenhum campo da tarefa — muda a
     # relação entre elas, que não cabe numa entidade só.
@@ -141,6 +166,19 @@ class DiffItem:
             raise ValueError("COMPLETE exige `before`")
         if self.op == Op.REORDER and not self.reorder_ids:
             raise ValueError("REORDER exige `reorder_ids`")
+        if self.op == Op.LINK and not self.event_refs:
+            raise ValueError(
+                "LINK exige `event_refs` — ligar a nada não é operação"
+            )
+
+        # Evento não tem o que cobrir: quem cobre bloco é tarefa. Isto
+        # é erro de programação, não entrada ruim do modelo, e falha
+        # aqui para não chegar ao executor como vínculo impossível.
+        if self.event_refs and self.target != Target.TASK:
+            raise ValueError(
+                "`event_refs` só existe em tarefa: é a tarefa que passa "
+                "a cobrir um bloco da agenda (§5.7.1)"
+            )
 
         # Operação só-de-tarefa num evento é erro de programação, não
         # entrada ruim do modelo: `COMPLETE` de evento não existe porque
@@ -150,7 +188,8 @@ class DiffItem:
         if self.op in _TASK_ONLY_OPS and self.target != Target.TASK:
             raise ValueError(
                 f"{self.op} só existe para tarefa; evento não tem "
-                "estado de conclusão nem posição em lista (§3.3)"
+                "estado de conclusão, posição em lista, nem bloco a "
+                "cobrir (§3.3)"
             )
 
         # E o inverso: o payload tem de combinar com o destino. Um item

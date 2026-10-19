@@ -53,6 +53,11 @@ class PlanItemOut(BaseModel):
     after: dict | None = None
     conflicts: list[ConflictOut] = Field(default_factory=list)
     links: list[UUID] = Field(default_factory=list)
+    # Blocos que já estavam na agenda e que esta tarefa passa a cobrir,
+    # como `[kind, id]`. Separado de `links` porque `links` é o grupo de
+    # APROVAÇÃO (§5.7.1): o bloco já aplicado não entra nele, e a tela
+    # não deve oferecer aprovar nem reverter o que já está na agenda.
+    event_refs: list[list[str]] = Field(default_factory=list)
     status: str
     is_blocking: bool
 
@@ -275,14 +280,31 @@ async def apply(
 async def _persist_task_event_links(db, user_id, plan, result) -> int:
     """Grava em `task_event_links` os pares que acabaram de ser aplicados.
 
-    O vínculo só é gravado quando **os dois lados** foram aplicados com
-    sucesso. Gravar com meio par aplicado seria pior que não gravar: o
-    Age afirmaria ter reservado tempo para uma tarefa que não existe,
-    ou apontaria para um bloco que não foi criado.
+    São DUAS origens, e a diferença entre elas é a razão de o segundo
+    laço existir:
 
-    Como o executor reverte o grupo inteiro na falha parcial (§5.8),
-    "os dois aplicados" é a situação normal; esta checagem cobre o caso
-    em que a reversão também falhou.
+    1. **`item.links`** — o par proposto junto, em que os dois lados são
+       itens DESTE plano (`reserve_time_for_task`). O vínculo só é
+       gravado quando os dois foram aplicados com sucesso: gravar com
+       meio par seria pior que não gravar, porque o Age afirmaria ter
+       reservado tempo para uma tarefa que não existe. Como o executor
+       reverte o grupo inteiro na falha parcial (§5.8), "os dois
+       aplicados" é a situação normal, e a checagem cobre o caso em que
+       a reversão também falhou.
+
+    2. **`item.event_refs`** — o bloco que JÁ ESTAVA na agenda. Aqui o
+       lado do evento não é item de plano nenhum, e era exatamente isso
+       que o código perdia: o laço de `links` resolve cada id com
+       `plan.item(...)`, que devolve `None` para quem não é item deste
+       plano, e o vínculo morria num `continue`. Medido na conta de
+       verdade: 8 tarefas pedidas "vinculadas a esses horários", 8
+       linhas de `plan_items` com `links = []`, zero vínculos, e uma
+       resposta afirmando "todos ligados ao bloco em que cada um cabe".
+
+    A garantia é a mesma nas duas, com provas diferentes: do lado da
+    tarefa, `applied_ref` só existe se a linha foi criada agora; do lado
+    do evento, `event_refs` só chega aqui depois de `promote_drafts`
+    resolver o id contra a agenda sob RLS.
     """
     from app.domain.plan_diff import Target
     from app.services.task_store import (
@@ -316,6 +338,32 @@ async def _persist_task_event_links(db, user_id, plan, result) -> int:
                 task_ref_kind=LOCAL_TASKS,
                 task_ref_id=str(task_ref),
                 event_ref_kind=LOCAL_EVENTS,
+                event_ref_id=str(event_ref),
+                plan_id=plan.id,
+            )
+            pairs += 1
+
+    for item in plan.items:
+        if item.target != Target.TASK or not item.event_refs:
+            continue
+        task_ref = applied_ref.get(item.id)
+        if not task_ref:
+            continue
+
+        for kind, event_ref in item.event_refs:
+            # `plan_id` vai junto para o desfazer achar estes vínculos
+            # por `remove_links_for_plan`, igual aos do par proposto.
+            #
+            # `create_link` é idempotente pelo índice único parcial,
+            # então religar um par que já existe não duplica nem falha —
+            # o que importa porque a mesma tarefa pode cobrir o mesmo
+            # bloco em dois planos diferentes.
+            await create_link(
+                db,
+                user_id,
+                task_ref_kind=LOCAL_TASKS,
+                task_ref_id=str(task_ref),
+                event_ref_kind=kind,
                 event_ref_id=str(event_ref),
                 plan_id=plan.id,
             )
@@ -650,6 +698,7 @@ def _to_out(plan) -> PlanOut:
                     for c in i.conflicts
                 ],
                 links=list(i.links),
+                event_refs=[[kind, ref] for kind, ref in i.event_refs],
                 status=i.status.value,
                 is_blocking=i.is_blocking,
             )

@@ -482,6 +482,62 @@ async def internal_events(
         }
 
 
+@internal.get("/resolve-events")
+async def internal_resolve_events(
+    user_id: WorkerUser,
+    ids: str = Query(..., description="ids separados por vírgula"),
+) -> dict:
+    """Confere se cada bloco existe, é do usuário, e em qual tabela vive.
+
+    Serve ao vínculo com bloco que JÁ ESTÁ na agenda (§5.7.1): o modelo
+    pegou o id em `get_events` e quer dizer "esta tarefa cobre aquele
+    bloco". Antes de empilhar a proposta, alguém tem de confirmar o id,
+    e a ferramenta precisa poder DIZER ao usuário qual bloco não serviu.
+
+    Por id e não por janela, diferente de `/events`: o bloco pode ter
+    sido visto turnos atrás, e `_check_window` (§7.0) limita o tamanho
+    da janela, o que tornaria um bloco distante impossível de conferir.
+
+    Não distingue "não existe" de "não é seu": as duas respostas são
+    `found: false`, porque distinguir daria ao worker um jeito de
+    descobrir se um id existe na conta de outra pessoa. A separação real
+    vem da RLS da sessão, não deste handler.
+    """
+    pedidos = [parte.strip() for parte in ids.split(",") if parte.strip()]
+    if not pedidos:
+        return {"events": []}
+    # Teto para a consulta não virar varredura: nenhum pedido honesto
+    # liga uma tarefa a cinquenta blocos.
+    if len(pedidos) > 50:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "error": {
+                    "code": "too_many_ids",
+                    "message": "No máximo 50 blocos por consulta.",
+                }
+            },
+        )
+
+    from app.services.task_store import resolve_events
+
+    async with user_session(user_id) as db:
+        achados = await resolve_events(db, user_id, pedidos)
+        return {
+            "events": [
+                {
+                    "id": a.ref_id,
+                    "kind": a.kind,
+                    "title": a.title,
+                    "start": a.start.isoformat() if a.start else None,
+                    "end": a.end.isoformat() if a.end else None,
+                    "found": a.found,
+                }
+                for a in achados
+            ]
+        }
+
+
 @internal.get("/free-slots")
 async def internal_free_slots(
     user_id: WorkerUser,

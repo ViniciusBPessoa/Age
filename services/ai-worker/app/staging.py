@@ -31,6 +31,11 @@ class StagedItem:
     target: str = "event"
     # Ids de outros itens que formam unidade com este (§5.7.1).
     links: list[str] = field(default_factory=list)
+    # Blocos que JÁ EXISTEM na agenda e que esta tarefa passa a cobrir.
+    # Não são ids de item, são ids de evento do banco, e é por isso que
+    # não podem entrar em `links`: `links` forma o grupo de APROVAÇÃO, e
+    # bloco já aplicado não tem o que ser aprovado.
+    event_refs: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -147,15 +152,28 @@ class StagingBuilder:
         list_id: str | None = None,
         tema: str | None = None,
         cobre_eventos: list[str] | None = None,
+        eventos_existentes: list[str] | None = None,
     ) -> str:
         """Empilha uma tarefa, opcionalmente ligada a sessões propostas.
 
-        `cobre_eventos` recebe ids de itens EMPILHADOS neste mesmo turno
-        (não ids de banco), que é o que faltava para a checklist de
-        estudo existir: quando a pessoa pede as sessões e depois os
-        to-dos, nem a tarefa nem o evento existem ainda, então
-        `reserve_time_for_task` — que exige `task_id` de uma tarefa já
-        gravada — não dá conta.
+        São DOIS parâmetros de vínculo porque são dois namespaces
+        diferentes, e misturá-los era o defeito:
+
+        - `cobre_eventos` recebe ids de itens EMPILHADOS neste mesmo
+          turno (não ids de banco), que é o que faltava para a checklist
+          de estudo existir: quando a pessoa pede as sessões e depois os
+          to-dos, nem a tarefa nem o evento existem ainda, então
+          `reserve_time_for_task` — que exige `task_id` de uma tarefa já
+          gravada — não dá conta.
+        - `eventos_existentes` recebe ids REAIS de evento, de
+          `get_events`, para o bloco que já está na agenda. Era o caso
+          que não tinha caminho nenhum: o usuário aprova os blocos num
+          turno e pede os to-dos no seguinte, quando os blocos já não
+          são propostas e `cobre_eventos` não alcança mais.
+
+        Cada validador recusa o valor do outro, de propósito: id de
+        banco passado em `cobre_eventos` não está em `self.items`, e id
+        de item passado em `eventos_existentes` não existe na agenda.
 
         `tema` entra como PRIMEIRA etiqueta porque é assim que a tela
         agrupa. Etiqueta comum continua etiqueta comum, depois dele.
@@ -187,6 +205,13 @@ class StagingBuilder:
         # transitivo, e com vínculo de um lado só o grupo sairia
         # diferente conforme o item por onde se começa a olhar — o que
         # faria a mesma sessão ser aplicada mais de uma vez.
+        # Vai em `event_refs`, nunca em `links`: `self.link` formaria
+        # grupo de aprovação com um evento que já está na agenda, e a
+        # tela ofereceria aprovar e reverter o que já é fato.
+        for existente in eventos_existentes or []:
+            if str(existente) not in item.event_refs:
+                item.event_refs.append(str(existente))
+
         for alvo in cobre_eventos or []:
             irmao = next(
                 (i for i in self.items if str(i.id) == str(alvo)), None
@@ -260,6 +285,38 @@ class StagingBuilder:
             reason=reason,
             payload={"task_id": task_id},
             sequence=self._next(),
+        )
+        self.items.append(item)
+        return str(item.id)
+
+    def stage_task_link(
+        self,
+        *,
+        task_id: str,
+        eventos_existentes: list[str],
+        reason: str,
+    ) -> str:
+        """Liga uma tarefa que JÁ EXISTE a blocos que JÁ EXISTEM (§5.7.1).
+
+        Operação própria, e não um `UPDATE` com vínculo pendurado, por
+        um motivo medido: `_build_task_item` levanta "UPDATE de tarefa
+        sem nenhuma mudança" quando o conjunto de campos alterados está
+        vazio, e um update só de vínculo cairia exatamente nisso — seria
+        descartado na promoção com um `log.info`, reproduzindo a falha
+        silenciosa que esta mudança existe para consertar.
+
+        Vínculo não é campo da tarefa, é relação entre duas coisas. O
+        projeto já tinha tomado essa decisão para `reorder_ids`, que
+        também não é campo de tarefa nenhuma.
+        """
+        item = StagedItem(
+            id=uuid4(),
+            op="LINK",
+            target="task",
+            reason=reason,
+            payload={"task_id": task_id},
+            sequence=self._next(),
+            event_refs=[str(e) for e in eventos_existentes],
         )
         self.items.append(item)
         return str(item.id)
@@ -411,6 +468,7 @@ class StagingBuilder:
                     "reason": i.reason,
                     "payload": i.payload,
                     "links": i.links,
+                    "event_refs": i.event_refs,
                     "sequence": i.sequence,
                 }
                 for i in self.items
@@ -451,6 +509,7 @@ class StagingBuilder:
             completes = sum(1 for i in tasks if i.op == "COMPLETE")
             deletes = sum(1 for i in tasks if i.op == "DELETE")
             reorders = sum(1 for i in tasks if i.op == "REORDER")
+            vinculos = sum(1 for i in tasks if i.op == "LINK")
             if creates:
                 detail.append(f"{creates} nova(s)")
             if updates:
@@ -461,6 +520,8 @@ class StagingBuilder:
                 detail.append(f"{deletes} para remover")
             if reorders:
                 detail.append("reordenar")
+            if vinculos:
+                detail.append(f"{vinculos} para ligar a um horário")
             parts.append("lista: " + ", ".join(detail))
 
         routines = [i for i in self.items if i.target == "routine"]

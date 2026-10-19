@@ -93,6 +93,8 @@ class CalendarClient:
                 return await self.list_tasks(**kwargs)
             case "get_task_lists":
                 return await self.get_task_lists()
+            case "resolve_events":
+                return await self.resolve_events(kwargs["ids"])
             case "list_routines":
                 return await self.list_routines()
             case "routine_adherence":
@@ -338,6 +340,24 @@ class CalendarClient:
     async def get_task_lists(self) -> list[dict]:
         data = await self._get_at("/internal/tasks", "/lists", {})
         return data["lists"]
+
+    async def resolve_events(self, ids: list[str]) -> list[dict]:
+        """Confere ids de bloco antes de ligar tarefa a eles (§5.7.1).
+
+        Devolve um registro por id PEDIDO, com `found`, para a
+        ferramenta poder dizer ao usuário qual bloco não serviu. Uma
+        resposta mais curta que o pedido obrigaria a adivinhar qual
+        falhou, e adivinhar aqui é o que deixou o Age afirmar vínculo
+        que não existia.
+        """
+        if not ids:
+            return []
+        data = await self._get_at(
+            "/internal/calendar",
+            "/resolve-events",
+            {"ids": ",".join(str(i) for i in ids)},
+        )
+        return data["events"]
 
     # -----------------------------------------------------------
     # Rotinas, relatório e mudança externa (§5.9.4, §5.9.9, §5.10)

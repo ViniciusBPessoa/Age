@@ -21,11 +21,77 @@ O modelo não calcula isso. Ele recebe e conta.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 from app.domain.tools.registry import ToolCategory, ToolContext, register_tool
 
 _ISO = "data-hora ISO 8601 com fuso, ex. 2026-10-15T14:00:00-03:00"
 _DATE = "data ISO, ex. 2026-10-15"
 _PRIORITIES = ["low", "normal", "high", "urgent"]
+
+
+async def _conferir_blocos(
+    ctx: ToolContext, ids: list[str] | None
+) -> tuple[list[str], list[dict]]:
+    """Confere ids de bloco contra a agenda de verdade (§5.7.1).
+
+    Devolve `(aceitos, recusados)`. Existe porque o Age chegou a
+    afirmar "montei 8 itens, todos ligados ao bloco em que cada um
+    cabe" sem ligar nenhum: sem alguém conferindo e DEVOLVENDO o que
+    não deu, o modelo não tem como saber que falhou, e descreve a
+    intenção como se fosse o resultado.
+
+    Recusa explícita, não descarte em silêncio: ao contrário de um
+    `diff_item_id` inventado, um id de bloco tem contrapartida visível
+    na tela, e a pessoa está olhando o bloco.
+    """
+    if not ids:
+        return [], []
+    if ctx.read_calendar is None:
+        return [], [
+            {"id": str(i), "motivo": "não consegui conferir a agenda agora"}
+            for i in ids
+        ]
+
+    achados = await ctx.read_calendar(
+        "resolve_events", ids=[str(i) for i in ids]
+    )
+
+    agora = datetime.now(UTC)
+    aceitos: list[str] = []
+    recusados: list[dict] = []
+    for achado in achados:
+        ref = str(achado.get("id"))
+        if not achado.get("found"):
+            recusados.append(
+                {"id": ref, "motivo": "não existe na sua agenda"}
+            )
+            continue
+        # Bloco encerrado não é tempo reservado: ligar a ele faria a
+        # lista dizer "tempo reservado" para tempo que não existe mais.
+        if _ja_terminou(achado.get("end"), agora):
+            recusados.append({"id": ref, "motivo": "esse bloco já terminou"})
+            continue
+        aceitos.append(ref)
+    return aceitos, recusados
+
+
+def _ja_terminou(fim: str | None, agora: datetime) -> bool:
+    """O bloco acabou antes de agora?
+
+    Data ilegível conta como NÃO terminado: recusar por não saber ler o
+    campo tiraria do usuário um vínculo legítimo, e o core-api confere
+    de novo na promoção.
+    """
+    if not fim:
+        return False
+    try:
+        instante = datetime.fromisoformat(fim)
+    except ValueError:
+        return False
+    if instante.tzinfo is None:
+        instante = instante.replace(tzinfo=UTC)
+    return instante <= agora
 
 
 # ---------------------------------------------------------------
@@ -194,6 +260,20 @@ async def get_task_lists(ctx: ToolContext, args: dict) -> dict:
                     "em texto: só vale o que entra aqui"
                 ),
             },
+            "eventos_existentes": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": (
+                    "id REAL de bloco que JÁ ESTÁ na agenda e que esta "
+                    "tarefa cobre — o `id` que veio de `get_events`. "
+                    "Use quando o bloco foi aprovado antes, em outro "
+                    "turno: aí `cobre_eventos` não alcança mais. Confiro "
+                    "cada id e devolvo quais aceitei em "
+                    "`eventos_ligados` e quais não em "
+                    "`eventos_recusados`; só afirme ao usuário o que "
+                    "estiver em `eventos_ligados`"
+                ),
+            },
         },
         "required": ["title", "reason"],
     },
@@ -202,6 +282,10 @@ async def get_task_lists(ctx: ToolContext, args: dict) -> dict:
 async def create_task(ctx: ToolContext, args: dict) -> dict:
     if ctx.plan_builder is None:
         return {"error": "sem proposta ativa neste turno"}
+
+    ligados, recusados = await _conferir_blocos(
+        ctx, args.get("eventos_existentes")
+    )
 
     item_id = ctx.plan_builder.stage_task_create(
         title=args["title"],
@@ -214,14 +298,29 @@ async def create_task(ctx: ToolContext, args: dict) -> dict:
         list_id=args.get("list_id"),
         tema=args.get("tema"),
         cobre_eventos=args.get("cobre_eventos"),
+        eventos_existentes=ligados,
     )
     # `staged`, não `created`: o modelo precisa saber a diferença, e o
     # system prompt reforça que ele não deve afirmar "já anotei".
-    return {
+    out: dict = {
         "staged": True,
         "diff_item_id": item_id,
         "note": "proposta registrada; o usuário ainda vai aprovar",
     }
+    if args.get("eventos_existentes"):
+        out["eventos_ligados"] = ligados
+        out["eventos_recusados"] = recusados
+    if recusados:
+        # O modelo tem de poder dizer a VERDADE sobre o que ficou sem
+        # horário. Sem esta instrução ele resumia "todos ligados", que é
+        # o defeito que esta mudança conserta.
+        out["instruction"] = (
+            f"'{args['title']}' NÃO ficou ligada a "
+            f"{len(recusados)} bloco(s). Diga isso ao usuário, nomeando "
+            "a tarefa, e não afirme vínculo que não está em "
+            "`eventos_ligados`"
+        )
+    return out
 
 
 @register_tool(
@@ -418,3 +517,82 @@ async def reserve_time_for_task(ctx: ToolContext, args: dict) -> dict:
             "os dois juntos"
         ),
     }
+
+
+@register_tool(
+    name="link_task_to_event",
+    description=(
+        "PROPÕE ligar uma tarefa que JÁ EXISTE a um ou mais blocos que "
+        "JÁ EXISTEM na agenda, sem criar nem mover nada. Use quando o "
+        "usuário disser que vai fazer uma tarefa da lista dentro de um "
+        "horário que já está marcado, ou pedir para 'vincular', "
+        "'amarrar' ou 'ligar' as duas coisas. "
+        "Para RESERVAR um horário novo use `reserve_time_for_task`; "
+        "para ligar uma tarefa NOVA use `create_task` com "
+        "`eventos_existentes`. Isto NÃO aplica nada: entra numa "
+        "proposta que o usuário aprova."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "task_id": {
+                "type": "string",
+                "description": "id da tarefa, vindo de `get_tasks`",
+            },
+            "eventos_existentes": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": (
+                    "id dos blocos que já estão na agenda, vindos de "
+                    "`get_events`. Uma tarefa pode cobrir vários"
+                ),
+            },
+            "reason": {
+                "type": "string",
+                "description": (
+                    "por que esta tarefa cabe neste bloco, nas palavras "
+                    "do usuário"
+                ),
+            },
+        },
+        "required": ["task_id", "eventos_existentes", "reason"],
+    },
+    category=ToolCategory.WRITE,
+)
+async def link_task_to_event(ctx: ToolContext, args: dict) -> dict:
+    if ctx.plan_builder is None:
+        return {"error": "sem proposta ativa neste turno"}
+
+    ligados, recusados = await _conferir_blocos(
+        ctx, args.get("eventos_existentes")
+    )
+    if not ligados:
+        # Nada para ligar: empilhar um item vazio daria ao usuário um
+        # cartão que aplica e não muda nada.
+        return {
+            "staged": False,
+            "eventos_recusados": recusados,
+            "instruction": (
+                "nenhum bloco serviu, então NÃO diga que ligou. Diga o "
+                "motivo que veio em `eventos_recusados`"
+            ),
+        }
+
+    item_id = ctx.plan_builder.stage_task_link(
+        task_id=args["task_id"],
+        eventos_existentes=ligados,
+        reason=args["reason"],
+    )
+    out: dict = {
+        "staged": True,
+        "diff_item_id": item_id,
+        "eventos_ligados": ligados,
+        "eventos_recusados": recusados,
+        "note": "proposta registrada; o usuário ainda vai aprovar",
+    }
+    if recusados:
+        out["instruction"] = (
+            f"{len(recusados)} bloco(s) não serviram. Diga quais e por "
+            "quê; não afirme vínculo que não está em `eventos_ligados`"
+        )
+    return out

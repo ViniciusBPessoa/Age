@@ -338,6 +338,106 @@ async def _read_links(
 # ---------------------------------------------------------------
 # Vínculo (§5.7.1)
 # ---------------------------------------------------------------
+@dataclass(frozen=True)
+class ResolvedEvent:
+    """Um bloco da agenda que se pediu para resolver por id.
+
+    `found=False` cobre junto "não existe" e "não é seu", e a mensagem
+    devolvida não distingue os dois de propósito: distinguir daria a
+    quem chama um oráculo para descobrir se um id existe na conta de
+    outra pessoa.
+    """
+
+    ref_id: str
+    kind: str | None = None
+    title: str | None = None
+    start: datetime | None = None
+    end: datetime | None = None
+    found: bool = False
+
+
+async def resolve_events(
+    db: AsyncSession, user_id: UUID, ref_ids: list[str]
+) -> list[ResolvedEvent]:
+    """Resolve ids de bloco para `(kind, título, início, fim)`.
+
+    Existe para o vínculo com bloco que JÁ ESTÁ na agenda (§5.7.1). O
+    modelo recebe ids reais de `get_events` e precisa dizer "esta tarefa
+    cobre aquele bloco", mas antes de empilhar a proposta alguém tem de
+    confirmar que o bloco existe, é do usuário, e descobrir em qual das
+    duas tabelas ele vive.
+
+    **Por id e não por janela**, diferente de `read_events`: o bloco
+    pode ter sido visto turnos atrás, e obrigar quem chama a reconstruir
+    a janela certa falharia em silêncio justamente para o bloco que está
+    um dia fora dela. `_check_window` também limita o tamanho da janela
+    (§7.0), o que tornaria um bloco distante impossível de resolver.
+
+    **A posse vem da RLS**, não de um `WHERE` que alguém pode esquecer:
+    a sessão já roda com `app.user_id`, e `user_id = :uid` aqui é
+    cinto de segurança sobre a política, não a política.
+
+    Devolve um registro por id PEDIDO, na ordem pedida, inclusive para
+    os não encontrados: quem chama precisa saber exatamente qual id
+    falhou para poder dizer ao usuário, e um resultado mais curto que a
+    entrada obrigaria a adivinhar.
+    """
+    if not ref_ids:
+        return []
+
+    # Ordem preservada e repetição removida: o modelo pode mandar o
+    # mesmo bloco duas vezes, e isso não é erro que mereça recusa.
+    unicos: list[str] = []
+    for rid in ref_ids:
+        if str(rid) not in unicos:
+            unicos.append(str(rid))
+
+    rows = await db.execute(
+        text(
+            """
+            SELECT CAST(e.id AS text), 'local_events',
+                   e.title, e.start_at, e.end_at
+            FROM core.local_events e
+            WHERE e.user_id = :uid
+              AND e.deleted_at IS NULL
+              AND CAST(e.id AS text) = ANY(:ids)
+            UNION ALL
+            -- O id do lado da sombra é o `external_event_id`, que é o
+            -- que `read_events` devolve como `Event.id` e portanto o
+            -- que o modelo viu. A PK uuid da tabela nunca sai daqui,
+            -- então procurar por ela encontraria nada.
+            SELECT s.external_event_id, 'events_shadow',
+                   s.title, s.start_at, s.end_at
+            FROM core.events_shadow s
+            JOIN core.calendar_selections sel
+              ON sel.connection_id = s.connection_id
+             AND sel.external_calendar_id = s.external_calendar_id
+            WHERE s.user_id = :uid
+              AND s.deleted_at IS NULL
+              AND sel.read_enabled = true
+              AND s.external_event_id = ANY(:ids)
+            """
+        ),
+        {"uid": str(user_id), "ids": unicos},
+    )
+
+    achados = {
+        str(r[0]): ResolvedEvent(
+            ref_id=str(r[0]),
+            kind=r[1],
+            title=r[2] or "(sem título)",
+            start=r[3],
+            end=r[4],
+            found=True,
+        )
+        for r in rows.all()
+    }
+    return [
+        achados.get(rid, ResolvedEvent(ref_id=rid, found=False))
+        for rid in unicos
+    ]
+
+
 async def create_link(
     db: AsyncSession,
     user_id: UUID,

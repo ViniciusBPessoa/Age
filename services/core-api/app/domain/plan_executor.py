@@ -317,6 +317,25 @@ async def _apply_task_item(
                 target=Target.TASK,
             )
 
+        case Op.LINK:
+            # Não escreve em porta nenhuma, e isso é o ponto: ligar uma
+            # tarefa que já existe a um bloco que já existe não muda
+            # campo de nenhum dos dois. A mudança é na RELAÇÃO, que vive
+            # em `core.task_event_links` e é gravada por
+            # `_persist_task_event_links` depois da aplicação, lendo
+            # `item.event_refs`.
+            #
+            # Aparece como item aplicado para o usuário ver no cartão o
+            # que foi acordado, e para o desfazer ter o que listar; a
+            # reversão é `remove_links_for_plan`, pelo `plan_id`.
+            return AppliedRecord(
+                item_id=item.id,
+                op=Op.LINK,
+                applied_ref=item.target_ref or "",
+                snapshot_before=None,
+                target=Target.TASK,
+            )
+
         case Op.REORDER:
             list_id = item.target_ref or ""
             # Ordem atual, para poder desfazer. Lida ANTES de escrever,

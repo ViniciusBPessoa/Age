@@ -204,6 +204,12 @@ async def _promote_one(
     # deve conhecer o conceito de "lista default" (§3.3).
     write_list_id = await _resolve_write_list(db, user_id, raw_items)
     existing_tasks = await _load_tasks_by_id(db, user_id, raw_items)
+    # Blocos que JÁ ESTÃO na agenda e que alguma tarefa passa a cobrir
+    # (§5.7.1). Resolvidos por ID, e não pela janela de `read_events`
+    # abaixo: a janela é derivada dos horários DO PLANO, então um plano
+    # só de tarefas tem janela "de ontem até daqui a 7 dias" e perderia
+    # justamente o bloco de duas semanas à frente.
+    blocos_resolvidos = await _resolver_blocos(db, user_id, raw_items)
     items: list[DiffItem] = []
     # Mapa do id do rascunho para o id do DiffItem, para refazer os
     # vínculos do par ligado (§5.7.1) depois de todos os itens
@@ -262,6 +268,7 @@ async def _promote_one(
                 timezone=policy.timezone,
                 write_calendar_id=write_calendar_id,
                 write_list_id=write_list_id,
+                blocos_resolvidos=blocos_resolvidos,
             )
         except (ValueError, KeyError) as exc:
             log.info("item %s descartado: %s", index, exc)
@@ -336,6 +343,7 @@ def _build_item(
     timezone: str,
     write_calendar_id: str,
     write_list_id: str,
+    blocos_resolvidos: dict[str, tuple[str, datetime]] | None = None,
 ) -> DiffItem | None:
     from zoneinfo import ZoneInfo
 
@@ -356,6 +364,7 @@ def _build_item(
             existing_tasks=existing_tasks,
             write_list_id=write_list_id,
             parse=parse,
+            blocos_resolvidos=blocos_resolvidos or {},
         )
 
     match op:
@@ -597,6 +606,51 @@ async def _load_tasks_by_id(
     }
 
 
+async def _resolver_blocos(
+    db: AsyncSession, user_id: UUID, raw_items: list[dict]
+) -> dict[str, tuple[str, datetime]]:
+    """Resolve os blocos existentes citados nos rascunhos (§5.7.1).
+
+    Devolve `{ref_id: (kind, fim)}`. O `kind` é o que diz em qual das
+    duas tabelas de evento o vínculo vai apontar; o `fim` serve para
+    recusar bloco que já terminou, mais abaixo.
+
+    Só os NÃO encontrados ficam de fora, e o descarte é registrado onde
+    acontece. Nada aqui levanta: a tarefa vale sem o vínculo.
+    """
+    desejados: list[str] = []
+    for raw in raw_items:
+        if raw.get("target") != "task":
+            continue
+        for ref in raw.get("payload", {}).get("event_refs") or []:
+            if str(ref) not in desejados:
+                desejados.append(str(ref))
+
+    if not desejados:
+        return {}
+
+    from app.services.task_store import resolve_events
+
+    agora = datetime.now(UTC)
+    out: dict[str, tuple[str, datetime]] = {}
+    for achado in await resolve_events(db, user_id, desejados):
+        if not achado.found or achado.kind is None or achado.end is None:
+            continue
+        # Bloco encerrado não é tempo reservado: contaria minutos que
+        # não existem mais e faria o Age dizer "3h reservadas" para três
+        # horas que já passaram. Mais restrito que `PAST_GRACE` de
+        # propósito, porque aqui nada está sendo agendado.
+        if achado.end <= agora:
+            log.info(
+                "vínculo descartado: bloco %s terminou em %s",
+                achado.ref_id,
+                achado.end,
+            )
+            continue
+        out[achado.ref_id] = (achado.kind, achado.end)
+    return out
+
+
 def _relink(
     items: list[DiffItem],
     raw_items: list[dict],
@@ -635,9 +689,36 @@ def _build_task_item(
     existing_tasks: dict[str, Task],
     write_list_id: str,
     parse,
+    blocos_resolvidos: dict[str, tuple[str, datetime]] | None = None,
 ) -> DiffItem | None:
     """Monta um item de tarefa a partir do rascunho (§5.7)."""
     from dataclasses import replace as _replace
+
+    def refs_de_blocos() -> tuple[tuple[str, str], ...]:
+        """Os blocos existentes que esta tarefa passa a cobrir (§5.7.1).
+
+        Revalidado AQUI, e não só na ferramenta que empilhou: entre
+        propor e aprovar o usuário pode ter apagado o bloco, e um
+        vínculo para evento que não existe mais faria a lista dizer
+        "tempo reservado" apontando para o vazio.
+
+        Bloco que não resolve é DESCARTADO, não erro: perder o vínculo
+        é degradação (a tarefa nasce sem horário, visível na tela);
+        levantar aqui mataria a tarefa inteira junto, que é pior e não
+        é o que o usuário pediu.
+        """
+        resolvidos = blocos_resolvidos or {}
+        out: list[tuple[str, str]] = []
+        for bruto in payload.get("event_refs") or []:
+            ref = str(bruto)
+            achado = resolvidos.get(ref)
+            if achado is None:
+                log.info("vínculo descartado: bloco %s não existe mais", ref)
+                continue
+            kind, _fim = achado
+            if (kind, ref) not in out:
+                out.append((kind, ref))
+        return tuple(out)
 
     def due_fields() -> dict:
         out: dict = {}
@@ -687,6 +768,7 @@ def _build_task_item(
                     source="age",
                     **due_fields(),
                 ),
+                event_refs=refs_de_blocos(),
             )
 
         case "UPDATE" | "MOVE":
@@ -783,6 +865,30 @@ def _build_task_item(
                 before=first,
                 after=first,
                 reorder_ids=tuple(known),
+            )
+
+        case "LINK":
+            before = existing_tasks.get(str(payload.get("task_id")))
+            if before is None:
+                raise ValueError(
+                    f"tarefa {payload.get('task_id')} não existe na lista"
+                )
+            refs = refs_de_blocos()
+            if not refs:
+                # Todos os blocos sumiram entre propor e aprovar. Sem
+                # nenhum, o item não tem o que fazer: `LINK` sem destino
+                # seria um cartão que aplica e não muda nada.
+                raise ValueError(
+                    f"'{before.title}': nenhum dos blocos existe mais"
+                )
+            return DiffItem(
+                id=uuid4(),
+                target=Target.TASK,
+                op=Op.LINK,
+                reason=reason,
+                sequence=sequence,
+                target_ref=before.id,
+                event_refs=refs,
             )
 
         case _:
@@ -939,12 +1045,12 @@ async def _persist(db: AsyncSession, plan: Plan) -> None:
                 INSERT INTO core.plan_items
                   (id, user_id, plan_id, target, op, target_ref,
                    before, after, reason, confidence, conflicts, links,
-                   sequence, status, reorder_ids)
+                   sequence, status, reorder_ids, event_refs)
                 VALUES (:id, :uid, :pid, :target, :op, :ref,
                         CAST(:before AS json), CAST(:after AS json),
                         :reason, :conf, CAST(:conflicts AS json),
                         CAST(:links AS json), :seq, :status,
-                        CAST(:reorder AS json))
+                        CAST(:reorder AS json), CAST(:event_refs AS json))
                 """
             ),
             {
@@ -972,6 +1078,12 @@ async def _persist(db: AsyncSession, plan: Plan) -> None:
                 "seq": item.sequence,
                 "status": item.status.value,
                 "reorder": _json(list(item.reorder_ids)),
+                # Lista de pares, não de ids: `(kind, id)`, porque o id
+                # sozinho não diz em qual das duas tabelas de evento
+                # procurar (ver a migração 0011).
+                "event_refs": _json(
+                    [[kind, ref] for kind, ref in item.event_refs]
+                ),
             },
         )
 
@@ -1017,7 +1129,7 @@ async def load_plan(
             """
             SELECT id, target, op, target_ref, before, after, reason,
                    confidence, conflicts, links, sequence, status,
-                   reorder_ids
+                   reorder_ids, event_refs
             FROM core.plan_items
             WHERE plan_id = :pid AND user_id = :uid
             ORDER BY sequence
@@ -1049,6 +1161,9 @@ async def load_plan(
                 sequence=r[10],
                 status=ItemStatus(r[11]),
                 reorder_ids=tuple(r[12] or ()),
+                event_refs=tuple(
+                    (par[0], par[1]) for par in (r[13] or ())
+                ),
             )
         )
 

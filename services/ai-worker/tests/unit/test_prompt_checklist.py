@@ -131,3 +131,120 @@ class TestNaoPrometeOQueNaoExiste:
         secao = _secao("Reservar tempo para uma tarefa (§5.7.1)")
 
         assert "não existe hoje" in secao
+
+
+class TestEscolherOMecanismo:
+    """Três caminhos de vínculo, e o modelo tem de acertar qual.
+
+    O defeito medido na conta de verdade: os 2 blocos de finanças foram
+    aprovados num turno; no seguinte o usuário pediu to-dos vinculados a
+    eles; o Age respondeu "montei 8 itens, todos ligados ao bloco em que
+    cada um cabe" e não ligou nada. `cobre_eventos` não alcança bloco de
+    turno passado, e nada no prompt dizia o que fazer nesse caso.
+    """
+
+    SECAO = "Sessão de estudo pede checklist (§5.7.1)"
+
+    def test_cita_os_tres_mecanismos(self) -> None:
+        """Sabotagem: documentar só `cobre_eventos`.
+
+        Com um caminho só descrito, o modelo usa aquele, ele falha
+        calado, e a resposta afirma vínculo que não existe.
+        """
+        secao = _secao(self.SECAO)
+
+        for mecanismo in (
+            "cobre_eventos",
+            "eventos_existentes",
+            "link_task_to_event",
+        ):
+            assert mecanismo in secao, f"falta {mecanismo}"
+
+    def test_diz_o_criterio_de_escolha(self) -> None:
+        """Não basta listar: tem de dizer QUANDO cada um serve.
+
+        O critério é um só: o bloco já foi aprovado ou não.
+        """
+        secao = _secao(self.SECAO).lower()
+
+        assert "já está na agenda" in secao
+        assert "neste turno" in secao
+
+    def test_manda_pegar_o_id_real_em_get_events(self) -> None:
+        """Sem isto o modelo não sabe de ONDE vem o id real."""
+        secao = _secao(self.SECAO)
+
+        assert "get_events" in secao
+
+    def test_avisa_que_diff_item_id_antigo_nao_serve(self) -> None:
+        """O erro natural: reusar o id da proposta do turno anterior.
+
+        Sabotagem: tirar o aviso. Os dois são strings parecidas, e nada
+        na forma denuncia a confusão.
+        """
+        secao = _secao(self.SECAO)
+
+        assert "diff_item_id" in secao
+        assert "turno passado" in secao
+
+    def test_registra_o_caso_medido_com_a_frase_que_falhou(self) -> None:
+        """O prompt deste projeto ensina pelo caso concreto.
+
+        Sabotagem: trocar o relato pela regra abstrata. O cabeçalho de
+        `test_prompt_conversa.py` registra por que isso não funciona.
+        """
+        secao = _secao(self.SECAO)
+
+        assert "todos ligados ao bloco em que cada um cabe" in secao
+        assert "Nada estava ligado" in secao
+
+
+class TestNuncaAfirmarVinculoRecusado:
+    """A metade que fazia o defeito ser invisível.
+
+    A ferramenta passou a devolver `eventos_ligados` e
+    `eventos_recusados`. Se o prompt não mandar olhar, o modelo resume
+    "todos ligados" porque foi o que ele quis fazer, e a pessoa confia.
+    """
+
+    SECAO = "Sessão de estudo pede checklist (§5.7.1)"
+
+    def test_manda_olhar_o_que_a_ferramenta_devolveu(self) -> None:
+        secao = _secao(self.SECAO)
+
+        assert "eventos_ligados" in secao
+        assert "eventos_recusados" in secao
+
+    def test_proibe_afirmar_o_que_foi_recusado(self) -> None:
+        """Sabotagem: tirar a proibição.
+
+        É a regra que impede exatamente a resposta que o usuário
+        recebeu.
+        """
+        secao = _secao(self.SECAO).lower()
+
+        assert "não está ligado" in secao
+        assert "em voz alta" in secao
+
+    def test_demonstra_como_dizer(self) -> None:
+        """Manda nomear a tarefa, e mostra a frase.
+
+        Regra sem exemplo gera "algumas tarefas ficaram sem bloco", que
+        não diz QUAL e não serve para conferir.
+        """
+        secao = _secao(self.SECAO)
+
+        assert "nomeando a tarefa" in secao
+        assert "ficou na lista sem bloco" in secao
+
+
+class TestSemTravessaoNoTextoNovo:
+    def test_a_secao_nao_usa_travessao(self) -> None:
+        """O prompt proíbe travessão e ENSINA pelo exemplo.
+
+        Uma seção que usa o que ela proíbe treina o contrário do que
+        manda. Já aconteceu nesta mesma seção, numa rodada anterior.
+        """
+        secao = _secao("Sessão de estudo pede checklist (§5.7.1)")
+
+        assert "—" not in secao
