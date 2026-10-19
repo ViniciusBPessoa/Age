@@ -11,7 +11,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { PlanReview } from "@/components/plan-review/plan-review";
 import { ReserveTimeDialog } from "@/components/tasks/reserve-time-dialog";
@@ -22,6 +22,7 @@ import {
   Empty,
   Field,
   IconAlert,
+  IconChevronDown,
   IconPlus,
   IconTasks,
   Input,
@@ -33,21 +34,52 @@ import {
 } from "@/components/ui";
 import { RequestFailed, api } from "@/lib/api-client";
 import { mensagemDeFalha } from "@/lib/resultado-do-apply";
-import { duration } from "@/lib/format";
+import { guardarAgrupamentoTarefas, lerAgrupamentoTarefas } from "@/lib/ultimo-lugar";
+import { dateOf, duration, range } from "@/lib/format";
 import type {
   ApplyResult,
   Plan,
   Priority,
+  Reserved,
   Task,
   TaskListRef,
   TaskOverview,
 } from "@/lib/types";
 
-type GroupBy = "due" | "list" | "priority";
+type GroupBy = "due" | "list" | "priority" | "horario" | "tema";
 
 export function TasksScreen({ timezone }: { timezone: string }) {
   const queryClient = useQueryClient();
-  const [groupBy, setGroupBy] = useState<GroupBy>("due");
+  const [groupBy, setGroupByState] = useState<GroupBy>("due");
+  /* Guarda quem está FECHADO, não quem está aberto: grupo novo (sessão
+     que acabou de entrar, tema novo) nasce aberto, e não invisível. */
+  const [fechados, setFechados] = useState<Set<string>>(new Set());
+
+  /* A escolha lembrada entra DEPOIS do primeiro render. Ler no render
+     daria divergência de hidratação, porque o servidor não tem
+     `localStorage` — foi assim que a agenda quebrou uma vez. */
+  useEffect(() => {
+    const salvo = lerAgrupamentoTarefas();
+    if (salvo !== null) setGroupByState(salvo);
+  }, []);
+
+  /* Toda troca passa por aqui para ser lembrada. Um `setGroupByState`
+     solto noutro ponto voltaria a esquecer, e em silêncio. */
+  const setGroupBy = useCallback((proximo: GroupBy) => {
+    setGroupByState(proximo);
+    guardarAgrupamentoTarefas(proximo);
+    // Trocar de agrupamento recomeça com tudo aberto: os ids do modo
+    // anterior não querem dizer nada no novo.
+    setFechados(new Set());
+  }, []);
+
+  const alternarGrupo = useCallback((id: string) => {
+    setFechados((atual) => {
+      const proximo = new Set(atual);
+      if (!proximo.delete(id)) proximo.add(id);
+      return proximo;
+    });
+  }, []);
   const [showDone, setShowDone] = useState(false);
   const [reserving, setReserving] = useState<Task | null>(null);
   const [creating, setCreating] = useState(false);
@@ -169,6 +201,8 @@ export function TasksScreen({ timezone }: { timezone: string }) {
               onChange={(e) => setGroupBy(e.target.value as GroupBy)}
             >
               <option value="due">por prazo</option>
+              <option value="horario">por horário</option>
+              <option value="tema">por tema</option>
               <option value="list">por lista</option>
               <option value="priority">por prioridade</option>
             </Select>
@@ -303,27 +337,58 @@ export function TasksScreen({ timezone }: { timezone: string }) {
             vira tarefa com prazo.
           </Empty>
         ) : (
-          groups.map((group) => (
-            <section key={group.label}>
-              <h2 className="eyebrow flex items-center gap-2 px-1 pb-2">
-                {group.label}
-                <span className="tnum text-faint">{group.tasks.length}</span>
-              </h2>
-              <ul className="space-y-2">
-                {group.tasks.map((task) => (
-                  <TaskRow
-                    key={task.id}
-                    task={task}
-                    timezone={timezone}
-                    busy={toggle.isPending || remove.isPending}
-                    onToggle={(t) => toggle.mutate(t)}
-                    onSchedule={setReserving}
-                    onDelete={(t) => remove.mutate(t)}
+          groups.map((group) => {
+            const aberto = !fechados.has(group.id);
+            return (
+              <section key={group.id}>
+                <button
+                  onClick={() => alternarGrupo(group.id)}
+                  aria-expanded={aberto}
+                  aria-controls={`grupo-${group.id}`}
+                  className="flex w-full items-center gap-2 rounded-lg px-1 py-1.5 text-left transition-colors hover:bg-surface-2"
+                >
+                  <IconChevronDown
+                    className={cx(
+                      "h-3.5 w-3.5 text-muted transition-transform duration-200",
+                      !aberto && "-rotate-90",
+                    )}
                   />
-                ))}
-              </ul>
-            </section>
-          ))
+                  <span className="eyebrow">{group.label}</span>
+                  {group.meta ? (
+                    <span className="truncate text-xs text-muted">{group.meta}</span>
+                  ) : null}
+                  <span className="tnum ml-auto text-xs text-faint">
+                    {group.tasks.length}
+                  </span>
+                </button>
+                {aberto ? (
+                  <ul
+                    id={`grupo-${group.id}`}
+                    className="animate-fade-in space-y-2 pt-1"
+                  >
+                    {group.tasks.map((task) => (
+                      <TaskRow
+                        key={task.id}
+                        task={task}
+                        timezone={timezone}
+                        busy={toggle.isPending || remove.isPending}
+                        omitir={
+                          groupBy === "tema"
+                            ? { tema: group.label }
+                            : groupBy === "horario"
+                              ? { bloco: group.id }
+                              : undefined
+                        }
+                        onToggle={(t) => toggle.mutate(t)}
+                        onSchedule={setReserving}
+                        onDelete={(t) => remove.mutate(t)}
+                      />
+                    ))}
+                  </ul>
+                ) : null}
+              </section>
+            );
+          })
         )}
 
         <label className="flex w-fit cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-xs text-muted transition-colors hover:bg-surface-2 hover:text-ink">
@@ -363,24 +428,130 @@ export function TasksScreen({ timezone }: { timezone: string }) {
 }
 
 // ---------------------------------------------------------------
-interface Group {
+export interface Group {
+  /* `id` e não `label` como chave do React: duas sessões do mesmo
+     assunto se chamam igual ("Estudo: Funções em Python"), e com o
+     rótulo por chave elas colapsariam numa só. */
+  id: string;
   label: string;
+  /** A hora da sessão, no cabeçalho do grupo. */
+  meta?: string;
   tasks: Task[];
 }
 
-function groupTasks(
+/** O bloco mais cedo de uma tarefa, para ordenar e para datar. */
+function primeiroBloco(task: Task) {
+  return [...task.reserved].sort((a, b) => a.start.localeCompare(b.start))[0];
+}
+
+/** "quinta 15/10 · 09:15–12:15" para o cabeçalho do grupo. */
+function quandoFoi(bloco: Reserved, timezone: string): string {
+  return `${dateOf(bloco.start, timezone)} · ${range(
+    bloco.start,
+    bloco.end,
+    timezone,
+  )}`;
+}
+
+export function groupTasks(
   tasks: Task[],
   groupBy: GroupBy,
   lists: TaskListRef[],
   timezone: string,
 ): Group[] {
+  if (groupBy === "horario") {
+    /* Agrupa pelo bloco reservado. Não precisa de nada novo do
+       servidor: `task.reserved` já vem em `GET /tasks`, e já é
+       desenhado dentro de cada item. */
+    const porBloco = new Map<string, { bloco: Reserved; tasks: Task[] }>();
+    const semHorario: Task[] = [];
+
+    for (const task of tasks) {
+      if (task.reserved.length === 0) {
+        semHorario.push(task);
+        continue;
+      }
+      /* Uma tarefa em dois blocos aparece nos dois, de propósito: a
+         pergunta desta visão é "o que eu faço nesta hora?", e esconder
+         a tarefa no segundo bloco faria aquela sessão parecer mais
+         vazia do que é. */
+      for (const bloco of task.reserved) {
+        const atual = porBloco.get(bloco.event_ref_id);
+        if (atual) {
+          atual.tasks.push(task);
+        } else {
+          porBloco.set(bloco.event_ref_id, { bloco, tasks: [task] });
+        }
+      }
+    }
+
+    const grupos: Group[] = [...porBloco.entries()]
+      .sort((a, b) => a[1].bloco.start.localeCompare(b[1].bloco.start))
+      .map(([id, { bloco, tasks: items }]) => ({
+        id,
+        label: bloco.title,
+        meta: quandoFoi(bloco, timezone),
+        tasks: items,
+      }));
+
+    // Sempre por último: é o balde de quem ainda precisa de horário.
+    if (semHorario.length > 0) {
+      grupos.push({ id: "sem-horario", label: "Sem horário", tasks: semHorario });
+    }
+    return grupos;
+  }
+
+  if (groupBy === "tema") {
+    /* O tema é a PRIMEIRA etiqueta, por convenção: é o que o Age grava
+       quando monta uma checklist. As outras etiquetas seguem sendo
+       etiquetas, e continuam aparecendo no item. */
+    const porTema = new Map<string, Task[]>();
+    const semTema: Task[] = [];
+
+    for (const task of tasks) {
+      const tema = task.labels[0];
+      if (!tema) {
+        semTema.push(task);
+        continue;
+      }
+      porTema.set(tema, [...(porTema.get(tema) ?? []), task]);
+    }
+
+    const grupos: Group[] = [...porTema.entries()]
+      .sort((a, b) => a[0].localeCompare(b[0], "pt-BR"))
+      .map(([tema, items]) => ({
+        id: `tema:${tema}`,
+        label: tema,
+        /* Dentro do tema, a ordem é a do relógio: é o que responde "já
+           passei do que deveria ter aprendido?". Quem ainda não tem
+           sessão vai para o fim, porque não dá para dizer se atrasou. */
+        tasks: [...items].sort((a, b) => {
+          const pa = primeiroBloco(a)?.start;
+          const pb = primeiroBloco(b)?.start;
+          if (!pa && !pb) return 0;
+          if (!pa) return 1;
+          if (!pb) return -1;
+          return pa.localeCompare(pb);
+        }),
+      }));
+
+    if (semTema.length > 0) {
+      grupos.push({ id: "sem-tema", label: "Sem tema", tasks: semTema });
+    }
+    return grupos;
+  }
+
   if (groupBy === "list") {
     const byList = new Map<string, Task[]>();
     for (const task of tasks) {
       const key = lists.find((l) => l.id === task.list_id)?.name ?? "Outra lista";
       byList.set(key, [...(byList.get(key) ?? []), task]);
     }
-    return [...byList.entries()].map(([label, items]) => ({ label, tasks: items }));
+    return [...byList.entries()].map(([label, items]) => ({
+      id: `lista:${label}`,
+      label,
+      tasks: items,
+    }));
   }
 
   if (groupBy === "priority") {
@@ -394,6 +565,7 @@ function groupTasks(
     };
     return order
       .map((key) => ({
+        id: `prioridade:${key}`,
         label: labels[key],
         tasks: tasks.filter((t) => (t.priority ?? "none") === key),
       }))
@@ -410,10 +582,10 @@ function groupTasks(
   const done = tasks.filter((t) => t.status === "done");
 
   return [
-    { label: "Atrasadas", tasks: overdue },
-    { label: "Com prazo", tasks: withDue },
-    { label: "Sem prazo", tasks: noDue },
-    { label: "Concluídas", tasks: done },
+    { id: "atrasadas", label: "Atrasadas", tasks: overdue },
+    { id: "com-prazo", label: "Com prazo", tasks: withDue },
+    { id: "sem-prazo", label: "Sem prazo", tasks: noDue },
+    { id: "concluidas", label: "Concluídas", tasks: done },
   ].filter((group) => group.tasks.length > 0);
 }
 

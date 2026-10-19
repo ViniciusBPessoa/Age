@@ -78,11 +78,12 @@ function bloco(over: Partial<Reserved> = {}): Reserved {
   };
 }
 
-function montar(t: Task) {
+function montar(t: Task, omitir?: { tema?: string; bloco?: string }) {
   return render(
     <TaskRow
       task={t}
       timezone={TZ}
+      omitir={omitir}
       onToggle={vi.fn()}
       onSchedule={vi.fn()}
       onDelete={vi.fn()}
@@ -189,5 +190,70 @@ describe("TaskRow — o aviso de tempo reservado (§8.1)", () => {
     const caixa = screen.getByRole("checkbox", { name: /concluir pagar ipva/i });
     expect(caixa).toBeTruthy();
     expect((caixa as HTMLInputElement).checked).toBe(false);
+  });
+});
+
+describe("TaskRow — não repete o que o cabeçalho do grupo já diz", () => {
+  it("agrupado por tema, o item não repete a etiqueta do tema", () => {
+    /*
+     * Só apareceu vendo a tela: embaixo de um cabeçalho "FUNCOES EM
+     * PYTHON", as cinco tarefas traziam a badge "Funcoes em Python".
+     * As OUTRAS etiquetas continuam, porque essas o cabeçalho não diz.
+     */
+    montar(tarefa({ labels: ["Funções em Python", "urgente"] }), {
+      tema: "Funções em Python",
+    });
+
+    expect(screen.queryByText("Funções em Python")).toBeNull();
+    expect(screen.getByText("urgente")).toBeTruthy();
+  });
+
+  it("agrupado por horário, o item não repete o bloco do cabeçalho", () => {
+    montar(tarefa({ reserved: [bloco({ event_ref_id: "e1" })] }), {
+      bloco: "e1",
+    });
+
+    expect(screen.queryByText(/reservad/)).toBeNull();
+  });
+
+  it("mas NÃO diz 'sem tempo reservado' quando o bloco só foi omitido", () => {
+    /*
+     * A armadilha: filtrar o bloco zerava `hasReserved`, e o item caía
+     * no ramo contrário, oferecendo "reservar tempo" para uma tarefa
+     * que TEM horário. Dizer o oposto da verdade é pior que repetir.
+     *
+     * Sabotagem: trocar `task.reserved.length > 0` por `blocos.length`
+     * na condição do ramo.
+     */
+    montar(tarefa({ reserved: [bloco({ event_ref_id: "e1" })] }), {
+      bloco: "e1",
+    });
+
+    expect(screen.queryByText("sem tempo reservado")).toBeNull();
+    expect(screen.queryByRole("button", { name: /reservar tempo/i })).toBeNull();
+  });
+
+  it("os outros blocos continuam à vista", () => {
+    // "Esta tarefa também tem hora na quarta" é informação que o
+    // cabeçalho de terça não dá.
+    montar(
+      tarefa({
+        reserved: [
+          bloco({ event_ref_id: "e1" }),
+          bloco({ event_ref_id: "e2", minutes: 60 }),
+        ],
+      }),
+      { bloco: "e1" },
+    );
+
+    expect(screen.getAllByText(/reservad/)).toHaveLength(1);
+  });
+
+  it("sem agrupamento especial, nada é escondido", () => {
+    // Contrapeso: as visões antigas continuam mostrando tudo.
+    montar(tarefa({ labels: ["TCC"], reserved: [bloco()] }));
+
+    expect(screen.getByText("TCC")).toBeTruthy();
+    expect(screen.getAllByText(/reservad/).length).toBeGreaterThan(0);
   });
 });

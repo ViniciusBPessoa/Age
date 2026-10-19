@@ -21,9 +21,21 @@
 
 const CHAVE_CONVERSA = "age-ultima-conversa";
 const CHAVE_VISTA = "age-ultima-vista-agenda";
+const CHAVE_AGRUPAMENTO = "age-agrupamento-tarefas";
 
 /** As visualizações da agenda. Espelha `TimelineView`. */
 export type VistaAgenda = "day" | "week" | "month";
+
+/** Como a tela de tarefas agrupa. Espelha `GroupBy`. */
+export type AgrupamentoTarefas = "due" | "horario" | "tema" | "list" | "priority";
+
+const AGRUPAMENTOS: AgrupamentoTarefas[] = [
+  "due",
+  "horario",
+  "tema",
+  "list",
+  "priority",
+];
 
 function ler(chave: string): string | null {
   try {
@@ -97,4 +109,31 @@ export function lerUltimaVista(): VistaAgenda | null {
  */
 export function guardarUltimaVista(vista: VistaAgenda): void {
   gravar(CHAVE_VISTA, vista);
+}
+
+/**
+ * Como a tela de tarefas estava agrupada da última vez.
+ *
+ * Valida contra a lista fechada pelo mesmo motivo de `lerUltimaVista`:
+ * `localStorage` é entrada NÃO confiável — sobrevive a deploy e qualquer
+ * um edita pelo devtools. Um valor fora da lista viraria um `groupBy`
+ * que não casa com nenhum ramo, e a tela renderizaria vazia.
+ */
+export function lerAgrupamentoTarefas(): AgrupamentoTarefas | null {
+  const valor = ler(CHAVE_AGRUPAMENTO);
+  return AGRUPAMENTOS.includes(valor as AgrupamentoTarefas)
+    ? (valor as AgrupamentoTarefas)
+    : null;
+}
+
+/**
+ * Guarda só o MODO, nunca quais grupos estavam fechados.
+ *
+ * Os ids de grupo são ids de evento e nomes de tema, que mudam a cada
+ * sessão aplicada ou concluída. Guardar o conjunto acumularia id morto
+ * para sempre, e um dia esconderia um grupo novo por coincidência de
+ * id. O modo é preferência durável; o que está dobrado é efêmero.
+ */
+export function guardarAgrupamentoTarefas(valor: AgrupamentoTarefas): void {
+  gravar(CHAVE_AGRUPAMENTO, valor);
 }

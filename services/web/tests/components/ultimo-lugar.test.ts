@@ -21,8 +21,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   esquecerUltimaConversa,
+  guardarAgrupamentoTarefas,
   guardarUltimaConversa,
   guardarUltimaVista,
+  lerAgrupamentoTarefas,
   lerUltimaConversa,
   lerUltimaVista,
 } from "@/lib/ultimo-lugar";
@@ -129,5 +131,42 @@ describe("a visualização da agenda", () => {
 
     const chaves = Object.keys(localStorage);
     expect(chaves).toEqual(["age-ultima-vista-agenda"]);
+  });
+});
+
+describe("o agrupamento da lista de tarefas", () => {
+  it("lembra a escolha", () => {
+    guardarAgrupamentoTarefas("horario");
+
+    expect(lerAgrupamentoTarefas()).toBe("horario");
+  });
+
+  it("valor fora da lista não passa", () => {
+    /*
+     * Mesmo motivo de `lerUltimaVista`: `localStorage` é entrada não
+     * confiável. Um `groupBy` inválido não casa com nenhum ramo de
+     * `groupTasks`, e a tela renderizaria vazia sem erro nenhum.
+     *
+     * Sabotagem: devolver o valor cru. Este teste é o que cai.
+     */
+    localStorage.setItem("age-agrupamento-tarefas", "por-cor");
+
+    expect(lerAgrupamentoTarefas()).toBeNull();
+  });
+
+  it("sem nada guardado, devolve nulo e a tela escolhe o padrão", () => {
+    expect(lerAgrupamentoTarefas()).toBeNull();
+  });
+
+  it("escrita que lança não derruba a tela", () => {
+    // Navegação privada. Perder a memória não é motivo para quebrar.
+    const original = Storage.prototype.setItem;
+    Storage.prototype.setItem = () => {
+      throw new Error("sem cota");
+    };
+
+    expect(() => guardarAgrupamentoTarefas("tema")).not.toThrow();
+
+    Storage.prototype.setItem = original;
   });
 });

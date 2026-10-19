@@ -53,6 +53,7 @@ export function TaskRow({
   task,
   timezone,
   busy,
+  omitir,
   onToggle,
   onSchedule,
   onDelete,
@@ -60,12 +61,25 @@ export function TaskRow({
   task: Task;
   timezone: string;
   busy?: boolean;
+  /**
+   * O que o CABEÇALHO do grupo já diz, e o item não precisa repetir.
+   *
+   * Agrupado por horário, cada item repetia "1h reservada · terça
+   * 20/10 · 04:05–05:05" embaixo de um cabeçalho que dizia a mesma
+   * coisa; agrupado por tema, cada item repetia a etiqueta do tema.
+   * Isso só apareceu vendo a tela — nenhum teste olha redundância.
+   */
+  omitir?: { tema?: string; bloco?: string };
   onToggle: (task: Task) => void;
   onSchedule: (task: Task) => void;
   onDelete: (task: Task) => void;
 }) {
   const done = task.status === "done";
-  const hasReserved = task.reserved.length > 0;
+  /* Agrupado por horário, o bloco do cabeçalho sai do item; os OUTROS
+     ficam, porque "esta tarefa também tem hora na quarta" é informação
+     que o cabeçalho daquele grupo não dá. */
+  const blocos = task.reserved.filter((b) => b.event_ref_id !== omitir?.bloco);
+  const hasReserved = blocos.length > 0;
 
   /**
    * O aviso de §8.1: prazo próximo (ou passado) e nenhum tempo
@@ -147,9 +161,11 @@ export function TaskRow({
               </Badge>
             ) : null}
 
-            {task.labels.map((label) => (
-              <Badge key={label}>{label}</Badge>
-            ))}
+            {task.labels
+              .filter((label) => label !== omitir?.tema)
+              .map((label) => (
+                <Badge key={label}>{label}</Badge>
+              ))}
           </div>
 
           <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
@@ -175,7 +191,7 @@ export function TaskRow({
           <div className="mt-2">
             {hasReserved ? (
               <div className="space-y-1">
-                {task.reserved.map((block) => (
+                {blocos.map((block) => (
                   <p
                     key={block.event_ref_id}
                     /* `ok` e não `brand`: tempo reservado é estado
@@ -194,7 +210,11 @@ export function TaskRow({
                   </p>
                 ))}
               </div>
-            ) : done ? null : (
+            ) : done || task.reserved.length > 0 ? null : (
+              /* `task.reserved`, não `blocos`: se o único bloco foi
+                 omitido porque o cabeçalho já o diz, a tarefa TEM
+                 horário. Dizer "sem tempo reservado" e oferecer
+                 reservar seria o contrário da verdade. */
               <div className="flex flex-wrap items-center gap-2">
                 <span
                   className={cx(
