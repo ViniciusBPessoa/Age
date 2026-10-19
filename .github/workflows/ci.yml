@@ -46,6 +46,13 @@ jobs:
       - name: Typecheck
         working-directory: services/web
         run: npm run typecheck
+      # Rodava so na maquina de quem escreveu. O backend tinha ruff e
+      # pytest aqui desde o M0; o front tinha typecheck e build, que
+      # nao executam um unico teste de componente, entao um PR que
+      # quebrasse a tela passava verde com a suite inteira vermelha.
+      - name: Testes
+        working-directory: services/web
+        run: npm test
       - name: Build
         working-directory: services/web
         run: npm run build
