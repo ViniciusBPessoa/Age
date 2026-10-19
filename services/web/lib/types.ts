@@ -64,7 +64,10 @@ export type PlanOp =
   | "DELETE"
   | "COMPLETE"
   | "REORDER"
-  | "UPDATE";
+  | "UPDATE"
+  // Liga uma tarefa que já existe a um bloco que já existe (§5.7.1).
+  // Não escreve campo em nenhum dos dois: muda só a relação.
+  | "LINK";
 
 export interface ApiError {
   error: { code: string; message: string; retryable?: boolean };

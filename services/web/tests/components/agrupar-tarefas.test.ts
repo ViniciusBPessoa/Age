@@ -118,6 +118,29 @@ describe("por horário", () => {
     expect(grupo.meta).toContain("16:15");
   });
 
+  it("o cabeçalho não repete a data", () => {
+    /*
+     * Saía "19/10 · segunda 19/10 · 16:15–17:15", com a data duas
+     * vezes na mesma linha, porque `quandoFoi` prefixava `dateOf` a um
+     * `range` que já começa por `dayOf`.
+     *
+     * O teste acima passava assim: `toContain("16:15")` é verdade com
+     * a data repetida. Só apareceu vendo a tela. Daí contar as
+     * ocorrências em vez de procurar um pedaço.
+     *
+     * Sabotagem: voltar o `dateOf` na frente.
+     */
+    const [grupo] = groupTasks(
+      [tarefa({ id: "t1", reserved: [S1] })],
+      "horario",
+      [],
+      TZ,
+    );
+
+    const vezes = (grupo.meta ?? "").match(/19\/10/g) ?? [];
+    expect(vezes).toHaveLength(1);
+  });
+
   it("tarefa em duas sessões aparece nas duas", () => {
     /*
      * De propósito: a pergunta desta visão é "o que eu faço nesta

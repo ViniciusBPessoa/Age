@@ -35,7 +35,7 @@ import {
 import { RequestFailed, api } from "@/lib/api-client";
 import { mensagemDeFalha } from "@/lib/resultado-do-apply";
 import { guardarAgrupamentoTarefas, lerAgrupamentoTarefas } from "@/lib/ultimo-lugar";
-import { dateOf, duration, range } from "@/lib/format";
+import { duration, range } from "@/lib/format";
 import type {
   ApplyResult,
   Plan,
@@ -353,9 +353,15 @@ export function TasksScreen({ timezone }: { timezone: string }) {
                       !aberto && "-rotate-90",
                     )}
                   />
-                  <span className="eyebrow">{group.label}</span>
+                  {/* Quem encolhe é o TÍTULO, não a hora. No celular o
+                      cabeçalho saía "segunda 19/10..." com a hora
+                      cortada, porque o `truncate` estava na hora e o
+                      título longo tomava a linha inteira. A hora é o
+                      que este cabeçalho existe para dizer: é por ela
+                      que a pessoa sabe o que faz nesta sessão. */}
+                  <span className="eyebrow min-w-0 truncate">{group.label}</span>
                   {group.meta ? (
-                    <span className="truncate text-xs text-muted">{group.meta}</span>
+                    <span className="shrink-0 text-xs text-muted">{group.meta}</span>
                   ) : null}
                   <span className="tnum ml-auto text-xs text-faint">
                     {group.tasks.length}
@@ -444,13 +450,17 @@ function primeiroBloco(task: Task) {
   return [...task.reserved].sort((a, b) => a.start.localeCompare(b.start))[0];
 }
 
-/** "quinta 15/10 · 09:15–12:15" para o cabeçalho do grupo. */
+/**
+ * "quinta 15/10 · 09:15–12:15" para o cabeçalho do grupo.
+ *
+ * Só `range`, sem `dateOf` na frente: `range` já começa por `dayOf`,
+ * que é "EEE dd/MM". Com os dois o cabeçalho saía "19/10 · segunda
+ * 19/10 · 12:15–13:15", com a data duas vezes na mesma linha. Nenhum
+ * teste pegava: a asserção era `toContain("16:15")`, que passa com a
+ * data repetida. Só apareceu vendo a tela com os blocos de verdade.
+ */
 function quandoFoi(bloco: Reserved, timezone: string): string {
-  return `${dateOf(bloco.start, timezone)} · ${range(
-    bloco.start,
-    bloco.end,
-    timezone,
-  )}`;
+  return range(bloco.start, bloco.end, timezone);
 }
 
 export function groupTasks(

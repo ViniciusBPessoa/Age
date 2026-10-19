@@ -166,6 +166,7 @@ const TOOL_LABELS: Record<string, string> = {
   complete_task: "concluindo",
   reorder_tasks: "reordenando",
   reserve_time_for_task: "reservando tempo",
+  link_task_to_event: "ligando ao horário",
   // Rotinas (§5.9.4)
   propose_routine: "simulando a série",
   get_routines: "lendo suas rotinas",

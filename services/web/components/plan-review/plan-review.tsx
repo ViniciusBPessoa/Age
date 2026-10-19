@@ -58,6 +58,7 @@ const OP_LABEL: Record<PlanOp, string> = {
   COMPLETE: "Concluir",
   REORDER: "Reordenar",
   UPDATE: "Atualizar",
+  LINK: "Ligar ao horário",
 };
 
 interface Payload {
