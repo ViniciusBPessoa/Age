@@ -858,17 +858,41 @@ async def internal_apply_proposals(
             if not resultado.refused_upfront:
                 await mark_applied(db, user_id, UUID(plan_id), resultado)
                 await record_undo_log(db, user_id, UUID(plan_id), resultado)
-            else:
-                recusados.extend(motivo for _, motivo in resultado.failed)
+
+            # O motivo entra na lista venha ele de onde vier.
+            #
+            # Isto so olhava `refused_upfront`, e um item que falhou NO
+            # MEIO da aplicacao (erro de escrita, por exemplo) saia com
+            # a lista vazia: a resposta virava "Nada entrou: ", com dois
+            # pontos e nada depois, e o Age nao tinha o que dizer a
+            # pessoa. Foi exatamente o que apareceu no primeiro teste de
+            # ponta a ponta desta rota.
+            recusados.extend(motivo for _, motivo in resultado.failed)
             total += len(resultado.applied)
 
         return {
             "applied": total,
             "items": nomes[:20],
             "refused": recusados[:10],
-            "message": (
-                f"{total} item(ns) entraram na agenda."
-                if total
-                else "Nada entrou: " + "; ".join(recusados[:3])
-            ),
+            "message": _mensagem_do_apply(total, recusados),
         }
+
+
+def _mensagem_do_apply(total: int, recusados: list[str]) -> str:
+    """O que o Age vai dizer depois de confirmar pela conversa.
+
+    Funcao nomeada porque a versao inline tinha um buraco que so
+    apareceu no primeiro teste de ponta a ponta desta rota: com zero
+    aplicados e `recusados` vazio, a mensagem saia "Nada entrou: ", com
+    dois pontos e nada depois, e o Age nao tinha o que contar.
+
+    Acontecia porque os motivos so eram coletados em recusa de pre-voo;
+    um item que falhasse NO MEIO da aplicacao nao deixava rastro aqui.
+    A coleta foi corrigida, e esta funcao garante que mesmo um caso nao
+    previsto diga alguma coisa.
+    """
+    if total:
+        return f"{total} item(ns) entraram na agenda."
+    if recusados:
+        return "Nada entrou: " + "; ".join(recusados[:3])
+    return "Nada entrou, e o servidor nao disse por que."
