@@ -222,9 +222,20 @@ export function Composer({
           </div>
         </div>
 
+        {/*
+         * A dica inteira so no desktop.
+         *
+         * Em 390px ela quebra em duas linhas e encosta na barra de
+         * navegacao de baixo, que e fixa: a segunda linha sai cortada.
+         * No celular fica a parte que a pessoa precisa saber (nada
+         * entra sem aprovar); "Enter envia" nao vale a linha extra em
+         * quem digita com teclado virtual.
+         */}
         <p className="mt-2 text-center text-2xs text-faint">
-          Enter envia · Shift+Enter quebra linha · nada é escrito na sua agenda sem você
-          aprovar
+          <span className="hidden sm:inline">
+            Enter envia · Shift+Enter quebra linha ·{" "}
+          </span>
+          nada é escrito na sua agenda sem você aprovar
         </p>
       </div>
     </div>
