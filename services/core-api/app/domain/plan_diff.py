@@ -280,18 +280,42 @@ class Plan:
         Aceitar um e rejeitar o outro deixaria o sistema inconsistente —
         bloco na agenda sem tarefa, ou tarefa apontando para horário
         vazio. A UI trata o grupo como uma coisa só.
+
+        É **fechamento transitivo**, não um salto só. Enquanto o único
+        vínculo era o par 1:1 de `reserve_time_for_task`, um salto dava
+        no mesmo: o grupo de uma dupla simétrica é a dupla. Deixou de dar
+        quando uma checklist passou a apontar várias tarefas para a mesma
+        sessão, e uma tarefa para duas sessões.
+
+        Medido, num plano de 7 itens (2 sessões, 5 tarefas, uma delas
+        cobrindo as duas):
+
+            um salto      → a soma dos grupos dava 13 de 7, e cada
+                            sessão caía em 4 grupos diferentes. Como
+                            `_group_linked` aplica grupo a grupo, era
+                            criar a mesma sessão até quatro vezes.
+            fechamento    → um grupo de 7, cada item uma vez só.
+
+        O que se perde é real e foi escolhido: o conjunto vira um acordo
+        único — aprovar um item aprova todos, e a falha de um reverte o
+        resto. É a mesma semântica que o par já tinha, agora valendo para
+        o conjunto.
         """
         target = self.item(item_id)
         if target is None:
             return []
-        if not target.links:
-            return [target]
 
-        group = {target.id: target}
-        for linked_id in target.links:
-            found = self.item(linked_id)
-            if found is not None:
-                group[found.id] = found
+        group: dict[UUID, DiffItem] = {}
+        fila = [target]
+        while fila:
+            atual = fila.pop()
+            if atual.id in group:
+                continue
+            group[atual.id] = atual
+            for linked_id in atual.links:
+                found = self.item(linked_id)
+                if found is not None and found.id not in group:
+                    fila.append(found)
         return list(group.values())
 
 

@@ -576,3 +576,85 @@ def test_creating_over_flexible_event_is_only_warning() -> None:
     item = plan.items[0]
     assert not item.is_blocking
     assert ConflictKind.OVERLAP in {c.kind for c in item.conflicts}
+
+
+# ---------------------------------------------------------------
+# Grupo ligado com N↔M (§5.7.1)
+# ---------------------------------------------------------------
+# Uma checklist de estudo liga VÁRIAS tarefas à MESMA sessão, e às vezes
+# uma tarefa a DUAS sessões. Enquanto o único vínculo era o par 1:1 de
+# `reserve_time_for_task`, `linked_group` podia ser de um salto só. Com a
+# checklist deixou de poder, e o modo de falhar era silencioso: a mesma
+# sessão caindo em vários grupos de aplicação, para ser criada de novo em
+# cada um.
+def _plano_de_checklist():
+    """2 sessões, 5 tarefas, uma delas cobrindo as duas."""
+    b = builder()
+    s1 = b.propose_create(ev(10, title="Sessão 1"), "primeira")
+    s2 = b.propose_create(ev(14, title="Sessão 2"), "segunda")
+
+    tarefas = []
+    for i, sessoes in enumerate([[s1], [s1], [s2], [s2], [s1, s2]]):
+        t = b.propose_create(ev(16, title=f"Tópico {i}", day=16 + i), "tópico")
+        for s in sessoes:
+            b.link(t.id, s.id)
+        tarefas.append(t)
+
+    return b.build(), [s1, s2], tarefas
+
+
+def test_grupo_ligado_e_fechamento_transitivo() -> None:
+    """Todo item do conjunto enxerga o MESMO grupo.
+
+    Sabotagem que precisa derrubá-lo: voltar `linked_group` para o corpo
+    de um salto (só `target` + vínculos diretos).
+    """
+    plan, sessoes, tarefas = _plano_de_checklist()
+    todos = sessoes + tarefas
+
+    tamanhos = {len(plan.linked_group(i.id)) for i in todos}
+
+    assert tamanhos == {7}, (
+        f"grupos de tamanhos diferentes conforme o item: {tamanhos}. "
+        "Com um salto só, a sessão vê 3 e a tarefa vê 2."
+    )
+
+
+def test_nenhum_item_cai_em_dois_grupos() -> None:
+    """A soma dos grupos é o tamanho do plano, não mais.
+
+    Este é o teste do defeito de verdade: `_group_linked` aplica grupo a
+    grupo, então item repetido em dois grupos é item aplicado duas vezes.
+    Com um salto, a soma dava 13 num plano de 7, e cada sessão aparecia
+    em 4 grupos.
+    """
+    from app.domain.plan_executor import _group_linked
+
+    plan, _, _ = _plano_de_checklist()
+    itens = list(plan.items)
+
+    grupos = _group_linked(plan, itens)
+    vistas = [m.id for g in grupos for m in g]
+
+    assert len(vistas) == len(itens), (
+        f"a soma dos grupos deu {len(vistas)} para um plano de "
+        f"{len(itens)} itens: algum item seria aplicado mais de uma vez"
+    )
+    assert len(set(vistas)) == len(itens)
+
+
+def test_par_1_para_1_continua_de_dois() -> None:
+    """Contrapeso: o caminho antigo não pode ter mudado.
+
+    `reserve_time_for_task` gera um par simétrico. Para ele, fechamento e
+    um salto dão o mesmo — e é isso que prova que a correção não alargou
+    o grupo de quem já funcionava.
+    """
+    b = builder()
+    bloco = b.propose_create(ev(10, title="Bloco"), "reserva")
+    tarefa = b.propose_create(ev(14, title="Tarefa"), "a fazer")
+    b.link(bloco.id, tarefa.id)
+    plan = b.build()
+
+    assert len(plan.linked_group(bloco.id)) == 2
+    assert len(plan.linked_group(tarefa.id)) == 2
