@@ -224,7 +224,29 @@ switch ($Command.ToLower()) {
             "--env-file", ".env"
         )
         Write-Host "construindo o front para producao (leva ~1 min)..."
-        Invoke-Compose -ComposeArgs @("up", "-d", "--build", "web-prod")
+        # `ai-worker` e `ai-worker-api` entram explicitamente.
+
+        #
+
+        # Subir so `web-prod` traz as dependencias DELE (core-api,
+
+        # postgres, redis) e deixa o worker de fora: a conversa nao
+
+        # responde, e a tela de Configuracoes recebe 503 em
+
+        # /api/llm/providers, que consulta o registry do worker.
+
+        #
+
+        # So aparece em `prod` logo depois de um `down`: quem vinha de um
+
+        # `up` ja tinha o worker no ar e nao via o problema.
+
+        Invoke-Compose -ComposeArgs @(
+
+            "up", "-d", "--build", "web-prod", "ai-worker", "ai-worker-api"
+
+        )
         Wait-CoreApi
         Write-Host ""
         Write-Host "  aplicacao   http://localhost:3000   (rapida)"
