@@ -372,9 +372,10 @@ async def reorder_tasks(ctx: ToolContext, args: dict) -> dict:
         "'reservar tempo' ou 'achar um horário pra' algo que já está na "
         "lista. SEMPRE use find_free_slots antes para escolher o "
         "horário — nunca invente um. "
-        "Depois de aplicado, marcar o bloco como feito conclui a tarefa "
-        "junto: diga isso ao usuário, porque é o que evita ele marcar "
-        "duas vezes."
+        "Depois de aplicado, concluir a TAREFA faz o Age lembrar do "
+        "bloco e oferecer liberar o horário. O contrário não existe: "
+        "não há como marcar o bloco como feito, então nunca prometa "
+        "isso."
     ),
     parameters={
         "type": "object",

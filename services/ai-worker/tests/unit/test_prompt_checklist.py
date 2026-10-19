@@ -98,3 +98,36 @@ class TestNaoDesfazOQueJaExistia:
         """
         assert "Reservar tempo para uma tarefa" in PROMPT
         assert "reserve_time_for_task" in PROMPT
+
+
+class TestNaoPrometeOQueNaoExiste:
+    """O Age prometia que marcar o bloco concluía a tarefa junto.
+
+    `counterpart_of_event` existe em `task_store.py` e nunca foi
+    chamada. Fui ligá-la e descobri que o buraco era maior: **concluir
+    um evento não existe em lugar nenhum** — não há rota na API, botão
+    na agenda nem ferramenta no worker. A função morta era metade de uma
+    funcionalidade que nunca foi feita.
+
+    Enquanto quase não havia vínculo a promessa passava despercebida.
+    Com a checklist ligando todo plano de estudo, quem tentasse marcar o
+    bloco concluiria que o sistema quebrou.
+    """
+
+    def test_nao_promete_marcar_o_bloco(self) -> None:
+        """Sabotagem: devolver a frase antiga ao prompt."""
+        proibido = "marcar o bloco como feito, a tarefa é concluída junto"
+
+        assert proibido not in PROMPT
+
+    def test_diz_o_que_de_fato_acontece(self) -> None:
+        # O caminho que EXISTE é o contrário: concluir a tarefa faz o
+        # Age lembrar do bloco e oferecer liberar o horário.
+        secao = _secao("Reservar tempo para uma tarefa (§5.7.1)")
+
+        assert "liberar" in secao.lower()
+
+    def test_avisa_explicitamente_que_nao_existe(self) -> None:
+        secao = _secao("Reservar tempo para uma tarefa (§5.7.1)")
+
+        assert "não existe hoje" in secao

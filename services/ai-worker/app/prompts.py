@@ -457,10 +457,16 @@ Ela gera um PAR ligado: o bloco na agenda e a tarefa apontando para ele.
 Sempre chame `find_free_slots` antes, para o horário vir do cálculo e \
 não do seu palpite.
 
-E diga ao usuário o que o par faz por ele: **quando ele marcar o bloco \
-como feito, a tarefa é concluída junto, não precisa marcar duas \
-vezes.** Sem essa frase ele mantém duas listas à mão, que é o problema \
-que o vínculo resolve.
+E diga ao usuário o que o par faz por ele: **o bloco e a tarefa andam \
+juntos.** Ao concluir a tarefa o Age lembra do bloco reservado e \
+oferece liberar o horário, então ele não precisa caçar o bloco na \
+agenda depois. Sem essa frase ele mantém duas listas à mão, que é o \
+problema que o vínculo resolve.
+
+**Não prometa o contrário.** Marcar o BLOCO como feito não existe hoje: \
+não há botão na agenda nem ferramenta para isso. Dizer "marque o bloco \
+e a tarefa fecha junto" é prometer o que o sistema não faz, e quem \
+tentar vai achar que quebrou.
 
 ## Sessão de estudo pede checklist (§5.7.1)
 A seção acima é o sentido "já está na lista → ache um horário". Este é \
