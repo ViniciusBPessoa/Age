@@ -1333,10 +1333,38 @@ item_2: UPDATE task   "Relatório do TCC"  due_at → qui 14:00
 Isso importa por três razões concretas:
 
 1. **Aprovação conjunta.** Aceitar um e rejeitar o outro deixaria o sistema inconsistente — bloco na agenda sem tarefa, ou tarefa apontando para horário vazio. A UI trata itens ligados como unidade.
-2. **Conclusão propagada.** Marcar o evento como feito propõe completar a tarefa, e vice-versa. Sem o vínculo, você marcaria duas vezes a mesma coisa.
+2. **Conclusão com memória do bloco.** Concluir a TAREFA faz o Age lembrar do bloco reservado e oferecer liberar o horário. O caminho contrário **não existe**: não há como marcar um bloco como feito, nem na agenda nem por ferramenta, e o prompt proíbe prometer isso.
 3. **Reversão conjunta.** O undo (§5.8) desfaz o par junto.
 
 O vínculo persiste depois de aplicado, em `task_event_links` (§6.1) — é o que permite ao Age responder "você tem 3h reservadas quinta para essa tarefa" em vez de tratar as duas coisas como estranhas.
+
+##### Bloco que JÁ EXISTE: `event_refs`
+
+`links` só alcança itens **do mesmo plano**, e isso deixava de fora o caso mais comum fora do estudo: os blocos foram aprovados num turno e as tarefas nascem no seguinte.
+
+Medido na conta real. O usuário pediu "criar alguns to-dos vinculados a esses horários"; a resposta foi "montei 8 itens, todos ligados ao bloco em que cada um cabe"; e as 8 linhas de `plan_items` saíram com `links = []`, sem nenhuma linha em `task_event_links`. Duas causas somadas: nenhuma ferramenta ligava duas coisas que já existiam, e `_persist_task_event_links` descartava em silêncio todo link cujo id não fosse item do plano.
+
+Daí um segundo campo, `event_refs`, com pares `(event_ref_kind, event_ref_id)`:
+
+```
+item_1: CREATE task  "Levantar gastos fixos"
+        links:      []                                  <- nada a aprovar junto
+        event_refs: [("local_events", "00fa20b3-...")]  <- bloco que já está na agenda
+```
+
+**Por que não reusar `links`.** `links` alimenta `linked_group`, que é o grupo de APROVAÇÃO por fechamento transitivo: aprovar um item aprova o grupo, e a falha de um reverte o resto. Um bloco já aplicado não tem o que ser aprovado nem revertido, e arrastá-lo para o acordo faria a tela oferecer desfazer o que não faz parte da proposta. O `kind` viaja junto porque `local_events` e `events_shadow` são tabelas diferentes, e é a distinção que o CHECK de `task_event_links` exige.
+
+Três caminhos, e o modelo escolhe pelo estado do bloco:
+
+| O bloco | A tarefa | Ferramenta |
+|---|---|---|
+| proposto neste turno | nova | `create_task` com `cobre_eventos` |
+| já está na agenda | nova | `create_task` com `eventos_existentes` |
+| já está na agenda | já existe | `link_task_to_event` (op `LINK`) |
+
+O id é conferido contra a agenda **antes** de empilhar (`GET /internal/calendar/resolve-events`, sob RLS) e **de novo** na promoção, porque o bloco pode sumir entre propor e aprovar. A ferramenta devolve `eventos_ligados` e `eventos_recusados`, e o prompt proíbe afirmar vínculo que foi recusado: era a ausência dessa devolução que deixava o modelo descrever a intenção como se fosse resultado.
+
+Bloco que já terminou é recusado: ligar a ele faria `reserved_minutes` contar tempo que não existe mais.
 
 #### 5.7.2 Destino: quem decide se vai para agenda, lista ou ambos
 

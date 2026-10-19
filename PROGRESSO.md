@@ -462,7 +462,15 @@ Checklist de execução. A especificação completa está em [ARQUITETURA.md](AR
 - [x] `propose_time_for_task` gerando par ligado (§5.7.1)
 - [x] Aprovação em grupo de itens ligados
 - [x] Reversão em grupo na falha parcial (§5.8)
-- [x] Propagação de conclusão entre par
+- [x] Propagação de conclusão entre par — **só num sentido**: concluir a
+  tarefa lembra do bloco e oferece liberar o horário. Marcar o BLOCO como
+  feito não existe (sem rota, sem botão, sem ferramenta), e a promessa
+  contrária saiu do prompt quando isso foi verificado
+- [x] Vínculo com bloco que **já existe** (`event_refs`, op `LINK`,
+  `eventos_existentes`, `link_task_to_event`) — §5.7.1. Era o buraco que
+  fazia o Age afirmar "todos ligados ao bloco em que cada um cabe" sem
+  ligar nada: `links` só alcança item do mesmo plano, e `cobre_eventos`
+  só aceita bloco proposto no mesmo turno
 
 ### Destino e UI (16–21 h)
 - [x] Seletor em 3 camadas: conta → conversa → mensagem (§5.7.2)
