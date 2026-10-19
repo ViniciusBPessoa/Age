@@ -676,6 +676,14 @@ def _build_task_item(
                         if estimated
                         else None
                     ),
+                    # O tema que agrupa a tarefa com as irmãs vai aqui,
+                    # como primeira etiqueta. `labels` ja atravessa todo
+                    # o resto do caminho — coluna, adaptador, capacidade
+                    # do provedor, `_task_json` e `TaskOut` — e faltava
+                    # so neste ponto, que e justamente onde a tarefa
+                    # nasce por proposta. Sem esta linha o tema morre
+                    # entre a conversa e o banco, calado.
+                    labels=tuple(payload.get("labels") or ()),
                     source="age",
                     **due_fields(),
                 ),

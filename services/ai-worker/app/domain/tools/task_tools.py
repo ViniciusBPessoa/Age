@@ -172,6 +172,28 @@ async def get_task_lists(ctx: ToolContext, args: dict) -> dict:
                 "type": "string",
                 "description": "por que esta tarefa, nas palavras do usuário",
             },
+            "tema": {
+                "type": "string",
+                "description": (
+                    "assunto que agrupa esta tarefa com as irmãs, como "
+                    "o usuário diria: 'Funções em Python', 'TCC', "
+                    "'Academia'. NÃO é só para estudo. É o que faz a "
+                    "tela agrupar por tema; sem ele a tarefa cai em "
+                    "'Sem tema'"
+                ),
+            },
+            "cobre_eventos": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": (
+                    "diff_item_id das sessões JÁ PROPOSTAS NESTE TURNO "
+                    "que cobrem esta tarefa — use os ids devolvidos por "
+                    "`propose_event` ou os de `diff_item_ids` de "
+                    "`propose_study_plan`. É o que liga o to-do ao "
+                    "horário. Nunca escreva essa ligação na observação "
+                    "em texto: só vale o que entra aqui"
+                ),
+            },
         },
         "required": ["title", "reason"],
     },
@@ -190,6 +212,8 @@ async def create_task(ctx: ToolContext, args: dict) -> dict:
         priority=args.get("priority"),
         estimated_min=args.get("estimated_min"),
         list_id=args.get("list_id"),
+        tema=args.get("tema"),
+        cobre_eventos=args.get("cobre_eventos"),
     )
     # `staged`, não `created`: o modelo precisa saber a diferença, e o
     # system prompt reforça que ele não deve afirmar "já anotei".

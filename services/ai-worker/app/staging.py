@@ -145,7 +145,25 @@ class StagingBuilder:
         priority: str | None = None,
         estimated_min: int | None = None,
         list_id: str | None = None,
+        tema: str | None = None,
+        cobre_eventos: list[str] | None = None,
     ) -> str:
+        """Empilha uma tarefa, opcionalmente ligada a sessões propostas.
+
+        `cobre_eventos` recebe ids de itens EMPILHADOS neste mesmo turno
+        (não ids de banco), que é o que faltava para a checklist de
+        estudo existir: quando a pessoa pede as sessões e depois os
+        to-dos, nem a tarefa nem o evento existem ainda, então
+        `reserve_time_for_task` — que exige `task_id` de uma tarefa já
+        gravada — não dá conta.
+
+        `tema` entra como PRIMEIRA etiqueta porque é assim que a tela
+        agrupa. Etiqueta comum continua etiqueta comum, depois dele.
+        """
+        labels: list[str] = []
+        if tema:
+            labels.append(tema)
+
         item = StagedItem(
             id=uuid4(),
             op="CREATE",
@@ -159,10 +177,25 @@ class StagingBuilder:
                 "priority": priority,
                 "estimated_min": estimated_min,
                 "list_id": list_id,
+                "labels": labels,
             },
             sequence=self._next(),
         )
         self.items.append(item)
+
+        # O vínculo é simétrico de propósito: `linked_group` é fechamento
+        # transitivo, e com vínculo de um lado só o grupo sairia
+        # diferente conforme o item por onde se começa a olhar — o que
+        # faria a mesma sessão ser aplicada mais de uma vez.
+        for alvo in cobre_eventos or []:
+            irmao = next(
+                (i for i in self.items if str(i.id) == str(alvo)), None
+            )
+            # Id inventado, ou apontando para uma tarefa em vez de uma
+            # sessão, é descartado em silêncio: vínculo pendurado no
+            # vazio é pior que vínculo nenhum.
+            if irmao is not None and irmao.target == "event":
+                self.link(str(item.id), str(alvo))
         return str(item.id)
 
     def stage_task_update(
