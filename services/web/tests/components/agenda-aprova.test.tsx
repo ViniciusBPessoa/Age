@@ -127,6 +127,48 @@ describe("a data de hoje so e decidida no cliente", () => {
   });
 });
 
+describe("o padrao de visualizacao cabe na tela", () => {
+  it("no celular abre em dia, nao em semana", async () => {
+    /*
+     * Sete colunas em 390px dao 47px por dia: o nome sai cortado
+     * ("18 dom", "20 terc") e nenhum titulo de evento cabe. Visto na
+     * captura em 390px, nunca num teste.
+     */
+    vi.stubGlobal("matchMedia", (q: string) => ({
+      matches: q.includes("640px"),
+      media: q,
+      addEventListener() {},
+      removeEventListener() {},
+    }));
+    montar([]);
+
+    expect(await screen.findByRole("button", { name: /^dia$/i })).toBeTruthy();
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /^dia$/i }).className).toContain(
+        "bg-surface",
+      ),
+    );
+  });
+
+  it("no desktop continua em semana", async () => {
+    // Contrapeso: forcar "dia" sempre tiraria a visao de semana de
+    // quem tem tela para ela.
+    vi.stubGlobal("matchMedia", (q: string) => ({
+      matches: false,
+      media: q,
+      addEventListener() {},
+      removeEventListener() {},
+    }));
+    montar([]);
+
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /^semana$/i }).className).toContain(
+        "bg-surface",
+      ),
+    );
+  });
+});
+
 describe("o painel de propostas permite aprovar", () => {
   it("mostra um botao de aplicar", async () => {
     /*

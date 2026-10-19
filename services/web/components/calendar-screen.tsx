@@ -95,7 +95,26 @@ export function CalendarScreen({ timezone }: { timezone: string }) {
    */
   useEffect(() => {
     const salva = lerUltimaVista();
-    if (salva !== null) setViewState(salva);
+    if (salva !== null) {
+      setViewState(salva);
+    } else if (globalThis.matchMedia?.("(max-width: 640px)").matches) {
+      /*
+       * No celular, a semana nao cabe.
+       *
+       * Sete colunas em 390px dao 47px por dia: o nome do dia sai
+       * cortado ("18 dom", "20 terc") e nenhum titulo de evento tem
+       * onde caber. Visto na captura em 390px, nunca num teste.
+       *
+       * So vale como PADRAO: se a pessoa escolheu semana alguma vez, a
+       * escolha dela manda, por isso este ramo so roda quando nao ha
+       * nada salvo.
+       *
+       * `globalThis` e nao `window` porque ha uma variavel local
+       * chamada `window` neste componente (a janela de datas buscada),
+       * que sombreia a global.
+       */
+      setViewState("day");
+    }
     setCursor(new Date());
   }, []);
 
