@@ -307,8 +307,11 @@ async def run_turn(ctx: dict, payload: dict) -> dict:
             await provider.aclose()
 
         # --- 5. Persistência ---
-        caps = provider.capabilities
-        cost = caps.estimate_cost_usd(result.usage)
+        # O custo vem do orquestrador, somado POR CHAMADA. Recalcular
+        # aqui sobre `result.usage` (o total do turno) aplicaria um
+        # preço só a chamadas que podem ter acontecido em faixas de
+        # preço diferentes — ver o comentário no laço do orquestrador.
+        cost = result.cost_usd
 
         async with user_session(user_id) as db:
             # Rascunho de plano, se o modelo propos algo. A promocao
@@ -494,9 +497,10 @@ async def _persist_assistant_message(
             """
             INSERT INTO ai.turn_usage
               (turn_id, user_id, provider_key, model,
-               prompt_tokens, completion_tokens, estimated_cost_usd,
-               used_instance_key)
-            VALUES (:tid, :uid, :pk, :model, :pt, :ct, :cost, :inst)
+               prompt_tokens, completion_tokens, cached_prompt_tokens,
+               estimated_cost_usd, used_instance_key)
+            VALUES (:tid, :uid, :pk, :model, :pt, :ct, :cached,
+                    :cost, :inst)
             """
         ),
         {
@@ -506,6 +510,9 @@ async def _persist_assistant_message(
             "model": model or "?",
             "pt": usage.prompt_tokens,
             "ct": usage.completion_tokens,
+            # A evidência do desconto de cache, para o custo poder ser
+            # auditado contra os tokens que o geraram.
+            "cached": usage.cached_prompt_tokens,
             "cost": cost_usd,
             # De quem foi o custo. É o que a consulta da cota filtra:
             # sem isto, turnos pagos pela chave do próprio usuário

@@ -76,9 +76,7 @@ class OpenAICompatibleProvider(LLMProvider):
 
     @property
     def capabilities(self) -> ModelCapabilities:
-        return self._capabilities_by_model.get(
-            self._model, self._fallback_capabilities
-        )
+        return self._capabilities_by_model.get(self._model, self._fallback_capabilities)
 
     # -----------------------------------------------------------
     # Tradução canônico -> wire
@@ -144,9 +142,7 @@ class OpenAICompatibleProvider(LLMProvider):
                 f"argumentos inválidos para '{name}': JSON malformado"
             ) from exc
         if not isinstance(parsed, dict):
-            raise MalformedToolCall(
-                f"argumentos de '{name}' não são um objeto JSON"
-            )
+            raise MalformedToolCall(f"argumentos de '{name}' não são um objeto JSON")
         return parsed
 
     # -----------------------------------------------------------
@@ -235,18 +231,45 @@ class OpenAICompatibleProvider(LLMProvider):
                 )
             )
 
-        usage_raw = data.get("usage") or {}
         return Completion(
             message=Message(
                 role="assistant",
                 content=raw_message.get("content"),
                 tool_calls=tuple(calls),
             ),
-            usage=Usage(
-                prompt_tokens=usage_raw.get("prompt_tokens", 0),
-                completion_tokens=usage_raw.get("completion_tokens", 0),
-            ),
+            usage=self._parse_usage(data.get("usage")) or Usage(0, 0),
             finish_reason=choice.get("finish_reason", "stop"),
+        )
+
+    @staticmethod
+    def _parse_usage(raw: dict | None) -> Usage | None:
+        """Traduz o `usage` do wire para o canônico.
+
+        Os tokens de cache eram descartados aqui, e o efeito era custo
+        superestimado na parte cacheada do prompt — que, com um prompt
+        grande e estável como o do Age, é a maior parte da conta. O
+        DeepSeek cobra o hit a 1/50 do miss.
+
+        Dois nomes porque há dois formatos no mesmo wire compatível: o
+        DeepSeek manda `prompt_cache_hit_tokens` no topo, a OpenAI manda
+        `prompt_tokens_details.cached_tokens`. Nenhum é obrigatório, e
+        quem não manda nada deixa o campo em `None`, o que faz o custo
+        cair no caminho sem cache.
+
+        `prompt_cache_miss_tokens` NÃO é lido: ele é derivável
+        (`prompt_tokens - hit`), e guardar os dois convida à
+        incoerência. O teste cobra a invariante contra o payload real.
+        """
+        if not raw:
+            return None
+        hit = raw.get("prompt_cache_hit_tokens")
+        if hit is None:
+            detalhes = raw.get("prompt_tokens_details") or {}
+            hit = detalhes.get("cached_tokens")
+        return Usage(
+            prompt_tokens=raw.get("prompt_tokens", 0),
+            completion_tokens=raw.get("completion_tokens", 0),
+            cached_prompt_tokens=hit,
         )
 
     # -----------------------------------------------------------
@@ -273,6 +296,11 @@ class OpenAICompatibleProvider(LLMProvider):
         if encoded_tools and self.capabilities.supports_tools:
             payload["tools"] = encoded_tools
 
+        # Fora do laço, e preservado entre chunks: o `usage` chega num
+        # chunk só (o último, por `include_usage`), e o `finish_reason`
+        # pode vir em outro. Zerar a cada iteração perderia um dos dois.
+        usage: Usage | None = None
+
         try:
             async with self._client.stream(
                 "POST", "/chat/completions", json=payload
@@ -294,15 +322,7 @@ class OpenAICompatibleProvider(LLMProvider):
                         log.warning("chunk SSE inválido ignorado")
                         continue
 
-                    usage_raw = event.get("usage")
-                    usage = (
-                        Usage(
-                            prompt_tokens=usage_raw.get("prompt_tokens", 0),
-                            completion_tokens=usage_raw.get("completion_tokens", 0),
-                        )
-                        if usage_raw
-                        else None
-                    )
+                    usage = self._parse_usage(event.get("usage")) or usage
 
                     choices = event.get("choices") or []
                     if not choices:

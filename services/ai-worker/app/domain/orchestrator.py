@@ -22,6 +22,7 @@ import json
 import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 
 from app.domain.history import normalize_for
 from app.ports.llm import (
@@ -83,6 +84,10 @@ class TurnResult:
     tool_calls_made: int
     cancelled: bool = False
     messages_appended: list[Message] = field(default_factory=list)
+    # Soma dos custos de CADA chamada, não o custo do total. Ver o
+    # comentário no laço: um turno longo atravessa faixa de preço.
+    # `None` quando o modelo não tem preço conhecido.
+    cost_usd: float | None = None
 
 
 class TurnCancelled(Exception):
@@ -102,8 +107,14 @@ async def run_conversation_turn(
     max_iterations: int = 8,
     summary: str | None = None,
     temperature: float = 0.3,
+    now: Callable[[], datetime] = lambda: datetime.now(UTC),
 ) -> TurnResult:
-    """Roda um turno completo até o modelo parar de pedir ferramenta."""
+    """Roda um turno completo até o modelo parar de pedir ferramenta.
+
+    `now` é injetável porque o custo de cada chamada depende do instante
+    dela (provedor com horário de pico). Sem poder controlar o relógio,
+    o teste da travessia de faixa seria impossível de escrever.
+    """
     caps = provider.capabilities
 
     # Histórico canônico -> formato que ESTE provedor aceita (§3.1.3).
@@ -116,6 +127,7 @@ async def run_conversation_turn(
     accumulated_text: list[str] = []
     appended: list[Message] = []
     total_usage = Usage(prompt_tokens=0, completion_tokens=0)
+    custo_total: float | None = None
     tool_calls_made = 0
     malformed_retries = 0
     iteration = 0
@@ -164,7 +176,26 @@ async def run_conversation_turn(
                         + chunk.usage.prompt_tokens,
                         completion_tokens=total_usage.completion_tokens
                         + chunk.usage.completion_tokens,
+                        # Somado para que o custo possa ser auditado
+                        # contra os tokens que o geraram.
+                        cached_prompt_tokens=_somar_opcional(
+                            total_usage.cached_prompt_tokens,
+                            chunk.usage.cached_prompt_tokens,
+                        ),
                     )
+                    # O custo é somado AQUI, por chamada, e não uma vez
+                    # no fim sobre o total.
+                    #
+                    # Não é refinamento: um turno com 8 iterações de
+                    # ferramenta dura minutos e pode ATRAVESSAR a
+                    # fronteira do horário de pico do provedor (no
+                    # DeepSeek, 01:00-04:00 e 06:00-10:00 UTC). Somar os
+                    # tokens e multiplicar por um preço só atribuiria o
+                    # preço de um instante a chamadas feitas em outro, e
+                    # no pior caso dobraria metade do turno.
+                    parcela = caps.estimate_cost_usd(chunk.usage, at=now())
+                    if parcela is not None:
+                        custo_total = (custo_total or 0.0) + parcela
 
                 if chunk.finish_reason:
                     chunk_finish = chunk.finish_reason
@@ -228,9 +259,7 @@ async def run_conversation_turn(
                 ok, summary_text = False, str(exc)[:120]
 
             await emit_tool_end(call.name, ok, summary_text)
-            tool_msg = Message(
-                role="tool", content=output, tool_call_id=call.id
-            )
+            tool_msg = Message(role="tool", content=output, tool_call_id=call.id)
             working.append(tool_msg)
             appended.append(tool_msg)
 
@@ -253,7 +282,20 @@ async def run_conversation_turn(
         iterations=iteration,
         tool_calls_made=tool_calls_made,
         messages_appended=appended,
+        cost_usd=custo_total,
     )
+
+
+def _somar_opcional(a: int | None, b: int | None) -> int | None:
+    """Soma preservando a diferença entre "não informado" e zero.
+
+    `(a or 0) + (b or 0)` devolveria `0` quando ninguém informou, o que
+    afirmaria "nenhum token veio de cache" em vez de "não sei". Se um
+    lado informou, o outro conta como zero — aí o total é um fato.
+    """
+    if a is None and b is None:
+        return None
+    return (a or 0) + (b or 0)
 
 
 # ---------------------------------------------------------------

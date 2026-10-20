@@ -16,6 +16,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Literal
 
 
@@ -57,8 +58,36 @@ class Message:
 
 @dataclass(frozen=True)
 class Usage:
+    """Tokens de UMA chamada ao provedor.
+
+    `cached_prompt_tokens` é a parte de `prompt_tokens` que veio de
+    cache — SUBCONJUNTO, não adicional. O DeepSeek devolve
+    `prompt_cache_hit_tokens` e `prompt_cache_miss_tokens`, e a soma dos
+    dois é `prompt_tokens`; tratar o hit como extra contaria o prompt
+    duas vezes.
+
+    `None` é "o provedor não informou", e é diferente de `0`
+    ("informou que nada veio de cache"). A distinção não é teórica: com
+    prompt grande e estável, `0` sustentado é sinal de que o cache não
+    está pegando, e um default zero apagaria esse sinal.
+
+    Os campos novos vêm DEPOIS dos dois originais e com default porque
+    o teste de contrato constrói `Usage(1_000_000, 1_000_000)`
+    posicionalmente.
+    """
+
     prompt_tokens: int
     completion_tokens: int
+    cached_prompt_tokens: int | None = None
+
+    @property
+    def uncached_prompt_tokens(self) -> int:
+        """A parte do prompt cobrada como cache miss."""
+        if self.cached_prompt_tokens is None:
+            return self.prompt_tokens
+        # `max(0, ...)` porque provedor pode reportar incoerente, e
+        # custo negativo é pior que custo superestimado.
+        return max(0, self.prompt_tokens - self.cached_prompt_tokens)
 
 
 @dataclass(frozen=True)
@@ -85,6 +114,66 @@ class Chunk:
 
 
 # ---------------------------------------------------------------
+# Preço
+# ---------------------------------------------------------------
+@dataclass(frozen=True)
+class Price:
+    """Preço por 1M de tokens de um regime de cobrança.
+
+    Três faixas porque é assim que se cobra quando há cache: o token de
+    prompt servido de cache custa uma fração do mesmo token lido do
+    zero. No DeepSeek a razão medida é 50x (0,003 contra 0,15 por
+    milhão), e ignorá-la superestima o custo de um prompt grande e
+    estável — que é exatamente a forma do prompt do Age.
+    """
+
+    input_cache_miss_per_1m: float
+    output_per_1m: float
+    # `None` = o provedor não cobra cache à parte, e o hit sai no preço
+    # do miss. É o caso da OpenAI nesta tabela e do mock.
+    input_cache_hit_per_1m: float | None = None
+
+    def cost_usd(self, usage: Usage) -> float:
+        hit = usage.cached_prompt_tokens or 0
+        hit_rate = (
+            self.input_cache_hit_per_1m
+            if self.input_cache_hit_per_1m is not None
+            else self.input_cache_miss_per_1m
+        )
+        return (
+            usage.uncached_prompt_tokens / 1_000_000 * self.input_cache_miss_per_1m
+            + hit / 1_000_000 * hit_rate
+            + usage.completion_tokens / 1_000_000 * self.output_per_1m
+        )
+
+
+class Pricing(ABC):
+    """Como um provedor precifica.
+
+    O instante entra na pergunta porque há provedor cujo preço depende
+    da hora. Quem consulta passa `when` e recebe um `Price`; nenhum
+    chamador sabe se a resposta varia ou não.
+    """
+
+    @abstractmethod
+    def price_at(self, when: datetime) -> Price: ...
+
+
+@dataclass(frozen=True)
+class FlatPricing(Pricing):
+    """Preço único, sem variação por horário. O caso comum.
+
+    Vive aqui, e não num adaptador, porque "não varia" não é
+    característica de provedor nenhum em particular.
+    """
+
+    price: Price
+
+    def price_at(self, when: datetime) -> Price:
+        return self.price
+
+
+# ---------------------------------------------------------------
 # Capacidades
 # ---------------------------------------------------------------
 @dataclass(frozen=True)
@@ -104,17 +193,37 @@ class ModelCapabilities:
     context_window: int
     max_output_tokens: int
     max_tools: int | None = None
+    # O TETO: preço da faixa mais cara, sem desconto de cache. Continua
+    # aqui porque é o que a cota usa para errar para cima de propósito,
+    # e o que o teste de contrato lê para saber se o modelo tem preço.
     cost_per_1m_input: float | None = None
     cost_per_1m_output: float | None = None
+    # Tabela completa. `None` mantém o comportamento antigo (preço único
+    # a partir dos dois campos acima), que é o que vale para mock,
+    # modelo local e qualquer adaptador ainda não convertido.
+    pricing: Pricing | None = None
 
-    def estimate_cost_usd(self, usage: Usage) -> float | None:
-        """Custo estimado. None quando o modelo é local ou desconhecido."""
+    def estimate_cost_usd(
+        self, usage: Usage, *, at: datetime | None = None
+    ) -> float | None:
+        """Custo estimado de UMA chamada.
+
+        `at` é o instante da chamada, porque há provedor cujo preço
+        depende da hora. Omitir usa o agora, o que é correto para quem
+        calcula durante a própria chamada — e é o que mantém a
+        assinatura de um argumento funcionando.
+
+        `None` quando o modelo é local ou de preço desconhecido. Nunca
+        `0.0`: zero afirmaria gratuidade.
+        """
+        if self.pricing is not None:
+            return self.pricing.price_at(at or datetime.now(UTC)).cost_usd(usage)
         if self.cost_per_1m_input is None or self.cost_per_1m_output is None:
             return None
-        return (
-            usage.prompt_tokens / 1_000_000 * self.cost_per_1m_input
-            + usage.completion_tokens / 1_000_000 * self.cost_per_1m_output
-        )
+        return Price(
+            input_cache_miss_per_1m=self.cost_per_1m_input,
+            output_per_1m=self.cost_per_1m_output,
+        ).cost_usd(usage)
 
 
 # ---------------------------------------------------------------

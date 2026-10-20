@@ -97,13 +97,18 @@ async def title_conversation(ctx: dict, payload: dict) -> dict:
     # Credencial do usuário se houver; senão a da instância (§3451), que
     # é o que faz o título gerado valer para quem nunca colou chave.
     #
-    # **Sem checar cota, de propósito**, e por duas razões. Primeira: o
+    # **Sem descontar da cota, de propósito**, e por duas razões. A
+    # primeira: o
     # usuário não pediu este turno — ele é efeito colateral de mandar a
     # primeira mensagem, e cobrar cota por algo que a pessoa não escolheu
     # seria gastar o limite dela sem aviso. Segunda: é barato e limitado
-    # a `max_tokens=16`, uma vez por conversa. O gasto segue registrado
-    # em `turn_usage`, então aparece no relatório de custo mesmo não
-    # descontando da cota.
+    # a `max_tokens=16`, uma vez por conversa.
+    #
+    # O gasto É registrado em `ai.turn_usage`, com `turn_id` nulo (não
+    # existe turno aqui), e por isso aparece no relatório de custo sem
+    # descontar da cota. Até out/2026 este comentário afirmava esse
+    # registro sem que ele existisse: o `completion.usage` era
+    # descartado e o custo do título era invisível.
     escolhida = None
     if cred is not None:
         provider_key, blob, model, base_url = cred
@@ -126,6 +131,8 @@ async def title_conversation(ctx: dict, payload: dict) -> dict:
             settings.instance_llm_base_url.strip() or None,
         )
 
+    gasto: tuple[str, str, int, int, int | None, float | None] | None = None
+
     if escolhida is not None:
         provider_key, api_key, model, base_url = escolhida
         try:
@@ -137,6 +144,18 @@ async def title_conversation(ctx: dict, payload: dict) -> dict:
                     [Message(role="user", content=build_title_prompt(first_message))],
                     temperature=0.0,
                     max_tokens=16,
+                )
+                # O gasto é capturado ANTES de qualquer tratamento do
+                # texto: a chamada já foi cobrada, e o título ter saído
+                # bom ou ruim não muda a fatura.
+                caps = provider.capabilities
+                gasto = (
+                    provider_key,
+                    model or "?",
+                    completion.usage.prompt_tokens,
+                    completion.usage.completion_tokens,
+                    completion.usage.cached_prompt_tokens,
+                    caps.estimate_cost_usd(completion.usage),
                 )
                 generated = (completion.message.content or "").strip().strip('"')
                 # Primeira linha só: modelo às vezes devolve explicação
@@ -176,6 +195,36 @@ async def title_conversation(ctx: dict, payload: dict) -> dict:
                 "source": source,
             },
         )
+
+        if gasto is not None:
+            pk, mdl, pt, ct, cached, custo = gasto
+            # `turn_id` nulo: este gasto não vem de um turno de conversa
+            # (ver migration 0006). `used_instance_key` fica `false`
+            # porque a cota não é descontada — se fosse `true`, a soma
+            # da cota passaria a incluir o que ela de propósito não
+            # cobra, e o usuário veria o limite andar sozinho.
+            await db.execute(
+                text(
+                    """
+                    INSERT INTO ai.turn_usage
+                      (turn_id, user_id, provider_key, model,
+                       prompt_tokens, completion_tokens,
+                       cached_prompt_tokens, estimated_cost_usd,
+                       used_instance_key)
+                    VALUES (NULL, :uid, :pk, :model, :pt, :ct,
+                            :cached, :cost, false)
+                    """
+                ),
+                {
+                    "uid": str(user_id),
+                    "pk": pk,
+                    "model": mdl,
+                    "pt": pt,
+                    "ct": ct,
+                    "cached": cached,
+                    "cost": custo,
+                },
+            )
 
     return {"status": "done", "title": title, "source": source}
 
