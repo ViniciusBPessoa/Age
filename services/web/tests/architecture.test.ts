@@ -65,6 +65,74 @@ describe("§2.4 — a lib de calendário fica encapsulada", () => {
   });
 });
 
+describe("valor em dinheiro tem uma porta só", () => {
+  /*
+   * O custo em dólar precisa ser fácil de esconder depois — "fácil"
+   * significando mudar um valor, não caçar JSX. Isso só continua
+   * verdade enquanto ninguém escrever "US$" solto por aí, e é o tipo de
+   * invariante que vale no dia do commit e se perde na terceira
+   * feature.
+   *
+   * Mesma mecânica do `react-big-calendar` acima: uma allowlist curta,
+   * e o teste explica o caminho certo quando falha.
+   */
+  const PERMITIDOS = [
+    join("lib", "usar-custo.ts"),
+    join("components", "chat", "custo-da-mensagem.tsx"),
+    join("components", "report", "usage-panel.tsx"),
+    join("components", "settings", "settings-screen.tsx"),
+    join("components", "onboarding-flow.tsx"),
+  ];
+
+  // Declarar o campo não é mostrá-lo: `types.ts` e `sse.ts` descrevem o
+  // formato que vem da API, e é justamente ali que ele PRECISA existir
+  // para o resto do código ser tipado.
+  const SO_DECLARAM = [join("lib", "types.ts"), join("lib", "sse.ts")];
+
+  it("só os componentes de custo falam em dólar", () => {
+    const offenders = FILES.filter((file) => {
+      const rel = relative(WEB_ROOT, file);
+      if (PERMITIDOS.some((p) => rel === p)) return false;
+      if (SO_DECLARAM.some((p) => rel === p)) return false;
+      if (rel.startsWith("tests")) return false;
+      const source = readFileSync(file, "utf8");
+      // `US$` literal ou leitura do campo de custo da API.
+      return /US\$|estimated_cost_usd|\bcost_usd\b/.test(source);
+    }).map((file) => relative(WEB_ROOT, file));
+
+    expect(
+      offenders,
+      "valor em dinheiro passa por `useMostrarCusto()` e `formatUsd()` " +
+        "(lib/usar-custo.ts). Escrever US$ direto no JSX faz o custo " +
+        "aparecer para quem o operador decidiu esconder.",
+    ).toEqual([]);
+  });
+
+  it("quem mostra dinheiro consulta o hook", () => {
+    /*
+     * A outra metade: um arquivo da allowlist que formate dólar e NÃO
+     * pergunte se pode mostrá-lo passaria no teste de cima e furaria a
+     * regra do mesmo jeito.
+     */
+    const semGuarda = PERMITIDOS.filter((rel) => {
+      const file = FILES.find((f) => relative(WEB_ROOT, f) === rel);
+      if (!file) return false;
+      const source = readFileSync(file, "utf8");
+      // Quem escreve um valor em dólar na tela — por `formatUsd` ou
+      // escrevendo "US$" direto — tem de perguntar antes.
+      const mostra = /formatUsd\s*\(/.test(source) || /US\$/.test(source);
+      if (!mostra) return false;
+      return !/useMostrarCusto/.test(source);
+    });
+
+    expect(
+      semGuarda,
+      "formatar dólar sem consultar `useMostrarCusto()` mostra o valor " +
+        "mesmo com a exibição desligada.",
+    ).toEqual([]);
+  });
+});
+
 describe("§2.4.1 — o BFF só repassa", () => {
   const bffFiles = FILES.filter((file) =>
     relative(WEB_ROOT, file).startsWith(join("app", "api")),

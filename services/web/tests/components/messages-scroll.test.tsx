@@ -27,6 +27,7 @@
  * roda em 200ms em vez de exigir Playwright.
  */
 
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
@@ -47,6 +48,10 @@ function mensagem(i: number, role: "user" | "assistant"): Message {
     content: `Mensagem ${i}. ${"palavra ".repeat(80)}`,
     provider_key: role === "assistant" ? "deepseek" : null,
     model: role === "assistant" ? "deepseek-flash" : null,
+    // O custo é do par e fica na resposta; a pergunta vem sem.
+    prompt_tokens: role === "assistant" ? 1200 : null,
+    completion_tokens: role === "assistant" ? 180 : null,
+    estimated_cost_usd: role === "assistant" ? 0.000354 : null,
     created_at: new Date().toISOString(),
   };
 }
@@ -55,14 +60,23 @@ function montar(quantas: number) {
   const messages = Array.from({ length: quantas }, (_, i) =>
     mensagem(i, i % 2 === 0 ? "user" : "assistant"),
   );
+  // `MessageList` passou a renderizar o custo sob cada resposta, e esse
+  // componente consulta as preferências por `useQuery`. Sem provedor,
+  // o React Query lança — e a mensagem ("No QueryClient set") não
+  // parece ter a ver com rolagem, que é o assunto deste arquivo.
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
   return render(
-    <MessageList
-      messages={messages}
-      streaming={false}
-      streamingText=""
-      traces={[]}
-      timezone={TZ}
-    />,
+    <QueryClientProvider client={client}>
+      <MessageList
+        messages={messages}
+        streaming={false}
+        streamingText=""
+        traces={[]}
+        timezone={TZ}
+      />
+    </QueryClientProvider>,
   );
 }
 

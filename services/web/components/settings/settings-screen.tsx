@@ -41,6 +41,7 @@ import {
 import { RequestFailed, api, auth } from "@/lib/api-client";
 import { moment } from "@/lib/format";
 import { presentationFor } from "@/lib/providers";
+import { useMostrarCusto } from "@/lib/usar-custo";
 import type {
   AutonomyLevel,
   CalendarRef,
@@ -211,6 +212,10 @@ function CredentialsSection() {
     queryFn: () => api.get<KeySource>("/llm/key-source"),
   });
 
+  // A porta única do dinheiro (§12): a barra de cota mostra valor em
+  // dólar, então passa pela mesma chave que o resto.
+  const mostrarCusto = useMostrarCusto();
+
   function refresh() {
     void queryClient.invalidateQueries({ queryKey: ["credentials"] });
     // A origem da chave MUDA quando uma credencial é criada ou apagada —
@@ -274,8 +279,15 @@ function CredentialsSection() {
               Você está usando o modelo fornecido pelo Age
               {keySource.data.model ? ` (${keySource.data.model})` : ""}, sem precisar
               de chave própria.
+              {/* Sem esta frase a tela se contradiz: "não precisa de
+                  chave" com uma chave listada logo abaixo. Ela só
+                  aparece quando há chave desativada, porque é só aí que
+                  a aparente contradição existe. */}
+              {credentials.data?.some((c) => !c.is_active)
+                ? " A chave que você cadastrou está desativada — por isso não está sendo usada."
+                : ""}
             </p>
-            {keySource.data.limit_usd ? (
+            {keySource.data.limit_usd && mostrarCusto ? (
               <>
                 {/* Barra de progresso com `<progress>` nativo: leitor de
                     tela anuncia o valor sozinho, e o rótulo em texto
@@ -319,7 +331,19 @@ function CredentialsSection() {
                 <span className="text-xs text-[var(--muted)]">
                   ••••{credential.key_last4}
                 </span>
-                {credential.last_error ? (
+                {/* `is_active` vem na API desde sempre e era ignorado
+                    aqui, o que produzia uma tela que se contradiz: o
+                    painel acima diz "sem precisar de chave própria" e
+                    logo abaixo aparece uma chave, sem nada explicando
+                    que ela está desligada. Medido na conta do usuário:
+                    `is_active = false`, e nenhum sinal na tela.
+
+                    Vem antes dos outros selos porque "desativada"
+                    explica por que a chave existe e não está em uso —
+                    e "não verificada" numa chave desligada é ruído. */}
+                {!credential.is_active ? (
+                  <Badge tone="neutral">desativada</Badge>
+                ) : credential.last_error ? (
                   <Badge tone="danger">falhou</Badge>
                 ) : credential.last_verified_at ? (
                   <Badge tone="ok">verificada</Badge>

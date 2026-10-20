@@ -16,6 +16,7 @@ from sqlalchemy import select, update
 
 from app.core.deps import CurrentUser, DbSession
 from app.models import UserPreferences
+from app.services.exibicao_de_custo import mostrar_custo
 
 router = APIRouter(prefix="/preferences", tags=["preferences"])
 
@@ -36,6 +37,10 @@ class PreferencesOut(BaseModel):
     spaced_repetition_enabled: bool
     default_target: str
     private_mode: bool
+    # Já com o teto da instância aplicado: o front lê isto como "mostro
+    # dinheiro?" e não precisa conhecer as duas camadas. Por isso NÃO
+    # vem do `model_validate` direto — ver `get_preferences`.
+    show_cost_usd: bool
 
 
 class PreferencesIn(BaseModel):
@@ -51,6 +56,7 @@ class PreferencesIn(BaseModel):
     spaced_repetition_enabled: bool | None = None
     default_target: Literal["event", "task", "both", "ask"] | None = None
     private_mode: bool | None = None
+    show_cost_usd: bool | None = None
 
 
 async def _load(db: DbSession, user: CurrentUser) -> UserPreferences:
@@ -69,10 +75,26 @@ async def _load(db: DbSession, user: CurrentUser) -> UserPreferences:
     return row
 
 
+async def _saida(db: DbSession, user: CurrentUser, row: UserPreferences):
+    """Monta a resposta com o teto da instância já aplicado.
+
+    `show_cost_usd` sai daqui como a resposta FINAL de "mostro
+    dinheiro?", e não como o valor cru da coluna: com
+    `cost_display_enabled` desligado, uma conta com a preferência
+    ligada veria `true` e o front mostraria o custo que o operador
+    acabou de esconder.
+
+    Quem decide é `mostrar_custo`, a mesma função que a rota de uso
+    chama — uma pergunta, uma resposta, um lugar.
+    """
+    out = PreferencesOut.model_validate(row, from_attributes=True)
+    return out.model_copy(update={"show_cost_usd": await mostrar_custo(db, user.id)})
+
+
 @router.get("")
 async def get_preferences(user: CurrentUser, db: DbSession) -> PreferencesOut:
     row = await _load(db, user)
-    return PreferencesOut.model_validate(row, from_attributes=True)
+    return await _saida(db, user, row)
 
 
 @router.put("")
@@ -89,4 +111,4 @@ async def update_preferences(
             .values(**values)
         )
     row = await _load(db, user)
-    return PreferencesOut.model_validate(row, from_attributes=True)
+    return await _saida(db, user, row)

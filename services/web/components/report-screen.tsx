@@ -34,6 +34,7 @@ import {
   Select,
   SkeletonList,
 } from "@/components/ui";
+import { UsagePanel } from "@/components/report/usage-panel";
 import { api } from "@/lib/api-client";
 import { dateOf, duration, percent } from "@/lib/format";
 import type { PeriodReport } from "@/lib/types";
@@ -210,6 +211,11 @@ export function ReportScreen({ timezone }: { timezone: string }) {
                 </ul>
               </section>
             ) : null}
+
+            {/* Consumo do assistente. Período próprio, porque "como foi
+                minha semana de estudo?" e "quanto o Age consumiu?" não
+                precisam da mesma janela. */}
+            <UsagePanel />
           </>
         ) : null}
       </div>

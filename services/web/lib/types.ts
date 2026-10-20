@@ -316,7 +316,52 @@ export interface Message {
   content: string | null;
   provider_key: string | null;
   model: string | null;
+  /** Do PAR (pergunta + resposta), guardado na resposta: o provedor
+   * cobra o prompt inteiro, que já inclui a pergunta. `null` na
+   * mensagem do usuário e no histórico anterior à migration 0012. */
+  prompt_tokens: number | null;
+  completion_tokens: number | null;
+  estimated_cost_usd: number | null;
   created_at: string;
+}
+
+// ---------------------------------------------------------------
+// Uso e custo (§12)
+// ---------------------------------------------------------------
+export interface UsageBucket {
+  /** "2026-10-20", já no fuso da conta. */
+  day: string;
+  prompt_tokens: number;
+  completion_tokens: number;
+  cached_prompt_tokens: number | null;
+  /** `null` = custo desconhecido, que é diferente de zero. */
+  estimated_cost_usd: number | null;
+}
+
+export interface UsageByModel {
+  provider_key: string;
+  model: string;
+  prompt_tokens: number;
+  completion_tokens: number;
+  cached_prompt_tokens: number | null;
+  estimated_cost_usd: number | null;
+  turns: number;
+}
+
+export interface UsageSummary {
+  period_start: string;
+  period_end: string;
+  bucket: "day" | "week" | "month";
+  timezone: string;
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  cached_prompt_tokens: number | null;
+  estimated_cost_usd: number | null;
+  turns: number;
+  show_cost: boolean;
+  buckets: UsageBucket[];
+  by_model: UsageByModel[];
 }
 
 export interface TurnAccepted {
@@ -450,6 +495,9 @@ export interface Preferences {
   spaced_repetition_enabled: boolean;
   default_target: Target;
   private_mode: boolean;
+  /** Já com o teto da instância aplicado pelo servidor: é a resposta
+   * final de "mostro dinheiro?", não o valor cru da coluna. */
+  show_cost_usd: boolean;
 }
 
 // ---------------------------------------------------------------

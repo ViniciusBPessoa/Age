@@ -42,6 +42,7 @@ import {
 } from "@/components/ui";
 import { RequestFailed, api } from "@/lib/api-client";
 import { brl } from "@/lib/format";
+import { formatUsd, useMostrarCusto } from "@/lib/usar-custo";
 import {
   HIDDEN_IN_ONBOARDING,
   HIGHLIGHT_LABEL,
@@ -223,6 +224,10 @@ function StepModel({
   // §14 classificou como alto.
   const casaPaga = keySource?.source === "instance";
 
+  // A porta única do dinheiro (§12): o teto em dólar só vai à tela se a
+  // exibição de custo estiver ligada.
+  const mostrarCusto = useMostrarCusto();
+
   async function saveAndVerify() {
     setError(null);
     setBusy(true);
@@ -303,8 +308,12 @@ function StepModel({
         <div className="mt-5 rounded-xl bg-brand/[0.07] px-4 py-4 ring-1 ring-inset ring-brand/20">
           <p className="text-sm leading-relaxed">
             <strong>Uso incluído</strong>
-            {keySource?.limit_usd
-              ? ` — até US$ ${keySource.limit_usd.toFixed(2)} por mês, por conta da casa.`
+            {/* O teto em dinheiro só aparece se a exibição de custo
+                estiver ligada: com ela desligada, "por conta da casa"
+                já diz o que a pessoa precisa saber para começar, e o
+                valor é a parte que o operador pode querer esconder. */}
+            {keySource?.limit_usd && mostrarCusto
+              ? ` — até ${formatUsd(keySource.limit_usd)} por mês, por conta da casa.`
               : ", por conta da casa."}
           </p>
           <Button variant="primary" className="mt-3.5" onClick={onDone}>

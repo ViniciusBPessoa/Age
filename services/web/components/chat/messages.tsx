@@ -33,6 +33,7 @@ import {
   Spinner,
   cx,
 } from "@/components/ui";
+import { CustoDaMensagem } from "@/components/chat/custo-da-mensagem";
 import { RichText } from "@/components/chat/rich-text";
 import { timeOf } from "@/lib/format";
 import type { Message } from "@/lib/types";
@@ -120,6 +121,9 @@ export function MessageList({
               text={message.content ?? ""}
               at={timeOf(message.created_at, timezone)}
             />
+            {message.role === "assistant" ? (
+              <CustoDaMensagem message={message} />
+            ) : null}
           </li>
         ))}
 
