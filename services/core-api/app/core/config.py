@@ -70,6 +70,15 @@ class Settings(BaseSettings):
     # Mais baixo, e por usuário: cada chamada aqui gasta token de uma
     # chave de API de verdade (§2219).
     rate_limit_llm_per_user: str = "30/60"
+
+    # Teto da instância para valores em dinheiro. `false` esconde o
+    # custo de TODA conta, inclusive das que têm `show_cost_usd`
+    # ligado — é a chave que o operador vira quando decide que custo em
+    # dólar não é assunto do usuário final.
+    #
+    # Contagem de token continua visível: o que some é a tradução para
+    # dinheiro, que é a parte que revela a margem de quem opera.
+    cost_display_enabled: bool = True
     rate_limit_llm_verify_per_user: str = "10/300"
 
     # --- Cota do modo de chave de instância (§3451) ---

@@ -27,6 +27,7 @@ from app.api import (
     routines,
     study,
     tasks,
+    usage,
 )
 from app.core import tracing
 from app.core.config import get_settings
@@ -88,6 +89,7 @@ v1.include_router(study.router)
 v1.include_router(tasks.router)
 v1.include_router(routines.router)
 v1.include_router(routines.reports)
+v1.include_router(usage.router)
 v1.include_router(routines.changes)
 v1.include_router(privacy.router)
 v1.include_router(conversations.router)

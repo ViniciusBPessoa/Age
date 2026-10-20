@@ -91,6 +91,13 @@ class MessageOut(BaseModel):
     content: str | None
     provider_key: str | None
     model: str | None
+    # Os tokens já estavam no banco desde o M1 e eram descartados aqui
+    # na serialização. O custo é do PAR (pergunta + resposta) e fica na
+    # resposta, porque o provedor cobra o prompt inteiro — que já inclui
+    # a pergunta. Mensagem do usuário vem com os três em `null`.
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
+    estimated_cost_usd: float | None = None
     created_at: datetime
 
 
