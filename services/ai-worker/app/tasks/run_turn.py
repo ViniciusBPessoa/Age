@@ -373,6 +373,8 @@ async def run_turn(ctx: dict, payload: dict) -> dict:
                 completion_tokens=result.usage.completion_tokens,
                 model=model or "?",
                 provider_key=provider_key,
+                cost_usd=cost,
+                cached_prompt_tokens=result.usage.cached_prompt_tokens,
             )
         )
         if not staging.is_empty:

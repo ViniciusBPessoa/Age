@@ -27,6 +27,10 @@ export type StreamEvent =
       completion_tokens: number;
       model: string;
       provider_key: string;
+      // `null` quando o modelo nao tem preco conhecido. Nunca 0 --
+      // zero afirmaria que a resposta foi de graca.
+      cost_usd: number | null;
+      cached_prompt_tokens: number | null;
     }
   | { type: "done"; message_id: string; status: string }
   | { type: "error"; code: string; message: string; retryable: boolean };

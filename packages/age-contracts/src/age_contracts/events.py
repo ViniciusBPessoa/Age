@@ -58,11 +58,26 @@ class PlanEvent(_BaseEvent):
 
 
 class UsageEvent(_BaseEvent):
+    """Quanto o turno consumiu, ao fim da geração.
+
+    Publicado DEPOIS da persistência e ANTES do `done`, então quando ele
+    chega o custo já está em `ai.turn_usage` — o número que o front
+    mostra ao vivo e o que uma releitura de `/messages` devolve são o
+    mesmo.
+
+    `cost_usd` é `None` quando o modelo não tem preço conhecido (local,
+    ou provedor sem tabela). Nunca `0.0`: zero afirmaria gratuidade. O
+    default existe para que um worker novo publicando para um core-api
+    antigo, e vice-versa, não quebre no parse.
+    """
+
     type: Literal["usage"] = "usage"
     prompt_tokens: int
     completion_tokens: int
     model: str
     provider_key: str
+    cost_usd: float | None = None
+    cached_prompt_tokens: int | None = None
 
 
 class DoneEvent(_BaseEvent):
