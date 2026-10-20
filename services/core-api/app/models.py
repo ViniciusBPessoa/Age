@@ -182,6 +182,10 @@ class Message(Base):
     tool_call_id: Mapped[str | None] = mapped_column(Text)
     prompt_tokens: Mapped[int | None] = mapped_column(Integer)
     completion_tokens: Mapped[int | None] = mapped_column(Integer)
+    # O custo do PAR (pergunta + resposta), guardado na resposta: o
+    # provedor cobra o prompt inteiro, que já inclui a pergunta, então
+    # é na resposta que a cobrança acontece. `None` = desconhecido.
+    estimated_cost_usd: Mapped[float | None] = mapped_column(Numeric(12, 6))
     provider_key: Mapped[str | None] = mapped_column(Text)
     model: Mapped[str | None] = mapped_column(Text)
     latency_ms: Mapped[int | None] = mapped_column(Integer)
@@ -214,6 +218,10 @@ class UserPreferences(Base):
     default_write_calendar_id: Mapped[str | None] = mapped_column(Text)
     default_target: Mapped[str] = mapped_column(Text, default="event")
     private_mode: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Se valores em dinheiro aparecem para esta conta. O teto é do
+    # operador (`cost_display_enabled`): a preferência só desliga o que
+    # ele deixou ligado.
+    show_cost_usd: Mapped[bool] = mapped_column(Boolean, default=True)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -227,6 +235,9 @@ class UsageLog(Base):
     user_id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True), ForeignKey("core.users.id", ondelete="CASCADE")
     )
+    # A chave natural do dreno, com unique parcial no banco. `None` nas
+    # linhas anteriores à migration 0012 e no uso que não vem de turno.
+    turn_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
     provider_key: Mapped[str] = mapped_column(Text, nullable=False)
     model: Mapped[str] = mapped_column(Text, nullable=False)
     prompt_tokens: Mapped[int] = mapped_column(Integer, nullable=False)
