@@ -660,6 +660,31 @@ function SchedulingSection() {
           Revisão espaçada nos planos de estudo
         </label>
 
+        {/* A chave do custo fica aqui, e o painel que ela controla fica
+            no Relatório: Configurações é onde se ajusta, Relatório é
+            onde se olha número.
+
+            Só aparece quando a instância permite. Com
+            `cost_display_enabled` desligado, oferecer o controle seria
+            mentir — a pessoa marcaria a caixa e nada apareceria. */}
+        {current.show_cost_usd !== undefined ? (
+          <label className="flex items-start gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={current.show_cost_usd}
+              onChange={(e) => save.mutate({ show_cost_usd: e.target.checked })}
+              className="mt-0.5 h-4 w-4 cursor-pointer accent-brand"
+            />
+            <span>
+              Mostrar custo em dinheiro
+              <span className="mt-0.5 block text-xs text-[var(--muted)]">
+                Desligado, o Relatório e o chat continuam mostrando o consumo em tokens
+                — só o valor em dólar some.
+              </span>
+            </span>
+          </label>
+        ) : null}
+
         <label className="flex items-start gap-2 text-sm">
           <input
             type="checkbox"
