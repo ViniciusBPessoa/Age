@@ -59,7 +59,8 @@ async def drain_turn_outputs(
                 SELECT o.id, o.conversation_id, o.role, o.content,
                        o.tool_calls, o.tool_call_id, o.provider_key,
                        o.model, o.latency_ms, o.created_at,
-                       u.prompt_tokens, u.completion_tokens
+                       u.prompt_tokens, u.completion_tokens,
+                       u.estimated_cost_usd
                 FROM ai.turn_outputs o
                 LEFT JOIN ai.turn_usage u ON u.turn_id = o.turn_id
                 WHERE o.user_id = :uid AND o.consumed = false {scope_aliased}
@@ -69,10 +70,12 @@ async def drain_turn_outputs(
                 INSERT INTO core.messages
                   (user_id, conversation_id, role, content, tool_calls,
                    tool_call_id, prompt_tokens, completion_tokens,
-                   provider_key, model, latency_ms, created_at)
+                   estimated_cost_usd, provider_key, model, latency_ms,
+                   created_at)
                 SELECT :uid, p.conversation_id, p.role, p.content,
                        p.tool_calls, p.tool_call_id, p.prompt_tokens,
-                       p.completion_tokens, p.provider_key, p.model,
+                       p.completion_tokens, p.estimated_cost_usd,
+                       p.provider_key, p.model,
                        p.latency_ms, p.created_at
                 FROM pending p
                 RETURNING conversation_id
@@ -86,6 +89,12 @@ async def drain_turn_outputs(
     row = result.first()
     copied = row[0] if row else 0
     touched = (row[1] if row else None) or []
+
+    # Antes do early-return, de propósito: a trilha de uso não depende
+    # de haver mensagem nova para copiar. Quando este INSERT vivia lá
+    # embaixo, um turno cuja mensagem já tinha sido drenada mas cujo uso
+    # não ficava sem registro para sempre.
+    await _copiar_uso(db, user_id)
 
     if not copied:
         return 0
@@ -125,30 +134,48 @@ async def drain_turn_outputs(
         {"ids": [str(c) for c in touched]},
     )
 
-    # Copia o uso para `core.usage_log`, que é o que a tela de custo lê.
+    log.debug("drenadas %d mensagens para user=%s", copied, user_id)
+    return copied
+
+
+async def _copiar_uso(db: AsyncSession, user_id: UUID) -> None:
+    """Copia `ai.turn_usage` para `core.usage_log`.
+
+    `core.usage_log` é a trilha de auditoria no schema do core (§12). O
+    painel de uso lê `ai.turn_usage` direto, porque ela tem `turn_id` e
+    `used_instance_key` e esta cópia não — mas a trilha existe para que
+    o core tenha o registro mesmo que o schema `ai` seja purgado.
+
+    **A idempotência é do banco**, pela unique parcial em `turn_id`
+    (migration 0012). Era um `NOT EXISTS` sobre
+    `(user_id, created_at, model)`, e isso falhava por construção: num
+    `INSERT ... SELECT` o `NOT EXISTS` lê o snapshot do início da
+    instrução e não vê as linhas que a própria instrução insere, então
+    dois turnos no mesmo `now()` com o mesmo modelo entravam os dois.
+    Havia uma duplicata assim neste banco quando a 0012 foi escrita.
+
+    Fica em função própria, e chamada ANTES do early-return de quem
+    drena, porque antes ela vivia depois dele: um turno cuja mensagem já
+    tinha sido drenada mas cujo uso não nunca era copiado, e nada
+    reclamava.
+    """
     await db.execute(
         text(
             """
             INSERT INTO core.usage_log
-              (user_id, provider_key, model, prompt_tokens,
+              (user_id, turn_id, provider_key, model, prompt_tokens,
                completion_tokens, estimated_cost_usd, created_at)
-            SELECT u.user_id, u.provider_key, u.model, u.prompt_tokens,
-                   u.completion_tokens, u.estimated_cost_usd, u.created_at
+            SELECT u.user_id, u.turn_id, u.provider_key, u.model,
+                   u.prompt_tokens, u.completion_tokens,
+                   u.estimated_cost_usd, u.created_at
             FROM ai.turn_usage u
             WHERE u.user_id = :uid
-              AND NOT EXISTS (
-                  SELECT 1 FROM core.usage_log l
-                  WHERE l.user_id = u.user_id
-                    AND l.created_at = u.created_at
-                    AND l.model = u.model
-              )
+              AND u.turn_id IS NOT NULL
+            ON CONFLICT (turn_id) WHERE turn_id IS NOT NULL DO NOTHING
             """
         ),
         {"uid": str(user_id)},
     )
-
-    log.debug("drenadas %d mensagens para user=%s", copied, user_id)
-    return copied
 
 
 async def apply_pending_titles(db: AsyncSession, user_id: UUID) -> int:
