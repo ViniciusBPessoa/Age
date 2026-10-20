@@ -2098,9 +2098,17 @@ user_preferences(user_id PK, working_hours JSONB, blocked_windows JSONB,
 -- Auditoria e custo
 audit_log(id, user_id, action, resource_type, resource_id,
           metadata JSONB, ip, created_at)
-usage_log(id, user_id, provider_key, model, prompt_tokens,
+usage_log(id, user_id, turn_id, provider_key, model, prompt_tokens,
           completion_tokens, estimated_cost_usd, created_at)
 ```
+
+**A fonte do relatório é `ai.turn_usage`, não `core.usage_log`.** As duas guardam o mesmo uso, mas a primeira tem `turn_id` e `used_instance_key`, e a segunda é uma cópia estritamente mais pobre — ela existe para que o schema do core tenha a trilha mesmo que `ai` seja purgado. `GET /usage/summary` agrega a partir da fonte rica, pelo GRANT de leitura que o core-api já tem em `ai`.
+
+`turn_id` com unique parcial (migration 0012) é a chave natural do dreno. A idempotência era um `NOT EXISTS` sobre `(user_id, created_at, model)`, e o defeito medido não era duplicar: era **perder** o segundo turno quando dois caíam no mesmo `now()` com o mesmo modelo — `now()` é constante dentro da transação do Postgres. Uso sem turno (a geração de título) fica só em `ai.turn_usage`, porque `ON CONFLICT` não desduplica `NULL`.
+
+**O custo é por chamada, não por turno.** `ModelCapabilities.estimate_cost_usd(usage, *, at)` recebe o instante porque há provedor cujo preço depende da hora (DeepSeek cobra metade fora do pico), e o orquestrador soma dentro do laço: um turno com ferramentas dura minutos e pode atravessar a fronteira da faixa. `Usage.cached_prompt_tokens` é subconjunto de `prompt_tokens`, não adicional — cache hit custa uma fração do miss, e tratá-lo como extra contaria o prompt duas vezes.
+
+**Valor em dinheiro tem uma porta só.** `cost_display_enabled` (instância) e `user_preferences.show_cost_usd` (conta), resolvidos por `services/exibicao_de_custo.mostrar_custo`; no front, `useMostrarCusto()`. Um teste de arquitetura falha se `US$` aparecer fora dos componentes de custo. É ocultação de interface, não controle de acesso: a rota continua devolvendo o número.
 
 ### 6.2 Conversas múltiplas, e o que acontece ao apagar
 
@@ -2350,6 +2358,7 @@ POST   /api/routines/occurrences/{id}/mark   # feito/pulado
 
 # Relatório (§5.9.8)
 GET    /api/reports/period?start&end      # planejado vs. realizado
+GET    /api/usage/summary?start&end&bucket # tokens e custo (§12)
 GET    /api/calendar/external-changes?since  # §5.10
 
 # Preferências

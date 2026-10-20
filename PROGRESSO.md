@@ -1323,6 +1323,55 @@ produto provar que a porta está certa seria investir na parte errada. A
 degradação do provedor pobre já é exercitada contra
 `PoorInMemoryTasks`.
 
+## Uso e custo visíveis — 20/10/2026
+
+§8.1 lista "Uso e custo estimado" entre o que a tela de Configurações
+precisa ter, e era o único item que nunca tinha sido feito. A medição,
+porém, já existia desde o M1: `ai.turn_usage` guardava tokens, custo,
+modelo e turno a cada resposta. Faltava alguém ler — `core.usage_log`
+era write-only, e um comentário no código a chamava de "o que a tela de
+custo lê", descrevendo uma tela que não existia.
+
+**O número que existia estava errado para cima, por três motivos
+independentes.** O código aplicava o preço de pico sempre (fora do pico
+a DeepSeek cobra metade); descartava `prompt_cache_hit_tokens`, que
+custa 1/50 do miss e é a maior parte de um prompt grande e estável como
+o do Age; e calculava o custo uma vez sobre o total do turno, o que
+atribui o preço de um instante a chamadas que podem ter acontecido em
+faixas diferentes — um turno com ferramentas dura minutos.
+
+Um comentário em `maintenance.py` também afirmava que o gasto da
+geração de título ia para `turn_usage`. Não ia: o `completion.usage`
+era descartado. Gravar exigia aceitar que existe uso sem turno, e a
+migration 0006 do worker fez isso.
+
+**Dois defeitos achados medindo, não lendo.** A migration 0012 "passou"
+sem desduplicar nada: ela roda como `age_owner`, que não tem
+`BYPASSRLS` por decisão de §4.2, e `FORCE ROW LEVEL SECURITY` vale até
+para o dono — sem `app.user_id`, o DELETE apagou zero calado. E um
+teste meu passava com o código sabotado, o que revelou que o defeito da
+dedupe era **perder** o segundo turno, não duplicá-lo.
+
+**O painel foi para o Relatório, não para Configurações.** A decisão
+veio de olhar as telas no navegador: o Relatório já tinha seletor de
+período e cartões de métrica, que é a forma exata deste painel.
+Configurações é onde se ajusta, Relatório é onde se olha número.
+
+A captura também pegou três defeitos que teste nenhum pegaria: custo com
+quatro casas decimais num total ("US$ 0,9841"), o último rótulo do eixo
+cortado, e o dia sem uso invisível no tema escuro.
+
+Gráficos em SVG próprio, sem dependência nova. `viewBox` em vez de medir
+o contêiner, porque jsdom não faz layout e um gráfico que dependa de
+medida é estruturalmente não testável.
+
+Valor em dinheiro tem uma porta só, sustentada por teste de arquitetura
+— que achou um violador já existente no onboarding.
+
+Fecha com **351 core-api · 229 worker · 276 front**, todos verdes.
+
+---
+
 ## Pontos de parada seguros
 
 - **Após M2** (~mês 4): agenda por conversa, Google conectado. Já se usa todo dia.
