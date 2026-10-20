@@ -49,9 +49,49 @@ class ToolCall:
 
 
 @dataclass(frozen=True)
+class TextPart:
+    """Um trecho de texto dentro de uma mensagem multimodal."""
+
+    text: str
+
+
+@dataclass(frozen=True)
+class ImagePart:
+    """Uma imagem anexada pelo usuário.
+
+    Guardamos os BYTES, não uma URL. Duas razões: o provedor aceita
+    `data:` embutido e com isso não precisamos expor o arquivo numa URL
+    pública (§4.1), e um link que o provedor busca sozinho seria um
+    caminho de saída de dados que ninguém auditou.
+
+    `media_type` é detectado pelo CONTEÚDO, nunca pela extensão — quem
+    anexa `.png` com bytes de JPEG não deve receber erro do provedor, e
+    quem renomeia um executável para `.png` não deve chegar tão longe.
+    """
+
+    data: bytes
+    media_type: Literal["image/jpeg", "image/png", "image/gif", "image/webp"]
+
+
+ContentPart = TextPart | ImagePart
+
+
+@dataclass(frozen=True)
 class Message:
+    """Uma mensagem no formato canônico.
+
+    `content` é `str` no caso comum e lista de partes quando há imagem.
+    A união existe para não reescrever as 31 ferramentas e todo o
+    histórico por causa de um anexo: quem só manda texto continua
+    passando `str`, e o adaptador é que decide o formato do wire.
+
+    Não vale uma lista com UMA parte de texto como forma canônica de
+    mensagem de texto — seriam dois jeitos de dizer a mesma coisa, e
+    todo comparador de histórico passaria a ter dois casos.
+    """
+
     role: Literal["system", "user", "assistant", "tool"]
-    content: str | None = None
+    content: str | tuple[ContentPart, ...] | None = None
     tool_calls: tuple[ToolCall, ...] = ()
     tool_call_id: str | None = None
 
@@ -193,6 +233,16 @@ class ModelCapabilities:
     context_window: int
     max_output_tokens: int
     max_tools: int | None = None
+    # Aceita `ImagePart` no conteúdo. Default `False` porque o padrão
+    # seguro é recusar antes de gastar: mandar imagem para um modelo que
+    # não vê devolve 400 do provedor, e o usuário já teria esperado o
+    # upload inteiro para ouvir isso.
+    supports_vision: bool = False
+    # Teto por imagem que o provedor documenta. `None` = não declarado.
+    # Medido no `deepseek-flash`: 184 tokens para 64x64 e 512x512
+    # (idênticos — ele trabalha em blocos, então encolher abaixo de 512
+    # não economiza), 652 para 1024x1024, 994 para 2048x2048.
+    max_tokens_per_image: int | None = None
     # O TETO: preço da faixa mais cara, sem desconto de cache. Continua
     # aqui porque é o que a cota usa para errar para cima de propósito,
     # e o que o teste de contrato lê para saber se o modelo tem preço.

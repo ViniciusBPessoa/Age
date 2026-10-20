@@ -153,6 +153,8 @@ _FLASH = ModelCapabilities(
     cost_per_1m_input=0.30,
     cost_per_1m_output=1.20,
     pricing=_PrecoPorHorario(peak=_FLASH_PEAK, off_peak=_FLASH_OFF),
+    supports_vision=True,
+    max_tokens_per_image=1024,
 )
 
 _PRO = ModelCapabilities(
@@ -166,6 +168,8 @@ _PRO = ModelCapabilities(
     cost_per_1m_input=1.32,
     cost_per_1m_output=3.96,
     pricing=_PrecoPorHorario(peak=_PRO_PEAK, off_peak=_PRO_OFF),
+    supports_vision=True,
+    max_tokens_per_image=1024,
 )
 
 

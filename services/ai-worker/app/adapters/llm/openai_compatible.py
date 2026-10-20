@@ -14,6 +14,7 @@ ARQUITETURA.md §3.1.1. A tradução que importa aqui:
 
 from __future__ import annotations
 
+import base64
 import json
 import logging
 from collections.abc import AsyncIterator
@@ -25,6 +26,7 @@ from app.ports.llm import (
     AuthenticationError,
     Chunk,
     Completion,
+    ContentPart,
     ContextTooLong,
     LLMError,
     LLMProvider,
@@ -34,6 +36,7 @@ from app.ports.llm import (
     ProviderTimeout,
     ProviderUnavailable,
     RateLimitError,
+    TextPart,
     ToolCall,
     ToolSpec,
     Usage,
@@ -96,7 +99,7 @@ class OpenAICompatibleProvider(LLMProvider):
 
             item: dict[str, Any] = {"role": msg.role}
             if msg.content is not None:
-                item["content"] = msg.content
+                item["content"] = self._encode_content(msg.content)
             if msg.tool_calls:
                 item["tool_calls"] = [
                     {
@@ -114,6 +117,35 @@ class OpenAICompatibleProvider(LLMProvider):
                 item.setdefault("content", None)
             out.append(item)
         return out
+
+    @staticmethod
+    def _encode_content(
+        content: str | tuple[ContentPart, ...],
+    ) -> str | list[dict[str, Any]]:
+        """Canônico -> wire.
+
+        Texto puro sai como STRING, não como lista de uma parte. O
+        formato de lista é aceito pela API, mas mudaria o corpo de todo
+        request do projeto — e o prompt do Age é grande e estável, ou
+        seja, é o que cacheia bem. Qualquer byte diferente no prefixo
+        invalida o cache de prompt, que é 50x mais barato
+        (`deepseek.py`), então a economia aqui não é estilística.
+        """
+        if isinstance(content, str):
+            return content
+        partes: list[dict[str, Any]] = []
+        for parte in content:
+            if isinstance(parte, TextPart):
+                partes.append({"type": "text", "text": parte.text})
+            else:
+                b64 = base64.b64encode(parte.data).decode("ascii")
+                partes.append(
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:{parte.media_type};base64,{b64}"},
+                    }
+                )
+        return partes
 
     @staticmethod
     def _encode_tools(tools: list[ToolSpec] | None) -> list[dict] | None:
