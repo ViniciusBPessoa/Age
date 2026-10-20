@@ -246,3 +246,44 @@ class UsageLog(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
+
+
+class MessageAttachment(Base):
+    """Uma imagem anexada a uma mensagem (migration 0013).
+
+    Os bytes ficam na linha, em `data`. A razão está no cabeçalho da
+    migration: arquivo no disco não compartilha transação com a linha,
+    não tem RLS e não é apagado por CASCADE — e as três coisas importam
+    mais aqui do que o espaço economizado.
+
+    `message_id` é nullable porque o anexo NASCE ANTES da mensagem: o
+    upload acontece enquanto a pessoa escreve, e só o envio cria a
+    mensagem. Anexo que nunca foi enviado é órfão, e o índice parcial
+    `ix_attachments_orfaos` existe para a varredura achá-lo.
+    """
+
+    __tablename__ = "message_attachments"
+    __table_args__ = {"schema": "core"}
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    user_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("core.users.id", ondelete="CASCADE")
+    )
+    message_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("core.messages.id", ondelete="CASCADE")
+    )
+    conversation_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("core.conversations.id", ondelete="CASCADE")
+    )
+    # Só para mostrar na tela. O tipo vem dos BYTES, não daqui.
+    filename: Mapped[str] = mapped_column(Text, nullable=False)
+    media_type: Mapped[str] = mapped_column(Text, nullable=False)
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    sha256: Mapped[str] = mapped_column(Text, nullable=False)
+    data: Mapped[bytes | None] = mapped_column(LargeBinary)
+    # Gancho para object storage futuro; `None` enquanto `data` manda.
+    storage_key: Mapped[str | None] = mapped_column(Text)
+    position: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
