@@ -1135,6 +1135,36 @@ A consequência prática: num pedido como "organiza meu estudo de Álgebra Linea
 - **No envio:** cada `POST` de mensagem leva um `client_turn_id` gerado no front. Reenvio com o mesmo id devolve o `turn_id` já existente em vez de criar outro — duplo-clique em enviar não custa dois planos.
 - **No consumo:** a fila garante *at-least-once*, não *exactly-once*. Um job pode ser reentregue se o worker morrer após pegar e antes de confirmar. Por isso o handler checa o estado do turno antes de começar: se já está `running` ou `done`, descarta. Sem isso, um worker reiniciado no momento errado refaz o turno e cobra os tokens de novo.
 
+### 5.1.1 Anexos de imagem
+
+O `deepseek-flash` — o modelo padrão — **aceita imagem nativamente**, no mesmo `/chat/completions`. Confirmado contra a API real antes de construir qualquer camada em cima da suposição: um PNG de três faixas devolveu "vermelho, verde e azul, em partes iguais".
+
+**Custo medido por tamanho** (prompt de 34 tokens como base):
+
+| Imagem | Tokens só dela |
+|---|---|
+| 64×64 | 184 |
+| 512×512 | **184** (idêntico) |
+| 1024×1024 | 652 |
+| 2048×2048 | 994 |
+
+64×64 e 512×512 custarem o mesmo diz que o modelo trabalha em blocos: **encolher abaixo de 512px não economiza nada**, então não há redimensionamento no cliente. Uma foto grande sai por ~US$ 0,00015 fora de pico — irrisório perto dos ~12.850 tokens do prompt do Age (system prompt ~7.400 + as 31 ferramentas ~5.450).
+
+**O upload acontece na escolha, não no envio.** `POST /attachments` devolve um id enquanto a pessoa ainda escreve; `POST /messages` recebe a lista de ids. Embutir os bytes no envio travaria a interface no clique de enviar e perderia tudo se falhasse. O vínculo acontece na **mesma transação** do INSERT da mensagem, e **depois** do `except IntegrityError` — amarrar anexo a uma mensagem que o índice único de idempotência recusou deixaria o anexo preso a uma linha inexistente.
+
+**Os bytes ficam na linha** (`core.message_attachments.data`), não em arquivo. Arquivo no disco não compartilha transação com a linha, não tem policy de RLS e não é apagado por `CASCADE` — as três coisas importam mais aqui do que o espaço economizado. A coluna `storage_key` é o gancho para object storage quando o volume justificar.
+
+**O tipo vem dos bytes, nunca da extensão nem do `Content-Type`.** JPEG, PNG, GIF e WebP, por assinatura binária. WebP exige checar `RIFF` **e** os bytes 8–12: WAV e AVI também são contêineres RIFF. A detecção está duplicada entre core-api e ai-worker de propósito (§2.4 proíbe os serviços de importarem código um do outro), e as duas cópias são testadas contra os mesmos bytes.
+
+Limites: **5 MB por imagem, 4 por mensagem**. O provedor aceita 32 MiB e 600; o corte é de interface e do buffer do BFF, que lê todo POST em memória para poder repetir após renovar o token.
+
+**A tela só oferece o que o modelo aceita.** O catálogo de provedores carrega `vision_models`, e o botão de anexo só existe quando o modelo **escolhido** vê imagem. Sem isso o anexo subiria, seria gravado e o worker o descartaria — e descarte calado faz o modelo afirmar o que não fez. Se mesmo assim chegar anexo a um modelo sem visão, o worker emite `log.warning` em vez de ignorar.
+
+**Duas armadilhas que só a captura da tela mostrou**, ambas invisíveis para a suíte:
+
+1. O botão aparecia com o `mock` selecionado, que não vê imagem.
+2. Pior: o botão **sumia** para quem usa a chave da instância — o caminho padrão do Age —, porque `credentials` vem vazio e nenhum modelo era conhecido. A regra de precedência completa está em `chat-screen`: conversa ativa → credencial própria → `key-source` quando `source === "instance"`.
+
 ### 5.2 Tools expostas ao modelo
 
 **Leitura — executam na hora:**
@@ -2360,6 +2390,10 @@ POST   /api/routines/occurrences/{id}/mark   # feito/pulado
 GET    /api/reports/period?start&end      # planejado vs. realizado
 GET    /api/usage/summary?start&end&bucket # tokens e custo (§12)
 GET    /api/calendar/external-changes?since  # §5.10
+
+# Anexos de imagem no chat (§5.1.1)
+POST   /api/attachments                    # multipart; devolve o id
+GET    /api/attachments/{id}/content       # os bytes, para a tela
 
 # Preferências
 GET    /api/preferences
