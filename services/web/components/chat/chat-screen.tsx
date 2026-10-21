@@ -414,9 +414,25 @@ export function ChatScreen({
   const [avisoDeArraste, setAvisoDeArraste] = useState<string | null>(null);
 
   const arraste = useArrastarImagem({
-    ativo: modeloVeImagem,
-    onSoltar: (imagens, ignorados) => {
-      if (imagens.length > 0) void estadoDeAnexos.adicionar(imagens);
+    // Sempre ligado: PDF vira texto extraído e funciona em qualquer
+    // modelo. É o `onSoltar` que recusa a IMAGEM quando o modelo não
+    // a vê — recusar o arraste inteiro tiraria o PDF junto.
+    ativo: true,
+    onSoltar: (arquivos, ignorados) => {
+      // Imagem exige modelo com visão; PDF, não.
+      const aceitos = modeloVeImagem
+        ? arquivos
+        : arquivos.filter((f) => f.type === "application/pdf");
+      const imagensRecusadas = arquivos.length - aceitos.length;
+
+      if (aceitos.length > 0) void estadoDeAnexos.adicionar(aceitos);
+
+      if (imagensRecusadas > 0) {
+        setAvisoDeArraste(
+          "Este modelo não lê imagens. Escolha outro para mandar foto — PDF funciona em qualquer um.",
+        );
+        return;
+      }
       /*
        * Soltar um PDF e nao acontecer NADA parece defeito. O aviso diz
        * o que foi ignorado e por que -- e e temporario porque uma
@@ -424,9 +440,9 @@ export function ChatScreen({
        */
       if (ignorados > 0) {
         setAvisoDeArraste(
-          imagens.length > 0
-            ? `${ignorados} ${ignorados === 1 ? "arquivo" : "arquivos"} fora de JPEG, PNG, GIF ou WebP ${ignorados === 1 ? "foi ignorado" : "foram ignorados"}.`
-            : "Por enquanto só dá para anexar imagem: JPEG, PNG, GIF ou WebP.",
+          aceitos.length > 0
+            ? `${ignorados} ${ignorados === 1 ? "arquivo foi ignorado" : "arquivos foram ignorados"}: aceito imagem e PDF.`
+            : "Por enquanto só dá para anexar imagem (JPEG, PNG, GIF, WebP) e PDF.",
         );
       }
     },

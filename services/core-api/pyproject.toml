@@ -25,6 +25,14 @@ dependencies = [
     "python-dateutil>=2.9",
     # Upload de anexo: o FastAPI exige para `UploadFile`/`Form`.
     "python-multipart>=0.0.18",
+    # Extrair o texto de PDF anexado. O modelo NAO aceita PDF (so
+    # imagem), entao o texto e extraido aqui e enviado como texto.
+    #
+    # `pypdf` e puro Python: sem binario do sistema, sem compilacao, e
+    # nao executa nada do documento. Alternativas (pdfminer, PyMuPDF)
+    # trazem dependencia nativa ou licenca AGPL -- caro demais para o
+    # que e, no fundo, ler strings de um formato.
+    "pypdf>=5.1",
     "age-contracts",
 ]
 

@@ -1,5 +1,5 @@
 /**
- * Arrastar imagem para qualquer lugar da conversa (§5.1.1).
+ * Arrastar imagem ou PDF para qualquer lugar da conversa (§5.1.1).
  *
  * A zona de soltura é a `<main>` inteira — mensagens, cabeçalho e
  * composer —, não só o campo de texto. Quem arrasta uma foto mira "o
@@ -34,7 +34,13 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { IconImage, cx } from "@/components/ui";
 
 /** Os mesmos quatro do backend. Filtro de conveniência, não validação. */
-const TIPOS_ACEITOS = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);
+const TIPOS_ACEITOS = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/gif",
+  "image/webp",
+  "application/pdf",
+]);
 
 /**
  * Só as imagens do que foi solto.
@@ -51,6 +57,11 @@ export function imagensDe(dt: DataTransfer | null): {
   const arquivos = Array.from(dt?.files ?? []);
   const imagens = arquivos.filter((f) => TIPOS_ACEITOS.has(f.type));
   return { imagens, ignorados: arquivos.length - imagens.length };
+}
+
+/** Se há alguma imagem no lote (PDF não precisa de modelo com visão). */
+export function temImagem(arquivos: File[]): boolean {
+  return arquivos.some((f) => f.type !== "application/pdf");
 }
 
 /**
@@ -170,11 +181,9 @@ export function SobreposicaoDeArraste({
       >
         <IconImage className={cx("h-8 w-8", cheio ? "text-warn" : "text-brand")} />
         <p className={cx("text-sm font-medium", cheio ? "text-warn" : "text-ink")}>
-          {cheio ? "Já são 4 imagens nesta mensagem" : "Solte a imagem para anexar"}
+          {cheio ? "Já são 4 anexos nesta mensagem" : "Solte o arquivo para anexar"}
         </p>
-        {cheio ? null : (
-          <p className="text-2xs text-faint">JPEG, PNG, GIF ou WebP · até 5 MB</p>
-        )}
+        {cheio ? null : <p className="text-2xs text-faint">Imagem ou PDF · até 5 MB</p>}
       </div>
     </div>
   );

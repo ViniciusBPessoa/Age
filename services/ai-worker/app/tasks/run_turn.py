@@ -197,34 +197,42 @@ async def run_turn(ctx: dict, payload: dict) -> dict:
             # So busca se o modelo ve imagem. Para modelo sem visao a
             # consulta seria trabalho jogado fora -- e pior, os bytes
             # viriam do banco para serem descartados.
-            anexos_por_mensagem: dict[str, list] = {}
-            if model_sees_images(provider_key, model):
-                anexos_por_mensagem = await _carregar_anexos(
-                    db, conversation_id=conversation_id
-                )
-            else:
+            #
+            # PDF nao depende de visao: ele chega como TEXTO extraido
+            # (migration 0014), entao funciona em qualquer modelo. Por
+            # isso os anexos sao sempre carregados, e e o filtro abaixo
+            # que descarta a imagem quando o modelo nao a ve.
+            ve_imagem = model_sees_images(provider_key, model)
+            anexos_por_mensagem = await _carregar_anexos(
+                db,
+                conversation_id=conversation_id,
+                incluir_imagens=ve_imagem,
+            )
+
+            if not ve_imagem:
                 # Descarte CALADO e o que faz o modelo afirmar o que nao
                 # fez: a pessoa manda a foto, a resposta vem sem ela, e
-                # nada no caminho reclama. Se ha anexo e o modelo nao ve,
-                # isso vira linha de log -- e a tela so oferece o botao
-                # quando o modelo aceita imagem, entao chegar aqui com
-                # anexo significa que alguma das duas pontas esta errada.
-                tem_anexo = (
+                # nada no caminho reclama. Se ha IMAGEM e o modelo nao
+                # ve, isso vira linha de log -- e a tela so oferece o
+                # botao quando o modelo aceita imagem, entao chegar aqui
+                # com imagem significa que alguma ponta esta errada.
+                tem_imagem = (
                     await db.execute(
                         text(
                             """
                             SELECT 1 FROM core.message_attachments
                             WHERE conversation_id = :cid
                               AND message_id IS NOT NULL
+                              AND media_type <> 'application/pdf'
                             LIMIT 1
                             """
                         ),
                         {"cid": str(conversation_id)},
                     )
                 ).first()
-                if tem_anexo is not None:
+                if tem_imagem is not None:
                     log.warning(
-                        "turno %s: anexo ignorado, modelo %s/%s nao ve imagem",
+                        "turno %s: imagem ignorada, modelo %s/%s nao ve imagem",
                         turn_id,
                         provider_key,
                         model,
@@ -469,38 +477,83 @@ async def run_turn(ctx: dict, payload: dict) -> dict:
 # ---------------------------------------------------------------
 # Auxiliares
 # ---------------------------------------------------------------
-async def _carregar_anexos(db, *, conversation_id) -> dict[str, list]:
+async def _carregar_anexos(
+    db, *, conversation_id, incluir_imagens: bool = True
+) -> dict[str, list]:
     """Os anexos da conversa, agrupados por mensagem e na ordem.
 
     `ORDER BY position` nao e detalhe: "compare a primeira com a
     segunda" muda de significado se a ordem embaralhar, e a ordem que
     vale e a que a pessoa escolheu no composer.
 
+    **Imagem e PDF saem daqui de formas diferentes.** A imagem vira
+    `ImagePart` com os bytes; o PDF vira `TextPart` com o texto que o
+    core-api ja extraiu no upload (migration 0014) -- o modelo nao
+    aceita PDF, e reextrair aqui significaria `pypdf` no worker e o
+    mesmo trabalho repetido a cada turno da conversa.
+
     Le `data` direto. O worker tem SELECT em `core.*` (secao 2.3.2), e
     os bytes vem do banco porque e la que eles estao -- ver o cabecalho
     da migration 0013 para por que nao num arquivo.
     """
-    from app.ports.llm import ImagePart
+    from app.ports.llm import ImagePart, TextPart
 
     rows = await db.execute(
         text(
             """
-            SELECT message_id, media_type, data
+            SELECT message_id, media_type, data, filename, extracted_text
             FROM core.message_attachments
             WHERE conversation_id = :cid
               AND message_id IS NOT NULL
-              AND data IS NOT NULL
+              AND (data IS NOT NULL OR extracted_text IS NOT NULL)
             ORDER BY message_id, position ASC
             """
         ),
         {"cid": str(conversation_id)},
     )
     por_mensagem: dict[str, list] = {}
-    for message_id, media_type, dados in rows.all():
+    for message_id, media_type, dados, filename, texto in rows.all():
+        if media_type == "application/pdf":
+            if not texto:
+                # A constraint `ck_attachment_pdf_tem_texto` impede
+                # isto, mas um PDF sem texto aqui significaria mandar
+                # ao modelo um anexo vazio -- pular e o lado seguro.
+                continue
+            por_mensagem.setdefault(str(message_id), []).append(
+                TextPart(text=_pdf_como_texto(filename, texto))
+            )
+            continue
+        # Modelo sem visao: a imagem e descartada AQUI, e o PDF da
+        # mesma conversa continua passando. O aviso de descarte fica em
+        # quem chama, que sabe o turno.
+        if not incluir_imagens or dados is None:
+            continue
         por_mensagem.setdefault(str(message_id), []).append(
             ImagePart(data=bytes(dados), media_type=media_type)
         )
     return por_mensagem
+
+
+def _pdf_como_texto(filename: str | None, texto: str) -> str:
+    """O texto do PDF, delimitado e com a origem declarada.
+
+    Os delimitadores nao sao enfeite. Sem eles o conteudo do documento
+    se mistura com a pergunta, e o modelo passa a tratar o que esta
+    ESCRITO no PDF como instrucao -- um documento que contenha "ignore
+    as instrucoes anteriores" vira injecao. Com a marcacao, ha uma
+    fronteira declarada entre o que o usuario pede e o que o arquivo
+    diz.
+
+    O nome do arquivo entra porque "segundo o edital" so faz sentido se
+    o modelo souber qual anexo e qual quando ha mais de um.
+    """
+    nome = filename or "documento.pdf"
+    return (
+        f"[Conteudo extraido do PDF anexado: {nome}]\n"
+        "--- inicio do documento ---\n"
+        f"{texto}\n"
+        "--- fim do documento ---"
+    )
 
 
 def _to_domain_message(

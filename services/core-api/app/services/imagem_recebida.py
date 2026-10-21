@@ -1,4 +1,8 @@
-"""Validação de imagem recebida: pelos BYTES, nunca pelo que o cliente diz.
+"""Validação de anexo recebido: pelos BYTES, nunca pelo que o cliente diz.
+
+Imagem e PDF. O tipo sai da assinatura binária, e o que acontece
+depois difere: imagem vai ao modelo como imagem, PDF tem o texto
+extraído em `pdf_recebido.py` e vai como texto.
 
 Isto duplica `domain/imagem.py` do ai-worker, e a duplicação é
 deliberada. §2.4 proíbe os dois serviços de importarem código um do
@@ -24,7 +28,13 @@ import hashlib
 from dataclasses import dataclass
 from typing import Literal
 
-MediaType = Literal["image/jpeg", "image/png", "image/gif", "image/webp"]
+MediaType = Literal[
+    "image/jpeg",
+    "image/png",
+    "image/gif",
+    "image/webp",
+    "application/pdf",
+]
 
 # 5 MB. Igual ao CHECK da migration 0013: a rota recusa com uma frase
 # útil, a constraint garante que nenhum outro caminho escape.
@@ -36,6 +46,10 @@ MAXIMO_POR_MENSAGEM = 4
 
 _ASSINATURAS: tuple[tuple[bytes, MediaType], ...] = (
     (b"\xff\xd8\xff", "image/jpeg"),
+    # O PDF entra por aqui, mas segue um caminho diferente: a imagem vai
+    # para o modelo como imagem, o PDF vai como TEXTO EXTRAIDO
+    # (`pdf_recebido.py`). O modelo nao aceita PDF.
+    (b"%PDF-", "application/pdf"),
     (b"\x89PNG\r\n\x1a\x0a", "image/png"),
     (b"GIF87a", "image/gif"),
     (b"GIF89a", "image/gif"),
@@ -44,10 +58,21 @@ _ASSINATURAS: tuple[tuple[bytes, MediaType], ...] = (
 
 @dataclass(frozen=True)
 class ImagemValida:
+    """Um anexo aceito: imagem OU PDF.
+
+    O nome ficou de quando so havia imagem. Renomear tocaria a rota, os
+    testes e o historico de tres commits para ganhar uma palavra -- e o
+    campo `media_type` ja diz o que e.
+    """
+
     dados: bytes
     media_type: MediaType
     sha256: str
     tamanho: int
+
+    @property
+    def e_pdf(self) -> bool:
+        return self.media_type == "application/pdf"
 
 
 class ImagemRecusada(Exception):
@@ -96,7 +121,8 @@ def validar(dados: bytes) -> ImagemValida:
     tipo = detectar_media_type(dados)
     if tipo is None:
         raise ImagemRecusada(
-            "Não reconheci este arquivo como imagem. Aceito JPEG, PNG, GIF e WebP."
+            "Não reconheci este arquivo. Aceito imagem (JPEG, PNG, GIF, "
+            "WebP) e PDF."
         )
     return ImagemValida(
         dados=dados,

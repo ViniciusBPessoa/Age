@@ -31,6 +31,7 @@ import {
   IconChevronDown,
   IconSparkle,
   Spinner,
+  IconDoc,
   cx,
 } from "@/components/ui";
 import { CustoDaMensagem } from "@/components/chat/custo-da-mensagem";
@@ -353,38 +354,59 @@ function ImagensDaMensagem({
         anexos.length === 1 ? "grid-cols-1" : "grid-cols-2",
       )}
     >
-      {anexos.map((anexo) => (
-        <li key={anexo.id}>
-          {/*
-           * `<a>` em volta: a miniatura corta a imagem (`object-cover`)
-           * para a grade ficar regular, e sem um jeito de ver o
-           * original a pessoa nao consegue conferir o que mandou. Abre
-           * em aba nova porque a rota devolve
-           * `Content-Disposition: attachment`.
-           *
-           * `<img>` cru e nao `next/image`: a origem e uma rota da
-           * propria API autenticada por cookie, que o otimizador do
-           * Next nao consegue buscar do servidor.
-           */}
-          <a
-            href={`/api/attachments/${anexo.id}/content`}
-            target="_blank"
-            rel="noreferrer"
-            className="block overflow-hidden rounded-lg border border-line-strong/60 transition-opacity hover:opacity-90 outline-none focus:border-brand focus-visible:ring-2 focus-visible:ring-brand/40"
-          >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={`/api/attachments/${anexo.id}/content`}
-              alt={anexo.filename}
-              loading="lazy"
-              className={cx(
-                "w-full bg-surface-sunken object-cover",
-                anexos.length === 1 ? "max-h-64" : "h-28",
-              )}
-            />
-          </a>
-        </li>
-      ))}
+      {anexos.map((anexo) =>
+        anexo.media_type === "application/pdf" ? (
+          /*
+           * PDF nao vira `<img>`: a rota devolve bytes de PDF, e um
+           * `<img>` apontando para eles mostra o icone de imagem
+           * quebrada. O cartao diz o nome e abre o arquivo.
+           */
+          <li key={anexo.id}>
+            <a
+              href={`/api/attachments/${anexo.id}/content`}
+              target="_blank"
+              rel="noreferrer"
+              className="flex items-center gap-2 rounded-lg border border-line-strong/60 bg-surface/60 px-3 py-2 outline-none transition-colors hover:border-brand/50 focus:border-brand focus-visible:ring-2 focus-visible:ring-brand/40"
+            >
+              <IconDoc className="h-4 w-4 shrink-0 text-faint" />
+              <span className="min-w-0 truncate text-xs text-ink-2">
+                {anexo.filename}
+              </span>
+            </a>
+          </li>
+        ) : (
+          <li key={anexo.id}>
+            {/*
+             * `<a>` em volta: a miniatura corta a imagem (`object-cover`)
+             * para a grade ficar regular, e sem um jeito de ver o
+             * original a pessoa nao consegue conferir o que mandou. Abre
+             * em aba nova porque a rota devolve
+             * `Content-Disposition: attachment`.
+             *
+             * `<img>` cru e nao `next/image`: a origem e uma rota da
+             * propria API autenticada por cookie, que o otimizador do
+             * Next nao consegue buscar do servidor.
+             */}
+            <a
+              href={`/api/attachments/${anexo.id}/content`}
+              target="_blank"
+              rel="noreferrer"
+              className="block overflow-hidden rounded-lg border border-line-strong/60 transition-opacity hover:opacity-90 outline-none focus:border-brand focus-visible:ring-2 focus-visible:ring-brand/40"
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={`/api/attachments/${anexo.id}/content`}
+                alt={anexo.filename}
+                loading="lazy"
+                className={cx(
+                  "w-full bg-surface-sunken object-cover",
+                  anexos.length === 1 ? "max-h-64" : "h-28",
+                )}
+              />
+            </a>
+          </li>
+        ),
+      )}
     </ul>
   );
 }

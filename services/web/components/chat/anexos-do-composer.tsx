@@ -33,7 +33,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { Button, IconImage, IconPaperclip, IconX, cx } from "@/components/ui";
+import { Button, IconDoc, IconImage, IconPaperclip, IconX, cx } from "@/components/ui";
 
 /** 5 MB e 4 imagens: os mesmos limites do backend. */
 const TAMANHO_MAXIMO = 5 * 1024 * 1024;
@@ -44,10 +44,9 @@ export const MAXIMO_DE_ANEXOS = 4;
  *
  * É filtro de conveniência, NÃO validação: o seletor aceita "todos os
  * arquivos" em toda plataforma, e o tipo real é decidido pelos bytes no
- * servidor (`services/imagem_recebida.py`). Listar os quatro aqui só
- * poupa a pessoa de escolher um PDF e ouvir não.
+ * servidor (`services/imagem_recebida.py`).
  */
-const ACEITOS = "image/jpeg,image/png,image/gif,image/webp";
+const ACEITOS = "image/jpeg,image/png,image/gif,image/webp,application/pdf";
 
 export type AnexoLocal = {
   /** Id do cliente, para a chave de lista e o botão de remover. */
@@ -55,9 +54,15 @@ export type AnexoLocal = {
   /** Id do servidor. `null` enquanto sobe — e é por isso que o envio espera. */
   id: string | null;
   nome: string;
+  /** `blob:` da imagem. Vazio em PDF, que não tem miniatura. */
   previa: string;
   estado: "enviando" | "pronto" | "erro";
   motivo?: string;
+  /** PDF mostra cartão com nome e páginas, não miniatura. */
+  ehPdf?: boolean;
+  /** Só em PDF, depois do upload: o que o servidor conseguiu ler. */
+  paginas?: number;
+  paginasLidas?: number;
 };
 
 /**
@@ -95,14 +100,14 @@ export function useAnexos(): EstadoDeAnexos {
   const remover = useCallback((localId: string) => {
     setAnexos((atuais) => {
       const alvo = atuais.find((a) => a.localId === localId);
-      if (alvo) URL.revokeObjectURL(alvo.previa);
+      if (alvo?.previa) URL.revokeObjectURL(alvo.previa);
       return atuais.filter((a) => a.localId !== localId);
     });
   }, []);
 
   const limpar = useCallback(() => {
     setAnexos((atuais) => {
-      for (const a of atuais) URL.revokeObjectURL(a.previa);
+      for (const a of atuais) if (a.previa) URL.revokeObjectURL(a.previa);
       return [];
     });
   }, []);
@@ -116,8 +121,11 @@ export function useAnexos(): EstadoDeAnexos {
 
       for (const arquivo of arquivos.slice(0, espaco)) {
         const localId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-        const previa = URL.createObjectURL(arquivo);
-        previas.current.push(previa);
+        const ehPdf = arquivo.type === "application/pdf";
+        // PDF não ganha `objectURL`: não há miniatura a mostrar, e
+        // criar a URL só para revogar depois é alocação à toa.
+        const previa = ehPdf ? "" : URL.createObjectURL(arquivo);
+        if (previa) previas.current.push(previa);
 
         // O tamanho é checado antes de subir: mandar 20 MB para ouvir
         // não é gastar a banda da pessoa para nada, e num celular isso
@@ -132,6 +140,7 @@ export function useAnexos(): EstadoDeAnexos {
               nome: arquivo.name,
               previa,
               estado: "erro",
+              ehPdf,
               motivo: `${mb} MB — o limite é 5 MB`,
             },
           ]);
@@ -140,7 +149,7 @@ export function useAnexos(): EstadoDeAnexos {
 
         setAnexos((a) => [
           ...a,
-          { localId, id: null, nome: arquivo.name, previa, estado: "enviando" },
+          { localId, id: null, nome: arquivo.name, previa, estado: "enviando", ehPdf },
         ]);
 
         try {
@@ -173,7 +182,13 @@ export function useAnexos(): EstadoDeAnexos {
           setAnexos((a) =>
             a.map((item) =>
               item.localId === localId
-                ? { ...item, id: dados.id, estado: "pronto" as const }
+                ? {
+                    ...item,
+                    id: dados.id,
+                    estado: "pronto" as const,
+                    paginas: dados.page_count ?? undefined,
+                    paginasLidas: dados.pages_read ?? undefined,
+                  }
                 : item,
             ),
           );
@@ -209,10 +224,13 @@ export function BotaoDeAnexo({
   onEscolher,
   disabled,
   cheio,
+  soPdf,
 }: {
   onEscolher: (arquivos: File[]) => void;
   disabled?: boolean;
   cheio?: boolean;
+  /** Modelo sem visão: só PDF, que vira texto. */
+  soPdf?: boolean;
 }) {
   const input = useRef<HTMLInputElement>(null);
 
@@ -221,7 +239,7 @@ export function BotaoDeAnexo({
       <input
         ref={input}
         type="file"
-        accept={ACEITOS}
+        accept={soPdf ? "application/pdf" : ACEITOS}
         multiple
         className="hidden"
         onChange={(e) => {
@@ -240,9 +258,13 @@ export function BotaoDeAnexo({
         onClick={() => input.current?.click()}
         disabled={disabled || cheio}
         title={
-          cheio ? `No máximo ${MAXIMO_DE_ANEXOS} imagens por mensagem` : "Anexar imagem"
+          cheio
+            ? `No máximo ${MAXIMO_DE_ANEXOS} anexos por mensagem`
+            : soPdf
+              ? "Anexar PDF (este modelo não lê imagens)"
+              : "Anexar imagem ou PDF"
         }
-        aria-label="Anexar imagem"
+        aria-label={soPdf ? "Anexar PDF" : "Anexar imagem ou PDF"}
       >
         <IconPaperclip className="h-4 w-4" />
       </Button>
@@ -274,15 +296,34 @@ export function MiniaturasDeAnexo({
              * `blob:` local que o otimizador do Next não processa, e
              * passar por ele daria aviso de console sem ganho nenhum.
              */}
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={anexo.previa}
-              alt={anexo.nome}
-              className={cx(
-                "h-full w-full object-cover",
-                anexo.estado !== "pronto" && "opacity-40",
-              )}
-            />
+            {anexo.ehPdf ? (
+              /*
+               * PDF não tem miniatura: mostra o ícone e o nome. Sem o
+               * nome, dois PDFs anexados viram dois quadrados idênticos
+               * e não dá para remover o certo.
+               */
+              <div
+                className={cx(
+                  "flex h-full w-full flex-col items-center justify-center gap-1 px-1",
+                  anexo.estado !== "pronto" && "opacity-40",
+                )}
+              >
+                <IconDoc className="h-5 w-5 text-faint" />
+                <span className="line-clamp-2 break-all text-center text-[9px] leading-tight text-faint">
+                  {anexo.nome}
+                </span>
+              </div>
+            ) : (
+              /* eslint-disable-next-line @next/next/no-img-element */
+              <img
+                src={anexo.previa}
+                alt={anexo.nome}
+                className={cx(
+                  "h-full w-full object-cover",
+                  anexo.estado !== "pronto" && "opacity-40",
+                )}
+              />
+            )}
             {anexo.estado === "enviando" ? (
               <span className="absolute inset-0 grid place-items-center" aria-hidden>
                 <span className="h-4 w-4 animate-spin rounded-full border-2 border-brand border-t-transparent" />
@@ -316,6 +357,23 @@ export function MiniaturasDeAnexo({
            * imagem tem 7 MB" é acionável, uma borda colorida não é. E
            * `role="status"` para quem usa leitor de tela ouvir.
            */}
+          {/*
+           * PDF cortado no teto de páginas: a pessoa PRECISA saber que
+           * o modelo não viu o documento inteiro, senão confia numa
+           * resposta sobre metade do arquivo.
+           */}
+          {anexo.estado === "pronto" &&
+          anexo.paginas &&
+          anexo.paginasLidas &&
+          anexo.paginasLidas < anexo.paginas ? (
+            <p
+              role="status"
+              className="absolute left-0 top-full mt-1 w-32 text-2xs leading-tight text-warn"
+            >
+              li {anexo.paginasLidas} de {anexo.paginas} páginas
+            </p>
+          ) : null}
+
           {anexo.estado === "erro" && anexo.motivo ? (
             <p
               role="status"

@@ -136,6 +136,11 @@ export function Composer({
       providers.find((p) => p.key === providerKey)?.vision_models?.includes(model),
   );
 
+  // PDF vira texto extraído e funciona em QUALQUER modelo; só a
+  // imagem exige visão. Sem esta distinção, anexar um PDF a um modelo
+  // sem visão bloquearia o envio sem razão.
+  const temImagemAnexada = anexos.some((a) => !a.ehPdf);
+
   const broken = credentials.filter((c) => c.last_error);
   /*
    * Enquanto uma imagem sobe, o envio espera.
@@ -150,9 +155,10 @@ export function Composer({
     !disabled &&
     !sending &&
     !subindo &&
-    // Com anexo e modelo sem visao, enviar faria o modelo
-    // responder a uma pergunta sobre uma imagem que ele nao ve.
-    (anexos.length === 0 || modeloVeImagem);
+    // Com IMAGEM e modelo sem visao, enviar faria o modelo responder
+    // a uma pergunta sobre uma foto que ele nao ve. PDF nao entra
+    // nesta conta: ele ja chega como texto.
+    (!temImagemAnexada || modeloVeImagem);
 
   function submit() {
     if (!canSend) return;
@@ -183,7 +189,7 @@ export function Composer({
          * bloqueado enquanto durar, porque mandar a pergunta sem a
          * imagem faria o modelo responder sobre algo que nao viu.
          */}
-        {anexos.length > 0 && !modeloVeImagem ? (
+        {temImagemAnexada && !modeloVeImagem ? (
           <p
             role="status"
             className="mb-2 flex items-center gap-2 rounded-lg bg-warn/10 px-3 py-2 text-xs text-warn ring-1 ring-inset ring-warn/20"
@@ -233,13 +239,26 @@ export function Composer({
           />
 
           <div className="flex flex-wrap items-center gap-1.5 px-2.5 pb-2.5 pt-1">
-            {modeloVeImagem ? (
-              <BotaoDeAnexo
-                onEscolher={adicionar}
-                disabled={disabled}
-                cheio={anexos.length >= MAXIMO_DE_ANEXOS}
-              />
-            ) : null}
+            {/*
+             * O botao aparece SEMPRE: PDF vira texto extraido e
+             * funciona em qualquer modelo. Esconde-lo quando o modelo
+             * nao ve imagem tiraria o PDF junto -- e PDF e o caso que
+             * vale para o `mock` e para qualquer provedor futuro.
+             *
+             * A imagem continua protegida: `aceitos` filtra na hora de
+             * escolher, e o aviso explica.
+             */}
+            <BotaoDeAnexo
+              onEscolher={(arquivos) => {
+                const aceitos = modeloVeImagem
+                  ? arquivos
+                  : arquivos.filter((f) => f.type === "application/pdf");
+                if (aceitos.length > 0) void adicionar(aceitos);
+              }}
+              disabled={disabled}
+              cheio={anexos.length >= MAXIMO_DE_ANEXOS}
+              soPdf={!modeloVeImagem}
+            />
 
             {/* Seletor de provedor/modelo (§3.1.3: trocar afeta a
                 próxima mensagem, a conversa segue com o mesmo

@@ -100,6 +100,8 @@ class AnexoOut(BaseModel):
     filename: str
     media_type: str
     size_bytes: int
+    # Só em PDF. A tela mostra "12 páginas" sem reabrir o arquivo.
+    page_count: int | None = None
 
 
 class MessageOut(BaseModel):
@@ -586,6 +588,7 @@ async def list_messages(
                     filename=linha.filename,
                     media_type=linha.media_type,
                     size_bytes=linha.size_bytes,
+                    page_count=linha.page_count,
                 )
             )
 

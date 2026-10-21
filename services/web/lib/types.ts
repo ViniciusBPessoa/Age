@@ -321,8 +321,13 @@ export interface Conversation {
 export interface MessageAttachment {
   id: string;
   filename: string;
+  /** `image/*` ou `application/pdf`. */
   media_type: string;
   size_bytes: number;
+  /** Só em PDF: quantas páginas o documento tem. */
+  page_count?: number | null;
+  /** Só em PDF, na resposta do upload: quantas foram lidas. */
+  pages_read?: number | null;
 }
 
 export interface Message {

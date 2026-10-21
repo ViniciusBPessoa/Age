@@ -15,6 +15,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   SobreposicaoDeArraste,
   imagensDe,
+  temImagem,
   useArrastarImagem,
 } from "@/components/chat/arrastar-imagem";
 
@@ -54,7 +55,7 @@ describe("filtro do que foi solto", () => {
     const r = imagensDe(
       dt([
         arquivo("a.png", "image/png"),
-        arquivo("b.pdf", "application/pdf"),
+        arquivo("b.zip", "application/zip"),
         arquivo("c.jpg", "image/jpeg"),
       ]),
     );
@@ -62,7 +63,37 @@ describe("filtro do que foi solto", () => {
     expect(r.ignorados).toBe(1);
   });
 
-  it("conta os ignorados quando NADA e imagem", () => {
+  it("PDF e aceito, nao ignorado", () => {
+    /*
+     * Sabotagem: tirar `application/pdf` de `TIPOS_ACEITOS` -- o que
+     * ACONTECEU de verdade. O prettier colapsou o `Set` numa linha, a
+     * minha edicao nao casou, e o PDF arrastado foi recusado com uma
+     * frase que se contradizia: "so da para anexar imagem (...) e PDF".
+     *
+     * Os 314 testes continuaram verdes porque nenhum deles arrastava um
+     * PDF. So a captura da tela mostrou.
+     */
+    const r = imagensDe(dt([arquivo("edital.pdf", "application/pdf")]));
+    expect(r.imagens.map((f) => f.name)).toEqual(["edital.pdf"]);
+    expect(r.ignorados).toBe(0);
+  });
+
+  it("separa PDF de imagem para a regra de visao", () => {
+    /*
+     * Sabotagem: `temImagem` devolver `true` sempre.
+     *
+     * PDF vira texto extraido e funciona em QUALQUER modelo; so a
+     * imagem exige visao. Confundir os dois faria um PDF arrastado num
+     * modelo sem visao ser recusado sem motivo.
+     */
+    expect(temImagem([arquivo("a.pdf", "application/pdf")])).toBe(false);
+    expect(temImagem([arquivo("a.png", "image/png")])).toBe(true);
+    expect(
+      temImagem([arquivo("a.pdf", "application/pdf"), arquivo("b.png", "image/png")]),
+    ).toBe(true);
+  });
+
+  it("conta os ignorados quando NADA e aceito", () => {
     /*
      * Sabotagem: devolver `ignorados: 0` sempre.
      *
@@ -71,7 +102,7 @@ describe("filtro do que foi solto", () => {
      * — e o PDF é justamente o que vem a seguir, então este caso vai
      * acontecer.
      */
-    const r = imagensDe(dt([arquivo("doc.pdf", "application/pdf")]));
+    const r = imagensDe(dt([arquivo("pacote.zip", "application/zip")]));
     expect(r.imagens).toHaveLength(0);
     expect(r.ignorados).toBe(1);
   });
@@ -94,7 +125,7 @@ describe("a zona de soltura", () => {
     fireEvent.dragEnter(screen.getByTestId("area"), {
       dataTransfer: dt([arquivo("a.png", "image/png")]),
     });
-    expect(screen.queryByText(/Solte a imagem/i)).not.toBeNull();
+    expect(screen.queryByText(/Solte o arquivo/i)).not.toBeNull();
   });
 
   it("NAO mostra a sobreposicao arrastando texto", () => {
@@ -107,7 +138,7 @@ describe("a zona de soltura", () => {
     fireEvent.dragEnter(screen.getByTestId("area"), {
       dataTransfer: dt([], ["text/plain"]),
     });
-    expect(screen.queryByText(/Solte a imagem/i)).toBeNull();
+    expect(screen.queryByText(/Solte o arquivo/i)).toBeNull();
   });
 
   it("a sobreposicao NAO pisca ao cruzar elementos filhos", () => {
@@ -130,7 +161,7 @@ describe("a zona de soltura", () => {
     fireEvent.dragEnter(filho, carga); // entra no filho (ainda dentro)
     fireEvent.dragLeave(area, carga); // sai do pai, por causa do filho
 
-    expect(screen.queryByText(/Solte a imagem/i)).not.toBeNull();
+    expect(screen.queryByText(/Solte o arquivo/i)).not.toBeNull();
   });
 
   it("some quando o arraste realmente sai", () => {
@@ -145,7 +176,7 @@ describe("a zona de soltura", () => {
     fireEvent.dragEnter(area, carga);
     fireEvent.dragLeave(area, carga);
 
-    expect(screen.queryByText(/Solte a imagem/i)).toBeNull();
+    expect(screen.queryByText(/Solte o arquivo/i)).toBeNull();
   });
 
   it("entrega as imagens ao soltar, e some", () => {
@@ -159,7 +190,7 @@ describe("a zona de soltura", () => {
 
     expect(onSoltar).toHaveBeenCalledTimes(1);
     expect(onSoltar.mock.calls[0][0].map((f: File) => f.name)).toEqual(["a.png"]);
-    expect(screen.queryByText(/Solte a imagem/i)).toBeNull();
+    expect(screen.queryByText(/Solte o arquivo/i)).toBeNull();
   });
 
   it("com o modelo sem visao, arrastar nao faz nada", () => {
@@ -176,7 +207,7 @@ describe("a zona de soltura", () => {
     const carga = { dataTransfer: dt([arquivo("a.png", "image/png")]) };
 
     fireEvent.dragEnter(area, carga);
-    expect(screen.queryByText(/Solte a imagem/i)).toBeNull();
+    expect(screen.queryByText(/Solte o arquivo/i)).toBeNull();
 
     fireEvent.drop(area, carga);
     expect(onSoltar).not.toHaveBeenCalled();
@@ -203,8 +234,8 @@ describe("a sobreposicao", () => {
      * quinta imagem e ela sumiria sem explicação.
      */
     render(<SobreposicaoDeArraste visivel cheio />);
-    expect(screen.queryByText(/Solte a imagem/i)).toBeNull();
-    expect(screen.queryByText(/4 imagens/i)).not.toBeNull();
+    expect(screen.queryByText(/Solte o arquivo/i)).toBeNull();
+    expect(screen.queryByText(/4 anexos/i)).not.toBeNull();
   });
 
   it("é anunciada por leitor de tela", () => {

@@ -171,6 +171,8 @@ describe("botao de anexo", () => {
       expect(accept).toContain(tipo);
     }
     expect(accept).not.toContain("image/*");
+    // E o PDF, que entra pelo mesmo botão mas vira texto extraído.
+    expect(accept).toContain("application/pdf");
   });
 
   it("desliga quando o limite de anexos foi atingido", () => {
@@ -181,7 +183,7 @@ describe("botao de anexo", () => {
      * que o botão desligado com o motivo no `title`.
      */
     render(<BotaoDeAnexo onEscolher={() => {}} cheio />);
-    const botao = screen.getByRole("button", { name: "Anexar imagem" });
+    const botao = screen.getByRole("button", { name: "Anexar imagem ou PDF" });
     expect(botao.hasAttribute("disabled")).toBe(true);
     expect(botao.getAttribute("title")).toContain(String(MAXIMO_DE_ANEXOS));
   });

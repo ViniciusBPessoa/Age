@@ -281,6 +281,11 @@ class MessageAttachment(Base):
     size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
     sha256: Mapped[str] = mapped_column(Text, nullable=False)
     data: Mapped[bytes | None] = mapped_column(LargeBinary)
+    # Texto do PDF, extraído no upload (migration 0014). `None` em
+    # imagem — e é essa distinção que o worker usa para decidir se
+    # manda como imagem ou como texto.
+    extracted_text: Mapped[str | None] = mapped_column(Text)
+    page_count: Mapped[int | None] = mapped_column(Integer)
     # Gancho para object storage futuro; `None` enquanto `data` manda.
     storage_key: Mapped[str | None] = mapped_column(Text)
     position: Mapped[int] = mapped_column(Integer, default=0)

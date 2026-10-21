@@ -1,4 +1,4 @@
-"""Upload de imagem para anexar a uma mensagem (§12).
+"""Upload de anexo para uma mensagem: imagem ou PDF (§5.1.1).
 
 ## Por que uma rota separada, e não o corpo do POST da mensagem
 
@@ -24,6 +24,14 @@ nova para resolver um problema que este limite já resolve.
 Se um dia o limite subir para vídeo ou PDF de centenas de páginas, o
 caminho certo é upload direto para object storage com URL assinada — e
 aí o BFF sai da frente por completo, em vez de ser remendado.
+
+## PDF vira TEXTO, e a tela diz isso
+
+O modelo não aceita PDF. O texto é extraído aqui com `pypdf` e enviado
+como texto; os bytes originais ficam guardados para a pessoa reabrir o
+que mandou. PDF escaneado (foto das páginas) não tem texto para
+extrair, e é recusado com uma frase que explica o que fazer — em vez de
+ser aceito e silenciosamente não chegar ao modelo.
 
 ## O que é validado, e onde
 
@@ -51,6 +59,7 @@ from app.services.imagem_recebida import (
     ImagemRecusada,
     validar,
 )
+from app.services.pdf_recebido import PdfRecusado, extrair
 
 router = APIRouter(prefix="/attachments", tags=["attachments"])
 
@@ -60,6 +69,11 @@ class AttachmentOut(BaseModel):
     filename: str
     media_type: str
     size_bytes: int
+    # Só em PDF. A tela mostra "12 páginas" e avisa quando o documento
+    # foi cortado no teto — um anexo que virou outra coisa precisa
+    # dizer isso, senão a pessoa supõe que o modelo viu o arquivo.
+    page_count: int | None = None
+    pages_read: int | None = None
 
 
 @router.post(
@@ -79,7 +93,7 @@ async def upload_attachment(
     dados = await file.read()
 
     try:
-        imagem = validar(dados)
+        anexo = validar(dados)
     except ImagemRecusada as e:
         # 422 e não 400: o pedido está bem formado, o conteúdo é que
         # não serve. E `motivo` é escrito para quem está olhando a tela.
@@ -87,6 +101,27 @@ async def upload_attachment(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail={"code": "imagem_recusada", "message": e.motivo},
         ) from e
+
+    nome = (file.filename or ("documento.pdf" if anexo.e_pdf else "imagem"))[:200]
+
+    # O texto do PDF sai AQUI, não na hora de montar o prompt.
+    #
+    # PDF escaneado não tem texto nenhum, e descobrir isso no worker
+    # faria a pessoa esperar um turno inteiro — já cobrado — para ouvir
+    # "não entendi o anexo". Extraindo no upload, a recusa é imediata e
+    # o arquivo ainda está na tela.
+    texto: str | None = None
+    paginas: int | None = None
+    lidas: int | None = None
+    if anexo.e_pdf:
+        try:
+            pdf = extrair(anexo.dados, nome=nome)
+        except PdfRecusado as e:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={"code": "pdf_recusado", "message": e.motivo},
+            ) from e
+        texto, paginas, lidas = pdf.texto, pdf.paginas, pdf.paginas_lidas
 
     attachment_id = uuid4()
     db.add(
@@ -98,20 +133,24 @@ async def upload_attachment(
             conversation_id=None,
             # Nome só para exibir. Truncado porque é texto de origem
             # externa e a coluna não tem por que receber 4 KB de nome.
-            filename=(file.filename or "imagem")[:200],
-            media_type=imagem.media_type,
-            size_bytes=imagem.tamanho,
-            sha256=imagem.sha256,
-            data=imagem.dados,
+            filename=nome,
+            media_type=anexo.media_type,
+            size_bytes=anexo.tamanho,
+            sha256=anexo.sha256,
+            data=anexo.dados,
+            extracted_text=texto,
+            page_count=paginas,
         )
     )
     await db.flush()
 
     return AttachmentOut(
         id=attachment_id,
-        filename=(file.filename or "imagem")[:200],
-        media_type=imagem.media_type,
-        size_bytes=imagem.tamanho,
+        filename=nome,
+        media_type=anexo.media_type,
+        size_bytes=anexo.tamanho,
+        page_count=paginas,
+        pages_read=lidas,
     )
 
 

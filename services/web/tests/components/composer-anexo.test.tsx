@@ -70,26 +70,36 @@ describe("botao de anexo no composer", () => {
      * inalcançável, e nenhum teste de backend notaria.
      */
     montar();
-    expect(screen.queryByLabelText("Anexar imagem")).not.toBeNull();
+    expect(screen.queryByLabelText("Anexar imagem ou PDF")).not.toBeNull();
   });
 
-  it("NAO aparece com um modelo que nao ve imagem", () => {
+  it("com modelo sem visao, o botao FICA mas so aceita PDF", () => {
     /*
-     * Sabotagem: renderizar o botão sempre — o estado que a captura
-     * pegou. O anexo subiria e seria descartado no worker.
+     * O botão não some mais, e a mudança é deliberada: PDF vira texto
+     * extraído e funciona em QUALQUER modelo. Escondê-lo quando o
+     * modelo não vê imagem tiraria o PDF junto — e o PDF é justamente
+     * o caso que vale para o `mock` e para qualquer provedor futuro.
+     *
+     * Sabotagem: voltar a esconder (`{modeloVeImagem ? <Botao/> : null}`),
+     * ou deixar o `accept` com imagem. A primeira tira o recurso; a
+     * segunda deixa escolher uma foto que o modelo não vai ver.
      */
-    montar({ providerKey: "mock", model: "mock-chat" });
-    expect(screen.queryByLabelText("Anexar imagem")).toBeNull();
+    const { container } = montar({ providerKey: "mock", model: "mock-chat" });
+    expect(screen.queryByLabelText("Anexar PDF")).not.toBeNull();
+
+    const accept =
+      container.querySelector('input[type="file"]')?.getAttribute("accept") ?? "";
+    expect(accept).toBe("application/pdf");
   });
 
-  it("NAO aparece quando o backend nao informa quais modelos veem", () => {
+  it("sem saber quais modelos veem, o botao aceita so PDF", () => {
     /*
      * Sabotagem: `?? models` em vez de `?? []`.
      *
-     * Um backend anterior a este campo não manda `vision_models`.
-     * Tratar ausência como "todos veem" ofereceria anexo para
-     * qualquer modelo — o default inseguro. Ausência é "não sei", e
-     * não sei esconde.
+     * Um backend anterior a `vision_models` não manda o campo. Tratar
+     * ausência como "todos veem" ofereceria IMAGEM para qualquer
+     * modelo — o default inseguro. Ausência é "não sei", e não sei
+     * restringe ao PDF, que funciona em todo lugar.
      */
     const semCampo: ProviderInfo = {
       key: "deepseek",
@@ -97,17 +107,22 @@ describe("botao de anexo no composer", () => {
       models: ["deepseek-flash"],
       default_model: "deepseek-flash",
     };
-    montar({ providers: [semCampo], model: "deepseek-flash" });
-    expect(screen.queryByLabelText("Anexar imagem")).toBeNull();
+    const { container } = montar({
+      providers: [semCampo],
+      model: "deepseek-flash",
+    });
+    const accept =
+      container.querySelector('input[type="file"]')?.getAttribute("accept") ?? "";
+    expect(accept).toBe("application/pdf");
   });
 
-  it("um modelo sem visao no MESMO provedor nao ganha o botao", () => {
+  it("um modelo sem visao no MESMO provedor so aceita PDF", () => {
     /*
      * Sabotagem: olhar só o provedor (`vision_models.length > 0`) e
      * não o modelo escolhido.
      *
-     * É a sabotagem que os testes acima NÃO pegam: um provedor com um
-     * modelo que vê e outro que não veria o botão nos dois.
+     * É a sabotagem que os outros NÃO pegam: um provedor com um modelo
+     * que vê e outro que não aceitaria imagem nos dois.
      */
     const misto: ProviderInfo = {
       key: "deepseek",
@@ -116,8 +131,25 @@ describe("botao de anexo no composer", () => {
       default_model: "deepseek-flash",
       vision_models: ["deepseek-flash"],
     };
-    montar({ providers: [misto], model: "deepseek-sem-visao" });
-    expect(screen.queryByLabelText("Anexar imagem")).toBeNull();
+    const { container } = montar({
+      providers: [misto],
+      model: "deepseek-sem-visao",
+    });
+    const accept =
+      container.querySelector('input[type="file"]')?.getAttribute("accept") ?? "";
+    expect(accept).toBe("application/pdf");
+  });
+
+  it("com modelo que ve, o accept inclui imagem E PDF", () => {
+    /*
+     * A outra ponta, e eles só fecham juntos: restringir tudo a PDF
+     * passaria nos três testes acima e mataria a imagem.
+     */
+    const { container } = montar();
+    const accept =
+      container.querySelector('input[type="file"]')?.getAttribute("accept") ?? "";
+    expect(accept).toContain("image/png");
+    expect(accept).toContain("application/pdf");
   });
 });
 
@@ -138,7 +170,7 @@ describe("conta que usa a chave da instancia", () => {
      * passando, porque eles passam `providerKey` explicito.
      */
     montar({ credentials: [], providerKey: "deepseek", model: "deepseek-flash" });
-    expect(screen.queryByLabelText("Anexar imagem")).not.toBeNull();
+    expect(screen.queryByLabelText("Anexar imagem ou PDF")).not.toBeNull();
   });
 
   it("o seletor nao diz 'sem credencial' quando ha modelo emprestado", () => {
