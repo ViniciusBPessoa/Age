@@ -71,12 +71,17 @@ def model_sees_images(key: str, model: str | None) -> bool:
     cls = _REGISTRY.get(key)
     if cls is None:
         return False
-    caps = cls._capabilities_by_model.get(  # noqa: SLF001
-        model or cls.default_model
-    )
+    # `getattr` nas DUAS buscas: `_capabilities_by_model` existe em
+    # `OpenAICompatibleProvider`, mas um adaptador pode implementar
+    # `capabilities` como property e nao herdar dela -- e o mock faz
+    # exatamente isso. Acessar o atributo direto levantava
+    # `AttributeError` e derrubava o turno de quem usa o mock, que e a
+    # conta de demonstracao inteira.
+    por_modelo = getattr(cls, "_capabilities_by_model", {}) or {}
+    caps = por_modelo.get(model or cls.default_model)
     if caps is None:
         caps = getattr(cls, "_fallback_capabilities", None)
-    return bool(caps is not None and caps.supports_vision)
+    return bool(caps is not None and getattr(caps, "supports_vision", False))
 
 
 def is_registered(key: str) -> bool:

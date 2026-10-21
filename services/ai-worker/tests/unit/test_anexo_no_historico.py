@@ -170,6 +170,37 @@ class TestModeloQueVeImagem:
         assert model_sees_images("deepseek", "deepseek-chat") is True
         assert model_sees_images("deepseek", "nome-que-nao-existe") is True
 
+    def test_provedor_registrado_sem_tabela_de_capacidades(self) -> None:
+        """Sabotagem: `cls._capabilities_by_model` em vez de `getattr`.
+
+        Este teste nasceu de um defeito que só o sistema rodando
+        mostrou. `_capabilities_by_model` existe em
+        `OpenAICompatibleProvider`, mas um adaptador pode implementar
+        `capabilities` como property e não herdar dela — e o `mock` faz
+        exatamente isso. O acesso direto levantava `AttributeError`
+        DENTRO do turno, e o `except` do worker o engolia: o turno
+        terminava "done", sem resposta do modelo e sem o aviso de anexo
+        ignorado.
+
+        A conta de demonstração usa o mock, ou seja, o defeito atingia
+        todo turno dela. `test_provedor_desconhecido_e_false` não pegava
+        porque ali o provedor nem está no registry — o caminho que
+        falhava era o do provedor REGISTRADO e sem a tabela.
+        """
+        assert model_sees_images("mock", None) is False
+        assert model_sees_images("mock", "qualquer-modelo") is False
+
+    def test_openai_nao_finge_ver_imagem(self) -> None:
+        """Sabotagem: `supports_vision=True` no default do dataclass.
+
+        Só declarei visão onde MEDI (DeepSeek, contra a API real). O
+        `gpt-4o` aceita imagem de fato, mas eu não testei por este
+        caminho, e declarar o que não verifiquei é o erro que o
+        cabeçalho de `deepseek.py` já registra sobre a tabela de preços
+        antiga.
+        """
+        assert model_sees_images("openai", None) is False
+
     def test_provedor_desconhecido_e_false(self) -> None:
         """Sabotagem: levantar exceção, ou devolver `True`.
 
@@ -213,13 +244,17 @@ class TestModeloQueVeImagem:
             f"nome de provedor no corpo da funcao: {literais}"
         )
 
-        nomes = {
+        # `supports_vision` consultado como atributo (`caps.supports_vision`)
+        # ou por nome (`getattr(caps, "supports_vision", False)`) — as duas
+        # são consulta por capacidade, que é o que §3.1.2 exige. O que o
+        # teste proíbe é o ramo por nome de provedor, afirmado acima.
+        consultados = {
             no.attr
             for stmt in corpo
             for no in ast.walk(stmt)
             if isinstance(no, ast.Attribute)
-        }
-        assert "supports_vision" in nomes
+        } | literais
+        assert "supports_vision" in consultados
 
 
 @pytest.mark.parametrize("vazio", [{}, None])
