@@ -266,3 +266,28 @@ def test_dicionario_vazio_nao_quebra(vazio) -> None:
     """
     msg = _to_domain_message(linha(uuid4()), vazio)
     assert msg.content == "o que e isto?"
+
+
+def test_nome_aposentado_entra_no_catalogo_de_visao() -> None:
+    """O catalogo lista os nomes APOSENTADOS que veem imagem.
+
+    Sabotagem: varrer so `known_models`.
+
+    `deepseek-chat` fica fora do catalogo de proposito -- nao deve ser
+    OFERECIDO a quem escolhe agora --, mas continua gravado em
+    `core.llm_credentials.default_model` de quem escolheu antes, e o
+    provedor o redireciona para o `deepseek-flash`. Varrer so os atuais
+    escondia o botao de anexo de quem tem um nome antigo salvo, que foi
+    exatamente o caso na conta real.
+    """
+    from app.adapters.llm.registry import available_providers
+
+    catalogo = {p["key"]: p for p in available_providers()}
+    vision = catalogo["deepseek"]["vision_models"]
+
+    assert "deepseek-chat" in vision, "nome aposentado no catalogo de visao"
+    assert "deepseek-flash" in vision
+    # E o catalogo OFERECIDO segue so com os atuais.
+    assert "deepseek-chat" not in catalogo["deepseek"]["models"]
+    # Provedor sem visao continua vazio.
+    assert catalogo["mock"]["vision_models"] == []

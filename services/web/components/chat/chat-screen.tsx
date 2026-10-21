@@ -252,7 +252,18 @@ export function ChatScreen({
 }) {
   const router = useRouter();
   const queryClient = useQueryClient();
+  /*
+   * A credencial que REALMENTE vale: `is_active`, como `key-source` e o
+   * `usable` do composer ja exigem.
+   *
+   * `GET /llm/credentials` devolve as inativas tambem -- e uma
+   * credencial desativada vinha na frente da chave da instancia,
+   * fazendo a tela anunciar um modelo que nao vai rodar. Na conta real
+   * era uma chave DeepSeek desligada com o nome aposentado
+   * `deepseek-chat`, e foi o que escondeu o botao de anexo.
+   */
   const timezone = me.timezone;
+  const credencialAtiva = credentials.find((c) => c.is_active) ?? null;
 
   const [streaming, setStreaming] = useState(false);
   /*
@@ -955,16 +966,16 @@ export function ChatScreen({
           credentials={credentials}
           providerKey={
             active?.provider_key ??
-            credentials[0]?.provider_key ??
+            credencialAtiva?.provider_key ??
             // A chave da instância é o último recurso, e para a maioria
-            // das contas é o ÚNICO: sem credencial própria, os dois
-            // acima são `undefined`.
+            // das contas é o ÚNICO: sem credencial ATIVA, os dois acima
+            // são `undefined`.
             (keySource?.source === "instance" ? keySource.provider_key : null) ??
             null
           }
           model={
             active?.model ??
-            credentials[0]?.default_model ??
+            credencialAtiva?.default_model ??
             (keySource?.source === "instance" ? keySource.model : null) ??
             null
           }

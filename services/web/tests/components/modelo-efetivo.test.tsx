@@ -33,15 +33,17 @@ function modeloEfetivo(
   credentials: Credential[],
   keySource: KeySource | null,
 ): { providerKey: string | null; model: string | null } {
+  // `is_active`: `GET /llm/credentials` devolve as inativas tambem.
+  const ativa = credentials.find((c) => c.is_active) ?? null;
   return {
     providerKey:
       ativo?.provider_key ??
-      credentials[0]?.provider_key ??
+      ativa?.provider_key ??
       (keySource?.source === "instance" ? keySource.provider_key : null) ??
       null,
     model:
       ativo?.model ??
-      credentials[0]?.default_model ??
+      ativa?.default_model ??
       (keySource?.source === "instance" ? keySource.model : null) ??
       null,
   };
@@ -154,5 +156,36 @@ describe("qual modelo o chat usa", () => {
     expect(trecho).toContain('keySource?.source === "instance"');
     expect(trecho).toContain("keySource.provider_key");
     expect(trecho).toContain("keySource.model");
+  });
+});
+
+describe("credencial desativada", () => {
+  /*
+   * A conta real tinha uma credencial DeepSeek DESLIGADA, com o nome
+   * aposentado `deepseek-chat`. Ela vinha na frente da chave da
+   * instancia, e o composer anunciava um modelo que nao ia rodar --
+   * foi o que escondeu o botao de anexo na tela de verdade.
+   */
+
+  it("credencial inativa NAO tem precedencia sobre a instancia", () => {
+    /*
+     * Sabotagem: voltar a `credentials[0]`. A tela mostraria o provedor
+     * de uma chave desligada, e tudo que depende das capacidades do
+     * modelo (o botao de anexo) olharia para o modelo errado.
+     */
+    const inativa = { ...credencial("deepseek", "deepseek-chat"), is_active: false };
+    const r = modeloEfetivo(null, [inativa], INSTANCIA);
+    expect(r.model).toBe("deepseek-flash");
+  });
+
+  it("entre uma inativa e uma ativa, vale a ativa", () => {
+    /*
+     * Sabotagem: `credentials[0]` de novo -- com a inativa primeiro na
+     * lista, a ativa seria ignorada.
+     */
+    const inativa = { ...credencial("deepseek", "deepseek-chat"), is_active: false };
+    const ativa = { ...credencial("openai", "gpt-4o-mini"), id: "c2" };
+    const r = modeloEfetivo(null, [inativa, ativa], INSTANCIA);
+    expect(r.providerKey).toBe("openai");
   });
 });
