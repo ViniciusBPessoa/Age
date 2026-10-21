@@ -29,7 +29,7 @@ from age_contracts import (
 from sqlalchemy import text
 
 from app import tracing
-from app.adapters.llm.registry import build_llm
+from app.adapters.llm.registry import build_llm, model_sees_images
 from app.calendar_client import CalendarClient
 from app.config import get_settings
 from app.credential_resolver import NoCredential, QuotaExceeded
@@ -127,9 +127,7 @@ async def run_turn(ctx: dict, payload: dict) -> dict:
                         {"tid": turn_id},
                     )
                 ).scalar_one_or_none()
-                log.info(
-                    "turno %s já em %s, descartando duplicata", turn_id, previous
-                )
+                log.info("turno %s já em %s, descartando duplicata", turn_id, previous)
                 return {"status": "duplicate", "previous": previous}
 
         # --- 2. Credencial e provedor ---
@@ -139,9 +137,7 @@ async def run_turn(ctx: dict, payload: dict) -> dict:
             # `credential_resolver`, inclusive a checagem de cota, para
             # que este arquivo continue sendo cola e não política.
             try:
-                credencial = await resolve_credential(
-                    db, user_id, conversation_id
-                )
+                credencial = await resolve_credential(db, user_id, conversation_id)
             except NoCredential:
                 await _fail(
                     pub,
@@ -174,9 +170,7 @@ async def run_turn(ctx: dict, payload: dict) -> dict:
 
             conv = (
                 await db.execute(
-                    text(
-                        "SELECT model FROM core.conversations WHERE id = :cid"
-                    ),
+                    text("SELECT model FROM core.conversations WHERE id = :cid"),
                     {"cid": str(conversation_id)},
                 )
             ).first()
@@ -186,7 +180,7 @@ async def run_turn(ctx: dict, payload: dict) -> dict:
             rows = await db.execute(
                 text(
                     """
-                    SELECT role, content, tool_calls, tool_call_id
+                    SELECT id, role, content, tool_calls, tool_call_id
                     FROM core.messages
                     WHERE conversation_id = :cid AND deleted_at IS NULL
                     ORDER BY created_at ASC
@@ -194,7 +188,51 @@ async def run_turn(ctx: dict, payload: dict) -> dict:
                 ),
                 {"cid": str(conversation_id)},
             )
-            history = [_to_domain_message(r) for r in rows.all()]
+            linhas_do_historico = rows.all()
+
+            # Os anexos de TODAS as mensagens da conversa, numa consulta
+            # so: uma por mensagem seria N+1 num laco que cresce com o
+            # tamanho da conversa.
+            #
+            # So busca se o modelo ve imagem. Para modelo sem visao a
+            # consulta seria trabalho jogado fora -- e pior, os bytes
+            # viriam do banco para serem descartados.
+            anexos_por_mensagem: dict[str, list] = {}
+            if model_sees_images(provider_key, model):
+                anexos_por_mensagem = await _carregar_anexos(
+                    db, conversation_id=conversation_id
+                )
+            else:
+                # Descarte CALADO e o que faz o modelo afirmar o que nao
+                # fez: a pessoa manda a foto, a resposta vem sem ela, e
+                # nada no caminho reclama. Se ha anexo e o modelo nao ve,
+                # isso vira linha de log -- e a tela so oferece o botao
+                # quando o modelo aceita imagem, entao chegar aqui com
+                # anexo significa que alguma das duas pontas esta errada.
+                tem_anexo = (
+                    await db.execute(
+                        text(
+                            """
+                            SELECT 1 FROM core.message_attachments
+                            WHERE conversation_id = :cid
+                              AND message_id IS NOT NULL
+                            LIMIT 1
+                            """
+                        ),
+                        {"cid": str(conversation_id)},
+                    )
+                ).first()
+                if tem_anexo is not None:
+                    log.warning(
+                        "turno %s: anexo ignorado, modelo %s/%s nao ve imagem",
+                        turn_id,
+                        provider_key,
+                        model,
+                    )
+
+            history = [
+                _to_domain_message(r, anexos_por_mensagem) for r in linhas_do_historico
+            ]
 
             summary_row = (
                 await db.execute(
@@ -270,9 +308,7 @@ async def run_turn(ctx: dict, payload: dict) -> dict:
         # O staging acumula propostas sem tocar a agenda (§5.2). As
         # tools de escrita só conhecem este objeto; é estruturalmente
         # impossível uma delas aplicar algo.
-        staging = StagingBuilder(
-            user_id=user_id, conversation_id=conversation_id
-        )
+        staging = StagingBuilder(user_id=user_id, conversation_id=conversation_id)
         tool_ctx = ToolContext(
             user_id=user_id,
             conversation_id=conversation_id,
@@ -386,9 +422,7 @@ async def run_turn(ctx: dict, payload: dict) -> dict:
                 )
             )
 
-        await pub.publish(
-            DoneEvent(message_id=str(message_id), status=TurnStatus.DONE)
-        )
+        await pub.publish(DoneEvent(message_id=str(message_id), status=TurnStatus.DONE))
         return {
             "status": "done",
             "iterations": result.iterations,
@@ -435,18 +469,67 @@ async def run_turn(ctx: dict, payload: dict) -> dict:
 # ---------------------------------------------------------------
 # Auxiliares
 # ---------------------------------------------------------------
-def _to_domain_message(row) -> Message:
-    from app.ports.llm import ToolCall
+async def _carregar_anexos(db, *, conversation_id) -> dict[str, list]:
+    """Os anexos da conversa, agrupados por mensagem e na ordem.
 
-    role, content, tool_calls_raw, tool_call_id = row
+    `ORDER BY position` nao e detalhe: "compare a primeira com a
+    segunda" muda de significado se a ordem embaralhar, e a ordem que
+    vale e a que a pessoa escolheu no composer.
+
+    Le `data` direto. O worker tem SELECT em `core.*` (secao 2.3.2), e
+    os bytes vem do banco porque e la que eles estao -- ver o cabecalho
+    da migration 0013 para por que nao num arquivo.
+    """
+    from app.ports.llm import ImagePart
+
+    rows = await db.execute(
+        text(
+            """
+            SELECT message_id, media_type, data
+            FROM core.message_attachments
+            WHERE conversation_id = :cid
+              AND message_id IS NOT NULL
+              AND data IS NOT NULL
+            ORDER BY message_id, position ASC
+            """
+        ),
+        {"cid": str(conversation_id)},
+    )
+    por_mensagem: dict[str, list] = {}
+    for message_id, media_type, dados in rows.all():
+        por_mensagem.setdefault(str(message_id), []).append(
+            ImagePart(data=bytes(dados), media_type=media_type)
+        )
+    return por_mensagem
+
+
+def _to_domain_message(
+    row, anexos_por_mensagem: dict[str, list] | None = None
+) -> Message:
+    from app.ports.llm import TextPart, ToolCall
+
+    message_id, role, content, tool_calls_raw, tool_call_id = row
     calls: tuple[ToolCall, ...] = ()
     if tool_calls_raw:
         calls = tuple(
             ToolCall(id=c["id"], name=c["name"], arguments=c.get("arguments", {}))
             for c in tool_calls_raw
         )
+
+    # Com anexo, `content` deixa de ser `str` e vira tupla de partes.
+    # O texto vem PRIMEIRO: e a pergunta que diz o que olhar na imagem,
+    # e o provedor le a sequencia na ordem em que ela chega.
+    anexos = (anexos_por_mensagem or {}).get(str(message_id), [])
+    conteudo: object = content
+    if anexos:
+        partes = []
+        if content:
+            partes.append(TextPart(text=content))
+        partes.extend(anexos)
+        conteudo = tuple(partes)
+
     return Message(
-        role=role, content=content, tool_calls=calls, tool_call_id=tool_call_id
+        role=role, content=conteudo, tool_calls=calls, tool_call_id=tool_call_id
     )
 
 
@@ -561,8 +644,7 @@ def _friendly(exc: LLMError) -> str:
     match exc.code:
         case "llm_auth_failed":
             return (
-                f"A chave do {name} foi rejeitada. "
-                "Confira em Configurações → Modelos."
+                f"A chave do {name} foi rejeitada. Confira em Configurações → Modelos."
             )
         case "llm_rate_limited":
             return (

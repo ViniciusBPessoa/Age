@@ -55,5 +55,29 @@ def available_providers() -> list[dict]:
     return sorted(out, key=lambda p: p["name"])
 
 
+def model_sees_images(key: str, model: str | None) -> bool:
+    """Se este provedor/modelo aceita imagem, SEM instanciar o provedor.
+
+    Existe porque quem decide se vale buscar os anexos do banco nao tem
+    chave de API em maos: a consulta acontece enquanto a sessao de banco
+    esta aberta, e o provedor so e construido depois, com a credencial
+    ja decifrada.
+
+    Ler `supports_vision` da tabela de capacidades e consulta por
+    atributo, nao `if provider_key == "deepseek"` -- e a mesma regra de
+    §3.1.2. Provedor desconhecido devolve `False`: o lado seguro e nao
+    buscar bytes que ninguem vai usar.
+    """
+    cls = _REGISTRY.get(key)
+    if cls is None:
+        return False
+    caps = cls._capabilities_by_model.get(  # noqa: SLF001
+        model or cls.default_model
+    )
+    if caps is None:
+        caps = getattr(cls, "_fallback_capabilities", None)
+    return bool(caps is not None and caps.supports_vision)
+
+
 def is_registered(key: str) -> bool:
     return key in _REGISTRY
