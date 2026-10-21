@@ -20,6 +20,7 @@ import { useEffect, useRef, useState } from "react";
 import { Badge, Button, IconSend, Select, cx } from "@/components/ui";
 import {
   BotaoDeAnexo,
+  type EstadoDeAnexos,
   MAXIMO_DE_ANEXOS,
   MiniaturasDeAnexo,
   useAnexos,
@@ -53,6 +54,7 @@ export function Composer({
   onSend,
   onProviderChange,
   onTargetChange,
+  estadoDeAnexos,
 }: {
   providers: ProviderInfo[];
   credentials: Credential[];
@@ -69,11 +71,25 @@ export function Composer({
   onSend: (text: string, attachmentIds: string[]) => void;
   onProviderChange: (providerKey: string, model: string) => void;
   onTargetChange: (target: Target) => void;
+  /**
+   * O estado dos anexos, quando quem o possui é o pai.
+   *
+   * Existe porque a zona de arrastar é a `<main>` inteira, e uma
+   * imagem solta no meio da conversa precisa cair na MESMA lista que
+   * as miniaturas daqui mostram. Omitido, o composer cria o seu — o
+   * que mantém o componente usável sozinho, como os testes o montam.
+   */
+  estadoDeAnexos?: EstadoDeAnexos;
 }) {
   const [text, setText] = useState("");
   const area = useRef<HTMLTextAreaElement>(null);
   const [pulse, setPulse] = useState(false);
-  const { anexos, adicionar, remover, limpar, idsProntos, subindo } = useAnexos();
+  // `useAnexos` roda sempre (regra dos hooks), e o do pai vence
+  // quando existe. Chamar condicionalmente quebraria a ordem dos
+  // hooks entre renders.
+  const proprio = useAnexos();
+  const { anexos, adicionar, remover, limpar, idsProntos, subindo } =
+    estadoDeAnexos ?? proprio;
 
   // O chip pisca quando a mensagem sobrepôs o padrão (§8.1).
   useEffect(() => {

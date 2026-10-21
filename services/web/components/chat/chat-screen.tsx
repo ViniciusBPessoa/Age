@@ -51,6 +51,8 @@ import { Composer } from "@/components/chat/composer";
 import { ConversationSidebar } from "@/components/conversation-list/sidebar";
 import { PlanReview } from "@/components/plan-review/plan-review";
 import { Button, IconAlert, IconInfo, IconX, LoadError, cx } from "@/components/ui";
+import { useAnexos } from "./anexos-do-composer";
+import { SobreposicaoDeArraste, useArrastarImagem } from "./arrastar-imagem";
 import { RequestFailed, api } from "@/lib/api-client";
 import { mensagemDeFalha } from "@/lib/resultado-do-apply";
 import { subscribeToTurn, toolLabel, type StreamEvent } from "@/lib/sse";
@@ -265,6 +267,14 @@ export function ChatScreen({
   const timezone = me.timezone;
   const credencialAtiva = credentials.find((c) => c.is_active) ?? null;
 
+  /*
+   * Os anexos vivem AQUI, nao no composer.
+   *
+   * A zona de arrastar e a `<main>` inteira, e as miniaturas ficam no
+   * composer: com o hook dentro dele, soltar uma imagem no meio da
+   * conversa cairia numa lista que ninguem mostra.
+   */
+
   const [streaming, setStreaming] = useState(false);
   /*
    * A mensagem que acabou de ser enviada, enquanto o servidor nao a
@@ -381,6 +391,55 @@ export function ChatScreen({
   });
 
   const active = conversations.data?.items.find((c) => c.id === idAtivo);
+
+  const providerEfetivo =
+    active?.provider_key ??
+    credencialAtiva?.provider_key ??
+    (keySource?.source === "instance" ? keySource.provider_key : null) ??
+    null;
+  const modeloEfetivo =
+    active?.model ??
+    credencialAtiva?.default_model ??
+    (keySource?.source === "instance" ? keySource.model : null) ??
+    null;
+  // A MESMA regra do composer: so arrasta para modelo que ve imagem.
+  const modeloVeImagem = Boolean(
+    modeloEfetivo &&
+      providers
+        .find((p) => p.key === providerEfetivo)
+        ?.vision_models?.includes(modeloEfetivo),
+  );
+
+  const estadoDeAnexos = useAnexos();
+  const [avisoDeArraste, setAvisoDeArraste] = useState<string | null>(null);
+
+  const arraste = useArrastarImagem({
+    ativo: modeloVeImagem,
+    onSoltar: (imagens, ignorados) => {
+      if (imagens.length > 0) void estadoDeAnexos.adicionar(imagens);
+      /*
+       * Soltar um PDF e nao acontecer NADA parece defeito. O aviso diz
+       * o que foi ignorado e por que -- e e temporario porque uma
+       * mensagem de erro permanente vira mobilia.
+       */
+      if (ignorados > 0) {
+        setAvisoDeArraste(
+          imagens.length > 0
+            ? `${ignorados} ${ignorados === 1 ? "arquivo" : "arquivos"} fora de JPEG, PNG, GIF ou WebP ${ignorados === 1 ? "foi ignorado" : "foram ignorados"}.`
+            : "Por enquanto só dá para anexar imagem: JPEG, PNG, GIF ou WebP.",
+        );
+      }
+    },
+  });
+
+  // O aviso some sozinho. `avisoDeArraste` na dependencia e nao um
+  // timer no handler: soltar duas vezes seguidas reinicia a contagem
+  // em vez de o primeiro timer apagar o segundo aviso.
+  useEffect(() => {
+    if (!avisoDeArraste) return;
+    const t = setTimeout(() => setAvisoDeArraste(null), 6000);
+    return () => clearTimeout(t);
+  }, [avisoDeArraste]);
 
   /**
    * §5.10: reativo, nunca notificação.
@@ -800,7 +859,25 @@ export function ChatScreen({
         />
       </div>
 
-      <main className="flex min-w-0 flex-1 flex-col pb-14 md:pb-0">
+      {/* `relative` ancora a sobreposicao de arraste no `inset-0`. */}
+      <main
+        className="relative flex min-w-0 flex-1 flex-col pb-14 md:pb-0"
+        {...arraste.props}
+      >
+        <SobreposicaoDeArraste
+          visivel={arraste.sobre}
+          cheio={estadoDeAnexos.anexos.length >= 4}
+        />
+
+        {avisoDeArraste ? (
+          <p
+            role="status"
+            className="mx-4 mt-3 rounded-lg bg-warn/10 px-3 py-2 text-xs text-warn ring-1 ring-inset ring-warn/20 md:mx-6"
+          >
+            {avisoDeArraste}
+          </p>
+        ) : null}
+
         {/* §5.10: o reconhecimento aparece uma vez, no topo, e não como
             notificação. */}
         {changes.data && changes.data.changes.length > 0 ? (
@@ -962,6 +1039,7 @@ export function ChatScreen({
         ) : null}
 
         <Composer
+          estadoDeAnexos={estadoDeAnexos}
           providers={providers}
           credentials={credentials}
           providerKey={

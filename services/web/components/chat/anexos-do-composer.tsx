@@ -60,7 +60,24 @@ export type AnexoLocal = {
   motivo?: string;
 };
 
-export function useAnexos() {
+/**
+ * O que `useAnexos` devolve.
+ *
+ * Nomeado porque o estado SOBE para o `chat-screen`: quem recebe o
+ * arraste é a `<main>` inteira, e as miniaturas vivem no composer. Com
+ * o hook chamado dentro do composer, os dois teriam listas separadas e
+ * soltar a imagem no meio da conversa não apareceria em lugar nenhum.
+ */
+export type EstadoDeAnexos = {
+  anexos: AnexoLocal[];
+  adicionar: (arquivos: File[]) => Promise<void>;
+  remover: (localId: string) => void;
+  limpar: () => void;
+  idsProntos: string[];
+  subindo: boolean;
+};
+
+export function useAnexos(): EstadoDeAnexos {
   const [anexos, setAnexos] = useState<AnexoLocal[]>([]);
   // As prévias criadas, para revogar no desmonte. Em `ref` e não em
   // estado: revogar não é render, e pôr isto no estado faria cada
