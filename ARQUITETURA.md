@@ -1158,6 +1158,14 @@ O `deepseek-flash` — o modelo padrão — **aceita imagem nativamente**, no me
 
 Limites: **5 MB por imagem, 4 por mensagem**. O provedor aceita 32 MiB e 600; o corte é de interface e do buffer do BFF, que lê todo POST em memória para poder repetir após renovar o token.
 
+**Arrastar para a conversa.** A zona de soltura é a `<main>` inteira — mensagens, cabeçalho e composer —, porque quem arrasta uma foto mira "o chat", não o campo de texto. Três detalhes decidem se funciona, e nenhum deles aparece em teste de unidade:
+
+1. **Contador de profundidade, não booleano.** `dragenter`/`dragleave` disparam a cada elemento filho cruzado; numa conversa com dez mensagens, "entrou/saiu" faz a sobreposição piscar a cada bolha.
+2. **`preventDefault` no `dragover`**, senão o navegador recusa a soltura e `drop` nunca dispara. Jsdom entrega o `drop` de qualquer jeito, então só o navegador real mostra.
+3. **`pointer-events-none` na sobreposição**, senão ela vira o alvo do arraste, dispara `dragleave` na `<main>` e o `drop` se perde.
+
+Soltar **fora** da zona faria o navegador abrir o arquivo e sair da aplicação, matando o turno em andamento — um listener no documento cancela isso. E soltar um PDF avisa em vez de ficar mudo.
+
 **A tela só oferece o que o modelo aceita.** O catálogo de provedores carrega `vision_models`, e o botão de anexo só existe quando o modelo **escolhido** vê imagem. Sem isso o anexo subiria, seria gravado e o worker o descartaria — e descarte calado faz o modelo afirmar o que não fez. Se mesmo assim chegar anexo a um modelo sem visão, o worker emite `log.warning` em vez de ignorar.
 
 **Duas armadilhas que só a captura da tela mostrou**, ambas invisíveis para a suíte:
