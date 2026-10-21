@@ -1173,6 +1173,28 @@ Soltar **fora** da zona faria o navegador abrir o arquivo e sair da aplicação,
 1. O botão aparecia com o `mock` selecionado, que não vê imagem.
 2. Pior: o botão **sumia** para quem usa a chave da instância — o caminho padrão do Age —, porque `credentials` vem vazio e nenhum modelo era conhecido. A regra de precedência completa está em `chat-screen`: conversa ativa → credencial própria → `key-source` quando `source === "instance"`.
 
+### 5.1.2 Anexos de PDF
+
+**O modelo não aceita PDF.** O texto é extraído com `pypdf` **no upload** e enviado como texto; os bytes originais ficam guardados para a pessoa reabrir o que mandou. A tela diz que foi isso que aconteceu — um anexo que silenciosamente vira outra coisa é a surpresa que faz alguém não confiar no resultado.
+
+**Por que no upload, e não no worker.** PDF escaneado não tem texto nenhum. Descobrir isso no worker faria a pessoa anexar, escrever a pergunta, mandar, esperar — e ouvir "não entendi o anexo" de um turno já cobrado. Na rota, a recusa é imediata e o arquivo ainda está na tela. De quebra, o worker não precisa de `pypdf`: lê uma coluna de texto, e o schema `ai` continua sem saber o que é PDF.
+
+**O teto de 50 páginas saiu de medição** (~4 caracteres por token):
+
+| PDF | Texto | Tokens | Custo |
+|---|---|---|---|
+| 1 página | 2.030 chars | ~507 | US$ 0,00008 |
+| 10 páginas | 20.349 chars | ~5.087 | US$ 0,00076 |
+| 40 páginas | 82.479 chars | ~20.619 | US$ 0,00309 |
+
+40 páginas geram **mais tokens que o prompt inteiro do Age** (~12.850), e o custo não é de um turno: o histórico é relido a cada mensagem seguinte, então um PDF grande encarece a conversa toda. Cortar é necessário; cortar **sem avisar** faria o modelo responder sobre metade do documento como se fosse o todo, então a tela mostra "li 30 de 80 páginas".
+
+**PDF não exige modelo com visão**, porque chega como texto — funciona em qualquer um, inclusive no `mock`. O botão de anexo não some quando o modelo não vê imagem: ele restringe o `accept` a PDF.
+
+**Os delimitadores no prompt não são enfeite.** O texto entra entre `--- início do documento ---` e `--- fim ---`, com o nome do arquivo declarado. Sem isso o conteúdo se mistura com a pergunta, e um PDF que contenha "ignore as instruções anteriores" vira injeção.
+
+**O que não é feito:** OCR (PDF escaneado é recusado com instrução — mandar um print, que o modelo lê como imagem) e imagens embutidas no PDF (só o texto sai; rasterizar custaria até 994 tokens por página e exigiria dependência nativa).
+
 ### 5.2 Tools expostas ao modelo
 
 **Leitura — executam na hora:**
@@ -2400,7 +2422,7 @@ GET    /api/usage/summary?start&end&bucket # tokens e custo (§12)
 GET    /api/calendar/external-changes?since  # §5.10
 
 # Anexos de imagem no chat (§5.1.1)
-POST   /api/attachments                    # multipart; devolve o id
+POST   /api/attachments                    # multipart: imagem ou PDF
 GET    /api/attachments/{id}/content       # os bytes, para a tela
 
 # Preferências
