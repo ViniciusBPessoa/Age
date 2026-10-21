@@ -23,6 +23,8 @@ dependencies = [
     # de borda reais (BYSETPOS, horário de verão na virada, UNTIL vs.
     # COUNT) e errar neles põe a academia de alguém no dia errado.
     "python-dateutil>=2.9",
+    # Upload de anexo: o FastAPI exige para `UploadFile`/`Form`.
+    "python-multipart>=0.0.18",
     "age-contracts",
 ]
 

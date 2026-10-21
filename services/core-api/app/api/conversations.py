@@ -24,6 +24,7 @@ from sqlalchemy import select, text, update
 from sqlalchemy.exc import IntegrityError
 from sse_starlette.sse import EventSourceResponse
 
+from app.api.attachments import vincular_anexos
 from app.core.config import get_settings
 from app.core.deps import CurrentUser, DbSession
 from app.core.rate_limit import enforce
@@ -110,6 +111,17 @@ class SendMessage(BaseModel):
     content: str = Field(min_length=1, max_length=8000)
     # Idempotência no envio: duplo-clique não custa dois turnos (§5.1).
     client_turn_id: UUID | None = None
+    # Ids devolvidos por POST /attachments. Vazio no caso comum.
+    #
+    # `content` segue obrigatorio mesmo com anexo: imagem sem
+    # pergunta faz o modelo adivinhar o que se quer dela, e a
+    # resposta vira descricao generica. A tela sugere uma pergunta
+    # em vez de deixar enviar vazio.
+    #
+    # `max_length` repete o limite de `MAXIMO_POR_MENSAGEM`: aqui o
+    # pydantic recusa antes de abrir transacao, e `vincular_anexos`
+    # recusa de novo porque e ele que fala com o banco.
+    attachment_ids: list[UUID] = Field(default_factory=list, max_length=4)
 
 
 class TurnAccepted(BaseModel):
@@ -175,9 +187,7 @@ async def list_conversations(
 
     if cursor:
         try:
-            stmt = stmt.where(
-                Conversation.created_at < datetime.fromisoformat(cursor)
-            )
+            stmt = stmt.where(Conversation.created_at < datetime.fromisoformat(cursor))
         except ValueError as exc:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -650,6 +660,18 @@ async def send_message(
             message_id=existing_id or message_id,
             stream_url=f"/api/v1/turns/{turn_id}/stream",
         )
+
+    # Na MESMA transacao do INSERT da mensagem: se o envio falhar, os
+    # anexos continuam orfaos e reutilizaveis, em vez de apontarem para
+    # uma mensagem que nao existe. E DEPOIS do except IntegrityError,
+    # para nao amarrar anexo a uma mensagem que o indice unico recusou.
+    await vincular_anexos(
+        db,
+        user_id=user.id,
+        attachment_ids=body.attachment_ids,
+        message_id=message_id,
+        conversation_id=conversation_id,
+    )
 
     await db.execute(
         update(Conversation)

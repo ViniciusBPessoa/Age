@@ -15,6 +15,7 @@ from fastapi.responses import JSONResponse
 # Importar registra os adaptadores de calendario no registry (secao 3.2).
 from app.adapters.calendar import in_memory, local  # noqa: F401
 from app.api import (
+    attachments,
     auth,
     calendar,
     conversations,
@@ -80,6 +81,7 @@ app.include_router(health.router)
 # Superfície versionada desde o início: adicionar versão depois, com
 # clientes no ar, custa caro (§7.0).
 v1 = APIRouter(prefix="/api/v1")
+v1.include_router(attachments.router)
 v1.include_router(auth.router)
 v1.include_router(llm.router)
 v1.include_router(preferences.router)
