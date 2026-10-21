@@ -152,6 +152,7 @@ function montar(rotas: Record<string, unknown>, conversationId = CONVERSA) {
         conversationId={conversationId}
         providers={[]}
         credentials={[]}
+        keySource={null}
         calendars={[]}
         accountTarget={"event" as never}
       />

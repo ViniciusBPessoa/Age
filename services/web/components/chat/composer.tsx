@@ -18,6 +18,12 @@
 import { useEffect, useRef, useState } from "react";
 
 import { Badge, Button, IconSend, Select, cx } from "@/components/ui";
+import {
+  BotaoDeAnexo,
+  MAXIMO_DE_ANEXOS,
+  MiniaturasDeAnexo,
+  useAnexos,
+} from "./anexos-do-composer";
 import type { Credential, ProviderInfo, Target } from "@/lib/types";
 
 const TARGET_LABEL: Record<Target, string> = {
@@ -56,13 +62,18 @@ export function Composer({
   overriddenTarget?: Target | null;
   disabled?: boolean;
   sending?: boolean;
-  onSend: (text: string) => void;
+  /**
+   * `attachmentIds` so chega com imagem anexada; sem anexo, a
+   * lista vem vazia e o caminho e o mesmo de sempre.
+   */
+  onSend: (text: string, attachmentIds: string[]) => void;
   onProviderChange: (providerKey: string, model: string) => void;
   onTargetChange: (target: Target) => void;
 }) {
   const [text, setText] = useState("");
   const area = useRef<HTMLTextAreaElement>(null);
   const [pulse, setPulse] = useState(false);
+  const { anexos, adicionar, remover, limpar, idsProntos, subindo } = useAnexos();
 
   // O chip pisca quando a mensagem sobrepôs o padrão (§8.1).
   useEffect(() => {
@@ -87,13 +98,51 @@ export function Composer({
   const usable = providers.filter((p) =>
     credentials.some((c) => c.provider_key === p.key && c.is_active),
   );
+  /*
+   * O botao de anexo so existe quando o modelo ESCOLHIDO aceita
+   * imagem.
+   *
+   * A captura da tela mostrou o botao ativo com "Mock (testes)"
+   * selecionado -- o mock nao ve imagem, entao o anexo subiria, seria
+   * gravado e o worker o descartaria com um `log.warning`. Oferecer
+   * algo que o backend vai ignorar e a promessa que nenhum teste pega,
+   * porque cada camada estava certa sozinha.
+   *
+   * `?? []` e nao `?? models`: backend sem o campo significa "nao sei
+   * quais veem", e esconder o botao e melhor que prometer.
+   */
+  // O modelo que a instancia empresta, quando a conta nao tem chave
+  // propria. `providerKey`/`model` ja vem resolvidos pelo chat-screen.
+  const modeloDaInstancia = usable.length === 0 && providerKey && model ? model : null;
+
+  const modeloVeImagem = Boolean(
+    model &&
+      providers.find((p) => p.key === providerKey)?.vision_models?.includes(model),
+  );
+
   const broken = credentials.filter((c) => c.last_error);
-  const canSend = text.trim().length > 0 && !disabled && !sending;
+  /*
+   * Enquanto uma imagem sobe, o envio espera.
+   *
+   * Mandar sem ela faria o modelo responder a uma pergunta sobre uma
+   * foto que nao chegou -- e o texto ja diria "nesta imagem". Esperar
+   * alguns segundos e o comportamento honesto; o botao fica desligado e
+   * a miniatura mostra o giro, entao a espera tem causa visivel.
+   */
+  const canSend =
+    text.trim().length > 0 &&
+    !disabled &&
+    !sending &&
+    !subindo &&
+    // Com anexo e modelo sem visao, enviar faria o modelo
+    // responder a uma pergunta sobre uma imagem que ele nao ve.
+    (anexos.length === 0 || modeloVeImagem);
 
   function submit() {
     if (!canSend) return;
-    onSend(text.trim());
+    onSend(text.trim(), idsProntos);
     setText("");
+    limpar();
   }
 
   return (
@@ -106,6 +155,25 @@ export function Composer({
           >
             A chave do {broken[0].provider_key} falhou na última verificação. Dá para
             corrigir em Configurações.
+          </p>
+        ) : null}
+
+        {/*
+         * Trocar para um modelo sem visao com imagem ja anexada.
+         *
+         * Nao removo os anexos sozinho: a pessoa pode estar voltando
+         * para o modelo anterior, e apagar o trabalho dela por causa de
+         * um clique no seletor e pior que avisar. O envio fica
+         * bloqueado enquanto durar, porque mandar a pergunta sem a
+         * imagem faria o modelo responder sobre algo que nao viu.
+         */}
+        {anexos.length > 0 && !modeloVeImagem ? (
+          <p
+            role="status"
+            className="mb-2 flex items-center gap-2 rounded-lg bg-warn/10 px-3 py-2 text-xs text-warn ring-1 ring-inset ring-warn/20"
+          >
+            Este modelo não lê imagens. Escolha outro, ou remova o anexo para enviar só
+            o texto.
           </p>
         ) : null}
 
@@ -123,6 +191,8 @@ export function Composer({
             "focus-within:border-brand focus-within:ring-[3px] focus-within:ring-brand/20",
           )}
         >
+          <MiniaturasDeAnexo anexos={anexos} onRemover={remover} />
+
           <label htmlFor="composer" className="sr-only">
             Mensagem
           </label>
@@ -147,6 +217,14 @@ export function Composer({
           />
 
           <div className="flex flex-wrap items-center gap-1.5 px-2.5 pb-2.5 pt-1">
+            {modeloVeImagem ? (
+              <BotaoDeAnexo
+                onEscolher={adicionar}
+                disabled={disabled}
+                cheio={anexos.length >= MAXIMO_DE_ANEXOS}
+              />
+            ) : null}
+
             {/* Seletor de provedor/modelo (§3.1.3: trocar afeta a
                 próxima mensagem, a conversa segue com o mesmo
                 histórico). */}
@@ -163,7 +241,22 @@ export function Composer({
                 onProviderChange(key, chosen);
               }}
             >
-              {usable.length === 0 ? <option value="::">sem credencial</option> : null}
+              {usable.length === 0 ? (
+                /*
+                 * "sem credencial" era mentira para quem usa a chave da
+                 * INSTANCIA: a conta nao tem credencial propria, mas
+                 * conversa normalmente -- e a captura mostrou esse
+                 * rotulo ao lado de um botao de anexo que funciona.
+                 *
+                 * Sem credencial E sem instancia, ai sim nao da para
+                 * conversar, e o texto antigo vale.
+                 */
+                <option value="::">
+                  {modeloDaInstancia
+                    ? `${modeloDaInstancia} · incluído`
+                    : "sem credencial"}
+                </option>
+              ) : null}
               {usable.map((provider) =>
                 provider.models.map((candidate) => (
                   <option

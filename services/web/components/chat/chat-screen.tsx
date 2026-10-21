@@ -65,6 +65,7 @@ import type {
   Conversation,
   Credential,
   ExternalChanges,
+  KeySource,
   Me,
   Message,
   Plan,
@@ -227,6 +228,7 @@ export function ChatScreen({
   conversationId,
   providers,
   credentials,
+  keySource,
   calendars,
   accountTarget,
 }: {
@@ -234,6 +236,16 @@ export function ChatScreen({
   conversationId: string | null;
   providers: ProviderInfo[];
   credentials: Credential[];
+  /**
+   * De onde vem a chave desta conta (§3451).
+   *
+   * Necessário porque quem usa a chave da INSTÂNCIA não tem credencial
+   * própria: `credentials` vem vazio, e o seletor do composer fica em
+   * `"::"`. Sem isto, o composer não sabe qual modelo vai rodar — e o
+   * botão de anexo sumia justamente para quem usa o Age sem chave
+   * própria, que é o caminho padrão.
+   */
+  keySource: KeySource | null;
   calendars: CalendarRef[];
   /** Camada 1 de §5.7.2: a preferência da conta. */
   accountTarget: Target;
@@ -478,7 +490,7 @@ export function ChatScreen({
     [queryClient],
   );
 
-  async function send(text: string) {
+  async function send(text: string, attachmentIds: string[] = []) {
     setTurnError(null);
     // O aviso de "entrou na agenda" vale para o que acabou de
     // acontecer. Mantê-lo durante o turno seguinte o transformaria em
@@ -531,7 +543,14 @@ export function ChatScreen({
 
       const accepted = await api.post<{ turn_id: string }>(
         `/conversations/${targetId}/messages`,
-        { content: text, client_turn_id: crypto.randomUUID() },
+        {
+          content: text,
+          client_turn_id: crypto.randomUUID(),
+          // Só vai no corpo quando há anexo: mandar `[]` em toda
+          // mensagem mudaria o payload de 100% dos envios por causa de
+          // um caso que é minoria.
+          ...(attachmentIds.length > 0 ? { attachment_ids: attachmentIds } : {}),
+        },
       );
 
       await queryClient.invalidateQueries({ queryKey: ["messages", targetId] });
@@ -934,8 +953,21 @@ export function ChatScreen({
         <Composer
           providers={providers}
           credentials={credentials}
-          providerKey={active?.provider_key ?? credentials[0]?.provider_key ?? null}
-          model={active?.model ?? credentials[0]?.default_model ?? null}
+          providerKey={
+            active?.provider_key ??
+            credentials[0]?.provider_key ??
+            // A chave da instância é o último recurso, e para a maioria
+            // das contas é o ÚNICO: sem credencial própria, os dois
+            // acima são `undefined`.
+            (keySource?.source === "instance" ? keySource.provider_key : null) ??
+            null
+          }
+          model={
+            active?.model ??
+            credentials[0]?.default_model ??
+            (keySource?.source === "instance" ? keySource.model : null) ??
+            null
+          }
           target={effectiveTarget}
           sending={streaming}
           onSend={send}

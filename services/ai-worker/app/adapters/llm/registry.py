@@ -50,6 +50,13 @@ def available_providers() -> list[dict]:
                 "name": cls.display_name,
                 "models": list(cls.known_models),
                 "default_model": cls.default_model,
+                # Quais dos modelos oferecidos aceitam imagem. A tela
+                # usa isto para so mostrar o botao de anexo quando ele
+                # leva a algum lugar -- oferecer anexo a um modelo que
+                # nao ve e prometer o que o backend vai descartar.
+                "vision_models": [
+                    m for m in cls.known_models if model_sees_images(cls.key, m)
+                ],
             }
         )
     return sorted(out, key=lambda p: p["name"])

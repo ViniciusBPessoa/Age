@@ -120,6 +120,20 @@ export const IconSend = (p: IconProps) => (
   </Svg>
 );
 
+export const IconPaperclip = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M20.5 11.5l-8.2 8.2a4.5 4.5 0 0 1-6.4-6.4l8.3-8.3a3 3 0 0 1 4.3 4.3l-8.3 8.3a1.5 1.5 0 0 1-2.2-2.2l7.6-7.6" />
+  </Svg>
+);
+
+export const IconImage = (p: IconProps) => (
+  <Svg {...p}>
+    <rect x="3" y="4.5" width="18" height="15" rx="2.5" />
+    <circle cx="8.5" cy="10" r="1.5" />
+    <path d="M3.5 17.5l4.6-4.6a2 2 0 0 1 2.8 0l3 3M14.5 15.5l1.6-1.6a2 2 0 0 1 2.8 0l1.6 1.6" />
+  </Svg>
+);
+
 export const IconPlus = (p: IconProps) => (
   <Svg {...p}>
     <path d="M12 5v14M5 12h14" />

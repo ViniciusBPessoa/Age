@@ -39,6 +39,7 @@ from __future__ import annotations
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, File, HTTPException, UploadFile, status
+from fastapi.responses import Response
 from pydantic import BaseModel
 from sqlalchemy import select
 
@@ -193,3 +194,59 @@ __all__ = [
     "router",
     "vincular_anexos",
 ]
+
+
+@router.get(
+    "/{attachment_id}/content",
+    summary="Os bytes de um anexo, para a tela mostrar a imagem",
+    response_class=Response,
+)
+async def attachment_content(
+    attachment_id: UUID,
+    db: DbSession,
+    user: CurrentUser,
+) -> Response:
+    """Serve a imagem.
+
+    Rota separada da listagem de mensagens de propósito: 4 fotos de
+    5 MB viram ~27 MB em base64, e a listagem é chamada no `done` de
+    TODO turno. Aqui cada imagem é uma requisição que o navegador
+    cacheia como qualquer outra.
+
+    A segurança é o `WHERE user_id`: o RLS já filtra, e a condição
+    explícita faz o 404 vir no lugar de um 500 confuso. Um id de outra
+    conta é 404, não 403 — "este anexo existe mas não é seu" é
+    informação que não precisa ser dada.
+    """
+    linha = (
+        await db.execute(
+            select(MessageAttachment).where(
+                MessageAttachment.id == attachment_id,
+                MessageAttachment.user_id == user.id,
+            )
+        )
+    ).scalar_one_or_none()
+
+    if linha is None or linha.data is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "anexo_nao_encontrado", "message": "Anexo não existe."},
+        )
+
+    return Response(
+        content=bytes(linha.data),
+        media_type=linha.media_type,
+        headers={
+            # `private`: a resposta depende do cookie de sessão, e um
+            # cache compartilhado guardando isto entregaria a imagem de
+            # uma conta para outra. O conteúdo é imutável — o id nunca
+            # aponta para bytes diferentes —, então `immutable` poupa
+            # revalidação enquanto a aba vive.
+            "Cache-Control": "private, max-age=86400, immutable",
+            # Nunca inline: um SVG malicioso servido inline executaria
+            # script na origem da API. Não aceitamos SVG hoje, e este
+            # header garante que aceitar um dia não vire um buraco.
+            "Content-Disposition": "attachment",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )

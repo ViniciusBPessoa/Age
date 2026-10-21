@@ -105,6 +105,14 @@ export interface ProviderInfo {
   name: string;
   models: string[];
   default_model: string;
+  /**
+   * Modelos deste provedor que aceitam imagem.
+   *
+   * Opcional porque um backend anterior a este campo nao o manda, e
+   * ausente significa "nenhum" — esconder o botao de anexo e melhor
+   * que oferecer um anexo que o worker vai descartar.
+   */
+  vision_models?: string[];
 }
 
 /** Note a ausência de `api_key`: é deliberada no backend (§4.3). */
@@ -310,6 +318,13 @@ export interface Conversation {
   applied_tasks: number;
 }
 
+export interface MessageAttachment {
+  id: string;
+  filename: string;
+  media_type: string;
+  size_bytes: number;
+}
+
 export interface Message {
   id: string;
   role: "user" | "assistant" | "system" | "tool";
@@ -322,6 +337,8 @@ export interface Message {
   prompt_tokens: number | null;
   completion_tokens: number | null;
   estimated_cost_usd: number | null;
+  /** Imagens anexadas. Vazio na esmagadora maioria das mensagens. */
+  attachments?: MessageAttachment[];
   created_at: string;
 }
 

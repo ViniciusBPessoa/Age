@@ -36,6 +36,11 @@ class ProviderInfo(BaseModel):
     name: str
     models: list[str]
     default_model: str
+    # Os modelos deste provedor que aceitam imagem. Default vazio para
+    # que um worker antigo (sem o campo) degrade para "nenhum ve", que
+    # é o lado seguro: esconde o botão em vez de oferecer um anexo que
+    # seria descartado.
+    vision_models: list[str] = []
 
 
 class KeySourceOut(BaseModel):

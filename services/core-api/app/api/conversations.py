@@ -31,7 +31,7 @@ from app.core.rate_limit import enforce
 from app.core.redis import get_arq, get_redis, turn_cancel_key, turn_stream_key
 from app.core.security import create_service_token
 from app.core.tracing import current_trace_id
-from app.models import Conversation, Message
+from app.models import Conversation, Message, MessageAttachment
 from app.services.plan_store import promote_drafts
 from app.services.turn_sync import (
     apply_pending_titles,
@@ -86,6 +86,22 @@ class UpdateConversation(BaseModel):
     target_default: Literal["event", "task", "both", "ask"] | None = None
 
 
+class AnexoOut(BaseModel):
+    """Um anexo de mensagem, SEM os bytes.
+
+    A lista de mensagens nao carrega imagem: 4 fotos de 5 MB viram ~27
+    MB em base64, num endpoint que o chat chama no `done` de TODO turno.
+    O cliente recebe o id e busca cada imagem por
+    `GET /attachments/{id}/content`, que o navegador cacheia como
+    qualquer imagem.
+    """
+
+    id: UUID
+    filename: str
+    media_type: str
+    size_bytes: int
+
+
 class MessageOut(BaseModel):
     id: UUID
     role: str
@@ -99,6 +115,8 @@ class MessageOut(BaseModel):
     prompt_tokens: int | None = None
     completion_tokens: int | None = None
     estimated_cost_usd: float | None = None
+    # Vazio na esmagadora maioria das mensagens.
+    attachments: list[AnexoOut] = Field(default_factory=list)
     created_at: datetime
 
 
@@ -548,8 +566,37 @@ async def list_messages(
     has_more = len(rows) > limit
     page = rows[:limit]
 
+    # Os anexos da PAGINA, numa consulta so. Uma por mensagem seria
+    # N+1 numa rota chamada a cada turno.
+    anexos_por_mensagem: dict[UUID, list[AnexoOut]] = {}
+    if page:
+        linhas = (
+            await db.execute(
+                select(MessageAttachment)
+                .where(MessageAttachment.message_id.in_([m.id for m in page]))
+                .order_by(MessageAttachment.message_id, MessageAttachment.position)
+            )
+        ).scalars()
+        for linha in linhas:
+            if linha.message_id is None:
+                continue
+            anexos_por_mensagem.setdefault(linha.message_id, []).append(
+                AnexoOut(
+                    id=linha.id,
+                    filename=linha.filename,
+                    media_type=linha.media_type,
+                    size_bytes=linha.size_bytes,
+                )
+            )
+
+    itens = []
+    for m in page:
+        saida = MessageOut.model_validate(m, from_attributes=True)
+        saida.attachments = anexos_por_mensagem.get(m.id, [])
+        itens.append(saida)
+
     return MessageList(
-        items=[MessageOut.model_validate(m, from_attributes=True) for m in page],
+        items=itens,
         next_cursor=page[-1].created_at.isoformat() if has_more and page else None,
     )
 

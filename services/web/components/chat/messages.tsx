@@ -120,6 +120,7 @@ export function MessageList({
               role={message.role}
               text={message.content ?? ""}
               at={timeOf(message.created_at, timezone)}
+              anexos={message.attachments}
             />
             {message.role === "assistant" ? (
               <CustoDaMensagem message={message} />
@@ -338,14 +339,66 @@ function ToolTrail({ traces, collapsed }: { traces: ToolTrace[]; collapsed: bool
   );
 }
 
+function ImagensDaMensagem({
+  anexos,
+}: {
+  anexos: NonNullable<Message["attachments"]>;
+}) {
+  if (anexos.length === 0) return null;
+
+  return (
+    <ul
+      className={cx(
+        "mb-2 grid gap-1.5",
+        anexos.length === 1 ? "grid-cols-1" : "grid-cols-2",
+      )}
+    >
+      {anexos.map((anexo) => (
+        <li key={anexo.id}>
+          {/*
+           * `<a>` em volta: a miniatura corta a imagem (`object-cover`)
+           * para a grade ficar regular, e sem um jeito de ver o
+           * original a pessoa nao consegue conferir o que mandou. Abre
+           * em aba nova porque a rota devolve
+           * `Content-Disposition: attachment`.
+           *
+           * `<img>` cru e nao `next/image`: a origem e uma rota da
+           * propria API autenticada por cookie, que o otimizador do
+           * Next nao consegue buscar do servidor.
+           */}
+          <a
+            href={`/api/attachments/${anexo.id}/content`}
+            target="_blank"
+            rel="noreferrer"
+            className="block overflow-hidden rounded-lg border border-line-strong/60 transition-opacity hover:opacity-90 outline-none focus:border-brand focus-visible:ring-2 focus-visible:ring-brand/40"
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={`/api/attachments/${anexo.id}/content`}
+              alt={anexo.filename}
+              loading="lazy"
+              className={cx(
+                "w-full bg-surface-sunken object-cover",
+                anexos.length === 1 ? "max-h-64" : "h-28",
+              )}
+            />
+          </a>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 function Bubble({
   role,
   text,
   at,
+  anexos,
 }: {
   role: Message["role"];
   text: string;
   at: string;
+  anexos?: Message["attachments"];
 }) {
   if (role === "user") {
     /*
@@ -359,9 +412,14 @@ function Bubble({
       <div className="flex justify-end">
         <div className="group max-w-[82%]">
           <div className="rounded-2xl rounded-br-md bg-brand-soft px-4 py-2.5 shadow-ring">
-            <p className="whitespace-pre-wrap text-base leading-relaxed text-ink">
-              {text}
-            </p>
+            {/* A imagem ACIMA do texto, na mesma ordem em que o modelo
+                a recebe: a pergunta vem depois do que ela comenta. */}
+            {anexos && anexos.length > 0 ? <ImagensDaMensagem anexos={anexos} /> : null}
+            {text ? (
+              <p className="whitespace-pre-wrap text-base leading-relaxed text-ink">
+                {text}
+              </p>
+            ) : null}
           </div>
           {/* A hora só no hover: ela importa raramente, e exibi-la
               sempre adiciona uma linha de ruído por mensagem. */}

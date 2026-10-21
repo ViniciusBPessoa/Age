@@ -16,6 +16,7 @@ import { Unauthenticated, apiGet, apiGetOptional } from "@/lib/api-server";
 import type {
   CalendarRef,
   Credential,
+  KeySource,
   Me,
   Preferences,
   ProviderInfo,
@@ -38,12 +39,15 @@ export default async function ConversationPage({
     throw err;
   }
 
-  const [providers, credentials, calendars, preferences] = await Promise.all([
-    apiGetOptional<ProviderInfo[]>("/llm/providers"),
-    apiGetOptional<Credential[]>("/llm/credentials"),
-    apiGetOptional<CalendarRef[]>("/calendar/calendars"),
-    apiGetOptional<Preferences>("/preferences"),
-  ]);
+  const [providers, credentials, calendars, preferences, keySource] = await Promise.all(
+    [
+      apiGetOptional<ProviderInfo[]>("/llm/providers"),
+      apiGetOptional<Credential[]>("/llm/credentials"),
+      apiGetOptional<CalendarRef[]>("/calendar/calendars"),
+      apiGetOptional<Preferences>("/preferences"),
+      apiGetOptional<KeySource>("/llm/key-source"),
+    ],
+  );
 
   return (
     <ChatScreen
@@ -51,6 +55,7 @@ export default async function ConversationPage({
       conversationId={id}
       providers={providers ?? []}
       credentials={credentials ?? []}
+      keySource={keySource ?? null}
       calendars={calendars ?? []}
       accountTarget={preferences?.default_target ?? "ask"}
     />
