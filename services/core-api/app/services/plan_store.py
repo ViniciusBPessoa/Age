@@ -245,6 +245,22 @@ async def _promote_one(
     by_id = {e.id: e for e in existing if e.id}
     busy = await read_busy(db, user_id, window_start, window_end)
 
+    # A janela sai dos horários DO PLANO, e um item que só REFERENCIA um
+    # evento (MOVE, DELETE) não traz horário nenhum — então não empurra
+    # a janela. Sem nenhum horário em item nenhum, a janela vira "ontem
+    # até daqui a 7 dias", e um evento de novembro cai fora dela.
+    #
+    # Medido na conta real em 25/10/2026: três ids recusados com "não
+    # existe na agenda" eram os filmes da Pixar, vivos em
+    # `core.local_events`. O plano nasceu vazio e a tela ofereceu
+    # "Aplicar os 0 itens".
+    #
+    # `_resolver_blocos` nunca teve esse problema porque resolve POR ID,
+    # e a docstring de `task_store.resolve_events` já dizia por quê:
+    # obrigar quem chama a reconstruir a janela certa "falharia em
+    # silêncio justamente para o bloco que está um dia fora dela".
+    by_id.update(await _eventos_referenciados(db, user_id, raw_items, by_id))
+
     for index, raw in enumerate(raw_items):
         op = raw.get("op", "")
         reason = (raw.get("reason") or "").strip()
@@ -284,6 +300,27 @@ async def _promote_one(
     # meio par é pior que nenhum, e `linked_group` trataria um id
     # inexistente como grupo de um só.
     items = _relink(items, raw_items, draft_to_item)
+
+    # Plano sem NENHUM item não vira cartão.
+    #
+    # Medido na conta real: o Age respondeu "Preparei os 4 vínculos,
+    # todos aceitos", com os quatro numa tabela, e a tela mostrou
+    # "0 itens · 0 marcados" com o botão "Aplicar os 0 itens". Os quatro
+    # haviam caído um a um, cada um com seu `log.info`, e o plano nasceu
+    # assim mesmo.
+    #
+    # Um cartão que não pode aplicar nada é pior que erro nenhum: ele
+    # confirma por escrito o que não aconteceu. Levantar aqui faz o
+    # chamador registrar `log.warning` — visível — e marcar o rascunho
+    # como promovido, sem ficar tentando eternamente.
+    #
+    # Isto NÃO é o caso de ALGUNS itens caírem: esse continua gerando
+    # plano com os que sobraram, porque aprovação é granular (§5.8).
+    if raw_items and not items:
+        raise ValueError(
+            f"todos os {len(raw_items)} itens foram descartados; "
+            "não há plano para propor"
+        )
 
     plan = Plan(
         id=uuid4(),
@@ -604,6 +641,52 @@ async def _load_tasks_by_id(
         for e in everything
         if e.task.id and e.task.id in wanted
     }
+
+
+async def _eventos_referenciados(
+    db: AsyncSession,
+    user_id: UUID,
+    raw_items: list[dict],
+    ja_tem: dict[str, Event],
+) -> dict[str, Event]:
+    """Eventos citados por id que a janela do plano não alcançou.
+
+    Complementa `by_id`, não o substitui: a janela continua sendo o
+    caminho barato do caso comum (plano com horário próprio), e isto
+    cobre só o que ela deixa de fora.
+
+    Busca apenas o que FALTA — um plano cujos eventos já estão na
+    janela não faz consulta nenhuma a mais.
+    """
+    faltando: list[str] = []
+    for raw in raw_items:
+        if raw.get("target") not in (None, "event"):
+            continue
+        ref = raw.get("payload", {}).get("event_id")
+        if ref and str(ref) not in ja_tem and str(ref) not in faltando:
+            faltando.append(str(ref))
+
+    if not faltando:
+        return {}
+
+    from app.services.task_store import resolve_events
+
+    achados: dict[str, Event] = {}
+    for achado in await resolve_events(db, user_id, faltando):
+        # Só evento local: `events_shadow` espelha calendário externo, e
+        # MOVE/DELETE nele não é nosso para propor (§6.3).
+        if not achado.found or achado.kind != "local_events":
+            continue
+        if achado.start is None or achado.end is None:
+            continue
+        achados[achado.ref_id] = Event(
+            id=achado.ref_id,
+            calendar_id="",
+            title=achado.title,
+            start=achado.start,
+            end=achado.end,
+        )
+    return achados
 
 
 async def _resolver_blocos(

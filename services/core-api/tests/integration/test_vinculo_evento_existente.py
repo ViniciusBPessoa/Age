@@ -640,3 +640,136 @@ async def _listas(factory, user_id: uuid.UUID) -> list[uuid.UUID]:
             {"u": str(user_id)},
         )
     return [r[0] for r in rows.all()]
+
+
+class TestAJanelaQueNaoAlcanca:
+    """O defeito medido na conta real em 25/10/2026.
+
+    O usuário pediu "vincula os to dos com o calendario" e o Age
+    respondeu "Preparei os 4 vínculos, todos aceitos", com os quatro na
+    tabela. O cartão na tela dizia **"0 itens · 0 marcados"**, com o
+    botão "Aplicar os 0 itens".
+
+    Nos logs do `core-api`, os quatro itens, com os títulos dele:
+
+        item 0 descartado: 'Definir, chamar e retorno de funções':
+                           nenhum dos blocos existe mais
+        ... e mais três
+
+    E, no turno anterior, a causa:
+
+        item 3 descartado: evento c48de6af-… não existe na agenda
+
+    **Só que o evento existia.** Conferi os três ids no banco: eram os
+    filmes da Pixar em `core.local_events`, aplicados, vivos.
+
+    A causa é a JANELA. `build_plan_from_items` monta `by_id` a partir
+    de `read_events(window_start, window_end)`, e a janela sai dos
+    campos `start`/`new_start` dos payloads **do próprio plano**. Um
+    item que só REFERENCIA um evento (MOVE, DELETE) não traz horário
+    nenhum, então não empurra a janela. Sem nenhum horário em nenhum
+    item, a janela vira "ontem até daqui a 7 dias" — e um evento de
+    novembro cai fora dela.
+
+    `_resolver_blocos` não tem esse problema porque resolve **por id**,
+    e a docstring de `task_store.resolve_events` explica justamente por
+    quê: "obrigar quem chama a reconstruir a janela certa falharia em
+    silêncio justamente para o bloco que está um dia fora dela".
+
+    O caminho da janela nunca recebeu a mesma correção.
+    """
+
+    async def test_move_de_evento_distante_nao_some(self, db):
+        """Sabotagem que derruba: voltar `by_id` a sair só da janela.
+
+        O bloco fica a 30 dias — fora da janela de 7 dias que um plano
+        sem horário nenhum produz. Com o código anterior, o item é
+        descartado com "não existe na agenda" e o plano nasce VAZIO,
+        que é exatamente o cartão "Aplicar os 0 itens" do usuário.
+        """
+        user_id = await _usuario()
+        try:
+            cal = await _calendario(db, user_id)
+            await _lista(db, user_id)
+            distante = datetime.now(UTC) + timedelta(days=30)
+            bloco = await _bloco(
+                db,
+                user_id,
+                cal,
+                titulo="Filme: Vida de Inseto (1998)",
+                inicio=distante,
+            )
+            conv = await _conversa(db, user_id)
+
+            # Um DELETE: referencia o evento por id e NÃO traz horário,
+            # então não empurra a janela. É a forma mínima do defeito.
+            item = {
+                "id": str(uuid.uuid4()),
+                "target": "event",
+                "op": "DELETE",
+                "reason": "o usuário pediu para tirar",
+                "payload": {"event_id": str(bloco)},
+                "links": [],
+                "event_refs": [],
+                "sequence": 0,
+            }
+            await _rascunho(db, user_id, conv, [item])
+
+            from app.services.plan_store import promote_drafts
+
+            async with db(user_id) as s:
+                ids = await promote_drafts(s, user_id)
+
+            assert ids, "o plano inteiro sumiu"
+
+            async with db(user_id) as s:
+                from app.services.plan_store import load_plan
+
+                plano = await load_plan(s, user_id, ids[0])
+
+            assert plano is not None
+            assert len(plano.items) == 1, (
+                "o item foi descartado: o evento existe, mas a janela "
+                "não alcança — é o 'Aplicar os 0 itens' do usuário"
+            )
+            assert plano.items[0].target_ref == str(bloco)
+        finally:
+            await _limpar(user_id)
+
+    async def test_plano_que_ficaria_vazio_nao_e_criado(self, db):
+        """Sabotagem: deixar o plano vazio nascer.
+
+        Um plano com zero itens só pode virar um cartão que não aplica
+        nada. Se TODOS os itens caírem, é erro — não um cartão mudo
+        prometendo quatro vínculos que não existem.
+        """
+        user_id = await _usuario()
+        try:
+            await _calendario(db, user_id)
+            await _lista(db, user_id)
+            conv = await _conversa(db, user_id)
+
+            # Id que não existe em lugar nenhum: o item cai de verdade.
+            item = {
+                "id": str(uuid.uuid4()),
+                "target": "event",
+                "op": "DELETE",
+                "reason": "apagar o que não existe",
+                "payload": {"event_id": str(uuid.uuid4())},
+                "links": [],
+                "event_refs": [],
+                "sequence": 0,
+            }
+            await _rascunho(db, user_id, conv, [item])
+
+            from app.services.plan_store import promote_drafts
+
+            async with db(user_id) as s:
+                ids = await promote_drafts(s, user_id)
+
+            assert ids == [], (
+                "um plano sem nenhum item virou cartão na tela: é o "
+                "'Aplicar os 0 itens' que o usuário fotografou"
+            )
+        finally:
+            await _limpar(user_id)
