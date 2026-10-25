@@ -16,10 +16,30 @@
  * Bearer (§4.1.1). É outra razão para o BFF existir.
  */
 
+/**
+ * Uma página que a busca na web usou (§5.1.3).
+ *
+ * Espelha `Fonte` do contrato em `age_contracts/events.py`.
+ */
+export interface Fonte {
+  titulo: string;
+  url: string;
+  site?: string | null;
+  /** `false` quando o score ficou abaixo do limite de qualidade. */
+  confiavel?: boolean;
+}
+
 export type StreamEvent =
   | { type: "token"; delta: string }
   | { type: "tool_start"; name: string }
-  | { type: "tool_end"; name: string; ok: boolean; summary?: string }
+  | {
+      type: "tool_end";
+      name: string;
+      ok: boolean;
+      summary?: string;
+      /** As fontes de `web_search` (§5.1.3); ausente nas outras. */
+      fontes?: Fonte[];
+    }
   | { type: "plan"; plan_id: string; item_count: number }
   | {
       type: "usage";

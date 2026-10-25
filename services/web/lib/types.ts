@@ -28,6 +28,10 @@
  * só formata, porque todo cálculo de tempo acontece no backend (§9.5).
  */
 
+import type { Fonte } from "@/lib/sse";
+
+export type { Fonte };
+
 // ---------------------------------------------------------------
 // Vocabulário do domínio
 // ---------------------------------------------------------------
@@ -352,6 +356,14 @@ export interface Message {
   estimated_cost_usd: number | null;
   /** Imagens anexadas. Vazio na esmagadora maioria das mensagens. */
   attachments?: MessageAttachment[];
+  /**
+   * As páginas que a busca na web usou (§5.1.3).
+   *
+   * Gravadas na mensagem para sobreviverem ao F5: o rastro das
+   * ferramentas vive só no estado do turno, e recarregar a página o
+   * apagava — a pessoa voltava a não saber de onde veio a resposta.
+   */
+  fontes?: Fonte[];
   created_at: string;
 }
 

@@ -19,7 +19,7 @@ from uuid import UUID, uuid4
 import httpx
 from age_contracts import CONTRACT_VERSION, JobName
 from fastapi import APIRouter, HTTPException, Query, Request, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy import select, text, update
 from sqlalchemy.exc import IntegrityError
 from sse_starlette.sse import EventSourceResponse
@@ -104,6 +104,41 @@ class AnexoOut(BaseModel):
     page_count: int | None = None
 
 
+class FonteOut(BaseModel):
+    """Uma página que a busca na web usou (§5.1.3)."""
+
+    titulo: str
+    url: str
+    site: str | None = None
+    confiavel: bool = True
+
+
+def _fontes_de(tool_calls) -> list[FonteOut]:
+    """As fontes gravadas em `tool_calls`, se houver.
+
+    A coluna serve a dois conteúdos e eles são discriminados pela
+    FORMA, não por um campo de tipo: as chamadas de ferramenta são uma
+    LISTA; as fontes, um dicionário com a chave `fontes`. Uma mensagem
+    antiga, ou de outro formato, devolve lista vazia em vez de quebrar
+    a conversa inteira.
+    """
+    if not isinstance(tool_calls, dict):
+        return []
+    brutas = tool_calls.get("fontes")
+    if not isinstance(brutas, list):
+        return []
+    out: list[FonteOut] = []
+    for b in brutas:
+        if not isinstance(b, dict) or not b.get("url"):
+            continue
+        try:
+            out.append(FonteOut(**b))
+        except ValidationError:
+            # Fonte malformada não derruba a leitura das outras.
+            continue
+    return out
+
+
 class MessageOut(BaseModel):
     id: UUID
     role: str
@@ -119,6 +154,10 @@ class MessageOut(BaseModel):
     estimated_cost_usd: float | None = None
     # Vazio na esmagadora maioria das mensagens.
     attachments: list[AnexoOut] = Field(default_factory=list)
+    # As páginas que a busca na web usou (§5.1.3), para a lista de
+    # fontes sobreviver ao F5. Vem da coluna `tool_calls`, que o dreno
+    # já copia — ver `_fontes_de`.
+    fontes: list[FonteOut] = Field(default_factory=list)
     created_at: datetime
 
 
@@ -603,6 +642,7 @@ async def list_messages(
     for m in page:
         saida = MessageOut.model_validate(m, from_attributes=True)
         saida.attachments = anexos_por_mensagem.get(m.id, [])
+        saida.fontes = _fontes_de(m.tool_calls)
         itens.append(saida)
 
     return MessageList(

@@ -37,15 +37,19 @@ import {
 import { CustoDaMensagem } from "@/components/chat/custo-da-mensagem";
 import { RichText } from "@/components/chat/rich-text";
 import { timeOf } from "@/lib/format";
+import type { Fonte } from "@/lib/sse";
 import type { Message } from "@/lib/types";
 
 /** Uma tool que rodou neste turno, para a linha de progresso. */
+export type { Fonte };
+
 export interface ToolTrace {
   name: string;
   label: string;
   done: boolean;
   ok?: boolean;
   summary?: string;
+  fontes?: Fonte[];
 }
 
 export function MessageList({
@@ -123,6 +127,27 @@ export function MessageList({
               at={timeOf(message.created_at, timezone)}
               anexos={message.attachments}
             />
+            {/*
+             * As fontes da busca, na mensagem já gravada (§5.1.3).
+             *
+             * O rastro de ferramentas (`ToolTrail`) vive só enquanto o
+             * turno roda: quando ele acaba, a mensagem vem do banco e
+             * aquele bloco some. Sem isto, um F5 — ou simplesmente o
+             * fim do turno — apagava a lista, e a pessoa voltava a não
+             * saber de onde veio a resposta.
+             */}
+            {message.role === "assistant" && message.fontes?.length ? (
+              <details className="mt-2 overflow-hidden rounded-xl border border-line bg-surface/60">
+                <summary className="cursor-pointer px-3 py-2 text-xs font-medium text-muted transition-colors hover:bg-surface-2/60 hover:text-ink">
+                  {message.fontes.length === 1
+                    ? "1 fonte consultada"
+                    : `${message.fontes.length} fontes consultadas`}
+                </summary>
+                <div className="border-t border-line px-3 py-2.5 text-xs">
+                  <ListaDeFontes fontes={message.fontes} />
+                </div>
+              </details>
+            ) : null}
             {message.role === "assistant" ? (
               <CustoDaMensagem message={message} />
             ) : null}
@@ -331,12 +356,70 @@ function ToolTrail({ traces, collapsed }: { traces: ToolTrace[]; collapsed: bool
                 {trace.summary ? (
                   <span className="text-muted">: {trace.summary}</span>
                 ) : null}
+                {trace.fontes?.length ? <ListaDeFontes fontes={trace.fontes} /> : null}
               </span>
             </li>
           ))}
         </ul>
       ) : null}
     </div>
+  );
+}
+
+/**
+ * As páginas que a busca na web usou (§5.1.3).
+ *
+ * O relato que originou isto: *"o Deep Search, eu não tenho nenhuma
+ * referência visual se está funcionando ou não"*. A caixa recolhível
+ * já existia — faltava conteúdo dentro dela.
+ *
+ * Fonte fraca aparece **marcada**, não escondida: foi a escolha do
+ * usuário quando perguntei, e a classificação já vinha pronta do
+ * backend (o `rerank_score` abaixo de 1,5). Esconder faria a pessoa
+ * não saber que a busca trouxe pouca coisa boa.
+ */
+function ListaDeFontes({ fontes }: { fontes: Fonte[] }) {
+  return (
+    <ul className="mt-1.5 space-y-1">
+      {fontes.map((fonte, i) => {
+        /*
+         * Só `http(s)`. A URL vem de um site de terceiro escolhido por
+         * um modelo a partir de resultados de busca: confiar no esquema
+         * faria `javascript:` virar âncora executável. É a mesma
+         * checagem de `rich-text.tsx`, pelo mesmo motivo.
+         */
+        const seguro = /^https?:\/\//i.test(fonte.url);
+        const duvidosa = fonte.confiavel === false;
+        return (
+          <li key={`${fonte.url}-${i}`} className="flex items-start gap-1.5">
+            <span aria-hidden className="mt-[3px] text-faint">
+              ·
+            </span>
+            <span className="min-w-0">
+              {seguro ? (
+                <a
+                  href={fonte.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className={cx(
+                    "underline underline-offset-2 hover:brightness-110",
+                    duvidosa ? "text-muted" : "text-brand",
+                  )}
+                >
+                  {fonte.titulo}
+                </a>
+              ) : (
+                <span className="text-muted">{fonte.titulo}</span>
+              )}
+              {fonte.site ? <span className="text-faint"> · {fonte.site}</span> : null}
+              {duvidosa ? (
+                <span className="ml-1 text-2xs text-warn">não verificada</span>
+              ) : null}
+            </span>
+          </li>
+        );
+      })}
+    </ul>
   );
 }
 

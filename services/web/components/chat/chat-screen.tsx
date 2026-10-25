@@ -526,6 +526,7 @@ export function ChatScreen({
                   done: true,
                   ok: event.ok,
                   summary: event.summary,
+                  fontes: event.fontes,
                 };
                 break;
               }
@@ -576,11 +577,7 @@ export function ChatScreen({
     [queryClient],
   );
 
-  async function send(
-    text: string,
-    attachmentIds: string[] = [],
-    deepSearch = false,
-  ) {
+  async function send(text: string, attachmentIds: string[] = [], deepSearch = false) {
     setTurnError(null);
     // O aviso de "entrou na agenda" vale para o que acabou de
     // acontecer. Mantê-lo durante o turno seguinte o transformaria em

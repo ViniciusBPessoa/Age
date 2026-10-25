@@ -67,7 +67,53 @@ def _juntar_segmentos(partes: list[str]) -> str:
 # Callbacks que o chamador fornece para publicar no stream.
 EmitText = Callable[[str], Awaitable[None]]
 EmitToolStart = Callable[[str], Awaitable[None]]
-EmitToolEnd = Callable[[str, bool, str | None], Awaitable[None]]
+EmitToolEnd = Callable[
+    [str, bool, str | None, list[dict] | None], Awaitable[None]
+]
+
+
+def _separar_fontes(output: str) -> tuple[str, list[dict] | None]:
+    """Tira `_fontes` do resultado da ferramenta.
+
+    O campo existe para a tela, não para o modelo — ele já tem os mesmos
+    dados dentro de `results`, e mandar de novo seria pagar os tokens
+    duas vezes num payload que já é o mais caro do turno.
+
+    Resultado que não é JSON, ou que não tem o campo, volta intacto:
+    toda ferramenta passa por aqui.
+    """
+    if "_fontes" not in output:
+        return output, None
+    try:
+        dados = json.loads(output)
+    except (ValueError, TypeError):
+        return output, None
+    if not isinstance(dados, dict):
+        return output, None
+    fontes = dados.pop("_fontes", None)
+    if not isinstance(fontes, list) or not fontes:
+        return output, None
+    return json.dumps(dados, ensure_ascii=False), fontes
+
+
+def _resumo_de_fontes(fontes: list[dict]) -> str:
+    """A linha que aparece recolhida, ao lado do rótulo da ferramenta.
+
+    Antes disto, sucesso emitia `summary=None` e a caixa de consultas
+    mostrava só "pesquisando na internet", sem dizer onde. Nomear os
+    sites é o que torna a busca verificável de relance, antes mesmo de
+    abrir a lista.
+    """
+    sites: list[str] = []
+    for f in fontes:
+        site = (f.get("site") or "").strip()
+        if site and site not in sites:
+            sites.append(site)
+    if not sites:
+        return f"{len(fontes)} fontes"
+    mostrados = ", ".join(sites[:3])
+    sobra = len(sites) - 3
+    return f"{mostrados} e mais {sobra}" if sobra > 0 else mostrados
 IsCancelled = Callable[[], Awaitable[bool]]
 
 # Executor de ferramenta: recebe nome e argumentos, devolve o resultado
@@ -248,9 +294,17 @@ async def run_conversation_turn(
 
             tool_calls_made += 1
             await emit_tool_start(call.name)
+            fontes: list[dict] | None = None
             try:
                 output = await execute_tool(call.name, call.arguments)
                 ok, summary_text = True, None
+                # A busca na web devolve as fontes num campo à parte,
+                # para a TELA (§5.1.3). Sai do que vai ao modelo: ele
+                # já tem os mesmos dados em `results`, e repetir seria
+                # pagar os tokens duas vezes.
+                output, fontes = _separar_fontes(output)
+                if fontes:
+                    summary_text = _resumo_de_fontes(fontes)
             except Exception as exc:  # noqa: BLE001
                 # Falha de ferramenta volta ao modelo como dado, não
                 # derruba o turno: ele pode tentar outro caminho.
@@ -258,7 +312,7 @@ async def run_conversation_turn(
                 output = json.dumps({"error": str(exc)}, ensure_ascii=False)
                 ok, summary_text = False, str(exc)[:120]
 
-            await emit_tool_end(call.name, ok, summary_text)
+            await emit_tool_end(call.name, ok, summary_text, fontes)
             tool_msg = Message(role="tool", content=output, tool_call_id=call.id)
             working.append(tool_msg)
             appended.append(tool_msg)

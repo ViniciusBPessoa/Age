@@ -42,11 +42,32 @@ class ToolStartEvent(_BaseEvent):
     name: str
 
 
+class Fonte(_BaseEvent):
+    """Uma página que a busca na web usou (§5.1.3).
+
+    Vai para a TELA, não para o modelo: é o que permite a pessoa ver de
+    onde veio a resposta e clicar para conferir. Sem isto a pesquisa é
+    indistinguível de o modelo inventar.
+    """
+
+    titulo: str
+    url: str
+    site: str | None = None
+    # `False` quando o `rerank_score` ficou abaixo do limite de
+    # qualidade. A tela marca como não verificada em vez de esconder.
+    confiavel: bool = True
+
+
 class ToolEndEvent(_BaseEvent):
     type: Literal["tool_end"] = "tool_end"
     name: str
     ok: bool = True
     summary: str | None = None
+    # As fontes de `web_search`, vazio em toda outra ferramenta.
+    #
+    # Default `None` porque `_BaseEvent` é `extra="forbid"`: um worker
+    # anterior a este campo não o manda, e o evento continua válido.
+    fontes: tuple[Fonte, ...] | None = None
 
 
 class PlanEvent(_BaseEvent):

@@ -216,6 +216,20 @@ async def web_search(context: ToolContext, args: dict) -> dict:
     saida = classificar(brutos)
     saida["query"] = query
     saida["aprofundado"] = aprofundado
+    # Para a TELA, não para o modelo: o orquestrador tira este campo do
+    # resultado e o manda no `tool_end`. Fica separado de `results`
+    # porque é outra audiência — aqui só o que a pessoa precisa para
+    # reconhecer e abrir a página, sem o conteúdo.
+    saida["_fontes"] = [
+        {
+            "titulo": r["title"],
+            "url": r["url"],
+            "site": r["site"] or None,
+            "confiavel": r["confiavel"],
+        }
+        for r in saida["results"]
+        if r.get("url")
+    ]
     return saida
 
 

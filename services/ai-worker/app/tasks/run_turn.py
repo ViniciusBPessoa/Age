@@ -13,12 +13,14 @@ Responsabilidades, em ordem:
 
 from __future__ import annotations
 
+import json
 import logging
 from uuid import UUID
 
 from age_contracts import (
     DoneEvent,
     ErrorEvent,
+    Fonte,
     PlanEvent,
     TokenEvent,
     ToolEndEvent,
@@ -344,6 +346,11 @@ async def run_turn(ctx: dict, payload: dict) -> dict:
             deep_search=deep_search,
         )
 
+        # As fontes de TODAS as buscas do turno, para gravar na
+        # mensagem. Sem isto elas vivem só no estado do navegador e um
+        # F5 apaga a lista — a pessoa volta a não saber de onde veio.
+        fontes_do_turno: list[dict] = []
+
         caps = provider.capabilities
         tools = (
             build_tool_specs(include_web=tem_busca)
@@ -362,8 +369,8 @@ async def run_turn(ctx: dict, payload: dict) -> dict:
                 execute_tool=_run_tool,
                 emit_text=lambda d: pub.publish(TokenEvent(delta=d)),
                 emit_tool_start=lambda n: pub.publish(ToolStartEvent(name=n)),
-                emit_tool_end=lambda n, ok, s: pub.publish(
-                    ToolEndEvent(name=n, ok=ok, summary=s)
+                emit_tool_end=lambda n, ok, s, f=None: _emitir_fim(
+                    pub, fontes_do_turno, n, ok, s, f
                 ),
                 is_cancelled=pub.is_cancelled,
                 max_iterations=settings.max_tool_iterations,
@@ -413,6 +420,7 @@ async def run_turn(ctx: dict, payload: dict) -> dict:
                 usage=result.usage,
                 cost_usd=cost,
                 used_instance_key=credencial.is_instance,
+                fontes=fontes_do_turno,
             )
             await db.execute(
                 text(
@@ -608,6 +616,26 @@ def _to_domain_message(
     )
 
 
+def _emitir_fim(pub, acumulador: list[dict], nome, ok, resumo, fontes):
+    """Publica o `tool_end` e guarda as fontes para a persistência.
+
+    As duas coisas juntas porque são o mesmo dado com dois destinos: a
+    tela agora (evento) e a tela depois do F5 (mensagem gravada).
+    """
+    if fontes:
+        for f in fontes:
+            if f not in acumulador:
+                acumulador.append(f)
+    return pub.publish(
+        ToolEndEvent(
+            name=nome,
+            ok=ok,
+            summary=resumo,
+            fontes=tuple(Fonte(**x) for x in fontes) if fontes else None,
+        )
+    )
+
+
 async def _persist_assistant_message(
     db,
     *,
@@ -620,6 +648,7 @@ async def _persist_assistant_message(
     usage,
     cost_usd: float | None,
     used_instance_key: bool,
+    fontes: list[dict] | None = None,
 ) -> UUID:
     """Grava a saída do turno no schema `ai`.
 
@@ -636,8 +665,9 @@ async def _persist_assistant_message(
             """
             INSERT INTO ai.turn_outputs
               (turn_id, user_id, conversation_id, role, content,
-               sequence, provider_key, model)
-            VALUES (:tid, :uid, :cid, 'assistant', :content, 0, :pk, :model)
+               sequence, provider_key, model, tool_calls)
+            VALUES (:tid, :uid, :cid, 'assistant', :content, 0, :pk,
+                    :model, CAST(:fontes AS json))
             RETURNING id
             """
         ),
@@ -648,6 +678,16 @@ async def _persist_assistant_message(
             "content": text_content,
             "pk": provider_key,
             "model": model,
+            # As fontes da busca viajam na coluna `tool_calls`, que já
+            # é copiada para `core.messages` pelo dreno. Reusar a coluna
+            # evita migration para um dado que aparece em uma mensagem
+            # a cada muitas — e o formato é discriminado por chave, então
+            # quem lê sabe o que é.
+            "fontes": (
+                json.dumps({"fontes": fontes}, ensure_ascii=False)
+                if fontes
+                else None
+            ),
         },
     )
     output_id = row.scalar_one()

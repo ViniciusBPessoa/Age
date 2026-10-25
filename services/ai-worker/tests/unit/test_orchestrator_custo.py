@@ -148,7 +148,7 @@ async def _rodar(provider: LLMProvider, agora) -> object:
         execute_tool=lambda nome, args: _ok(),
         emit_text=lambda _t: _nada(),
         emit_tool_start=lambda _n: _nada(),
-        emit_tool_end=lambda _n, _ok, _s: _nada(),
+        emit_tool_end=lambda _n, _ok, _s, _f=None: _nada(),
         is_cancelled=_falso,
         now=agora,
     )
