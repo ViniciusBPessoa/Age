@@ -1195,6 +1195,41 @@ Soltar **fora** da zona faria o navegador abrir o arquivo e sair da aplicação,
 
 **O que não é feito:** OCR (PDF escaneado é recusado com instrução — mandar um print, que o modelo lê como imagem) e imagens embutidas no PDF (só o texto sai; rasterizar custaria até 994 tokens por página e exigiria dependência nativa).
 
+### 5.1.3 Pesquisa na internet
+
+**O botão de globo no composer liga a pesquisa aprofundada.** Desligado, o modelo ainda pode buscar se julgar necessário, mas em modo econômico; ligado, ele lê o conteúdo das páginas. O estado vive na **mensagem**, não na conversa: deixar ligado faria toda mensagem seguinte custar 5x sem a pessoa ter pedido.
+
+Duas tools de LEITURA, `web_search` e `web_fetch`, sobre os endpoints `/v1/tools/search` e `/v1/tools/fetch` da DeepSeek — **autenticados pela mesma chave do chat**. Nenhuma credencial nova, nenhuma conta a mais para administrar, e é isso que torna a feature barata.
+
+**A API nunca devolve lista vazia, e esse é o defeito que define o desenho.** Medido em 24/10/2026: a busca `"xqzvbnm7731qz lkjhgfdsa zzzz nao existe nada disso"` voltou **HTTP 200 com 10 resultados de lixo** — IDs de revisão do Stack Overflow, uma nota do Nostr, um "Aquí no hay nada" e uma tabela de CVSS. O único sinal que separa ouro de lixo é o `rerank_score`:
+
+| Busca | score máximo | mediana |
+|---|---|---|
+| "edital Enem 2026" | 2,38 | **2,28** |
+| absurdo proposital | 0,54 | **0,27** |
+
+Uma ordem de magnitude. Sem olhar esse campo, o Age responderia sobre o edital do usuário citando revisão de Stack Overflow — com convicção, e sem erro em lugar nenhum.
+
+**O filtro classifica, não esconde.** Cada resultado sai com `confiavel`, e a resposta traz `qualidade: "boa" | "fraca" | "nenhuma_confiavel"`. Quando nada passa do limite de 1,5, a descrição da tool manda o modelo dizer isso **antes** de resumir. Verificado na tela: perguntado sobre um campeonato inexistente, ele abriu com *"não retornou nenhuma fonte confiável"*, mostrou o que achou marcado como não verificado e apontou que as fontes se contradiziam.
+
+**Conteúdo de site é dado, nunca instrução.** Fonte fraca entra cercada por `--- fonte de baixa confianca, score 0.54, NAO verificada ---`, com o score no próprio delimitador. É a mesma defesa dos anexos de PDF (§5.1.2), e aqui ela importa mais: o texto vem de terceiros que ninguém escolheu.
+
+**O orçamento é do sistema, não do modelo**, porque medição manda:
+
+| Chamada | Tokens no histórico |
+|---|---|
+| `count=3`, sem conteúdo (botão desligado) | ~1.163 |
+| `count=5`, `need_content=true` (botão ligado) | ~6.455 |
+| `count=10`, `need_content=true` | **~17.867** |
+
+17.867 tokens é **mais que o prompt inteiro do Age** (~12.850), e o histórico é relido a cada mensagem — uma busca gorda encarece todos os turnos seguintes. Por isso o `count` é tampado no código, e o parâmetro certo é `count`: `top_k` e `max_results` são aceitos e **ignorados em silêncio** (os três foram testados).
+
+**As fontes aparecem no corpo da resposta**, em Markdown, e não por evento SSE novo — `_BaseEvent` tem `extra="forbid"`, e o custo seria mudar o contrato em três serviços. A tool pede ao modelo que cite as URLs; o renderizador (§8.1) ganhou suporte a link para que elas sejam clicáveis, com esquema validado (só `http`/`https`) e `rel="noopener noreferrer"`, porque agora há links de terceiros na tela.
+
+**Busca é capacidade de PROVEDOR, não de modelo** — é um endpoint separado e o resultado entra como texto. Consultada por atributo (`supports_web_search`), nunca por `if provider_key == "deepseek"` (§3.1.2). Provedor sem busca não recebe as tools e não mostra o botão: um botão morto promete o que o modelo não faz.
+
+**Custo:** US$ 0,75 por 1000 buscas, grátis até 01/11/2026. Uma pesquisa de 5 buscas e 3 leituras custa ~US$ 0,006. Como a API nunca devolve vazio, na prática toda busca é cobrada — inclusive a que só trouxe lixo. O filtro economiza tokens, não a busca.
+
 ### 5.2 Tools expostas ao modelo
 
 **Leitura — executam na hora:**
@@ -1210,6 +1245,8 @@ Soltar **fora** da zona faria o navegador abrir o arquivo e sair da aplicação,
 | `get_routine_status(routine_id?, weeks?)` | aderência de uma série recorrente — §5.9.4 |
 | `get_period_summary(start, end)` | agregado para relatório: planejado vs. realizado por categoria — §5.9.9 |
 | `get_external_changes(since)` | o que mudou na agenda fora do Age — §5.10 |
+| `web_search(query)` | pesquisa na internet, com as fontes e o score de qualidade — §5.1.3 |
+| `web_fetch(url)` | lê uma página inteira em texto — §5.1.3 |
 | `get_tasks(filter)` | tarefas abertas/atrasadas/sem prazo — §3.3 |
 | `get_task_lists()` | listas disponíveis e qual é destino de escrita |
 | `get_unscheduled_tasks(due_before?)` | tarefas sem tempo reservado — a matéria-prima de "reserva tempo pra isso" |
