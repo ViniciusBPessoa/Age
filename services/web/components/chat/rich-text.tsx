@@ -15,9 +15,14 @@
  *   (`vite@7` quer `@types/node >=22.12`, o projeto fixa `22.10.1`).
  *   Somar dependência agora é somar risco a um build que não fecha.
  * - Markdown de LLM num chat é um subconjunto pequeno e previsível:
- *   bloco de código, negrito, itálico, código inline, lista, título e
- *   tabela. Não há HTML embutido para sanitizar, nem links de
- *   terceiros a validar.
+ *   bloco de código, negrito, itálico, código inline, lista, título,
+ *   tabela e link. Não há HTML embutido para sanitizar.
+ *
+ * O link entrou com a busca na web (§5.1.3): sem ele a resposta exibia
+ * `[título](url)` cru, e a lista de fontes — que é o ponto inteiro de
+ * pesquisar — não era clicável. Agora os links VÊM de terceiros, então
+ * o esquema é validado (só `http`/`https`) e a âncora leva
+ * `rel="noopener noreferrer"`.
  *
  * ## Segurança
  *
@@ -36,7 +41,8 @@ function inline(texto: string, chave: string): ReactNode[] {
   // seja a do texto e não a da ordem em que eu aplicaria substituições.
   // `**` antes de `*` importa: com `*` primeiro, "**x**" viraria
   // itálico vazio seguido de lixo.
-  const padrao = /(`[^`\n]+`)|(\*\*[^*\n]+\*\*)|(\*[^*\n]+\*)|(__[^_\n]+__)/g;
+  const padrao =
+    /(\[[^\]\n]+\]\([^)\s]+\))|(`[^`\n]+`)|(\*\*[^*\n]+\*\*)|(\*[^*\n]+\*)|(__[^_\n]+__)/g;
   let ultimo = 0;
   let m: RegExpExecArray | null;
   let i = 0;
@@ -47,7 +53,38 @@ function inline(texto: string, chave: string): ReactNode[] {
     i += 1;
     const k = `${chave}-i${i}`;
 
-    if (t.startsWith("`")) {
+    if (t.startsWith("[")) {
+      const corte = t.lastIndexOf("](");
+      const rotulo = t.slice(1, corte);
+      const href = t.slice(corte + 2, -1);
+      /*
+       * So `http(s)`. Este texto vem do MODELO, que por sua vez
+       * resumiu conteudo de sites de terceiros: confiar no esquema
+       * faria `javascript:` virar ancora executavel. Esquema
+       * desconhecido fica como texto -- visivel e inofensivo.
+       */
+      const seguro = /^https?:\/\//i.test(href);
+      saida.push(
+        seguro ? (
+          <a
+            key={k}
+            href={href}
+            target="_blank"
+            /*
+             * `noopener` impede a pagina aberta de mexer nesta por
+             * `window.opener`; `noreferrer` evita vazar a URL da
+             * conversa no cabecalho Referer do site de destino.
+             */
+            rel="noopener noreferrer"
+            className="text-brand underline underline-offset-2 hover:brightness-110"
+          >
+            {rotulo}
+          </a>
+        ) : (
+          <Fragment key={k}>{t}</Fragment>
+        ),
+      );
+    } else if (t.startsWith("`")) {
       saida.push(
         <code
           key={k}
