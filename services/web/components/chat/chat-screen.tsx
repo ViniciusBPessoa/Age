@@ -50,6 +50,7 @@ import {
 import { Composer } from "@/components/chat/composer";
 import { ConversationSidebar } from "@/components/conversation-list/sidebar";
 import { PlanReview } from "@/components/plan-review/plan-review";
+import { PropostasPendentes } from "@/components/chat/propostas-pendentes";
 import { Button, IconAlert, IconInfo, IconX, LoadError, cx } from "@/components/ui";
 import { useAnexos } from "./anexos-do-composer";
 import { SobreposicaoDeArraste, useArrastarImagem } from "./arrastar-imagem";
@@ -494,15 +495,30 @@ export function ChatScreen({
    * antes de listar, entao esta chamada e tambem o que materializa o
    * plano que o worker acabou de propor.
    */
-  const plan = useQuery({
-    queryKey: ["plan", "proposto-da-conversa", idAtivo],
-    queryFn: async () => {
-      const propostos = await api.get<Plan[]>("/plans?status=proposed");
-      return planoDaConversa(propostos, idAtivo);
-    },
-    enabled: idAtivo !== null,
+  /*
+   * A lista INTEIRA de propostas vivas, não só a da conversa aberta.
+   *
+   * O cartão usa `planoDaConversa` para achar a desta conversa; o
+   * aviso de pendente usa o resto. Antes a query já descartava as
+   * outras aqui dentro, e era por isso que uma proposta deixada sem
+   * resposta em outra conversa não aparecia em lugar nenhum — o caso
+   * do Toy Story que ficou cinco dias esperando.
+   *
+   * `enabled` sem `idAtivo`: numa conversa nova ainda não existe id, e
+   * é justamente aí que avisar importa.
+   */
+  const propostas = useQuery({
+    queryKey: ["plan", "propostos"],
+    queryFn: () => api.get<Plan[]>("/plans?status=proposed"),
     staleTime: 10_000,
   });
+  // `refetch` continua vindo da query de verdade: quem recalcula um
+  // horário precisa recarregar do servidor, e um objeto literal sem
+  // ele quebraria na hora do clique — não no `tsc`.
+  const plan = {
+    data: planoDaConversa(propostas.data ?? [], idAtivo),
+    refetch: propostas.refetch,
+  };
 
   const handleEvent = useCallback(
     (event: StreamEvent) => {
@@ -945,36 +961,39 @@ export function ChatScreen({
             onRetry={() => void messages.refetch()}
           />
         ) : (
-          <MessageList
-            messages={comEcoLocal(messages.data?.items ?? [], ecoLocal)}
-            streaming={streaming}
-            streamingText={streamingText}
-            traces={traces}
-            timezone={timezone}
-          >
-            {plan.data && plan.data.status === "proposed" ? (
-              <PlanReview
-                plan={plan.data}
-                timezone={timezone}
-                applying={applying}
-                onApply={applyPlan}
-                onReject={rejeitarPlano(plan.data)}
-                onReschedule={async (itemId, start, end) => {
-                  await api.patch(`/plans/items/${itemId}`, { start, end });
-                  // Recarrega o plano: os horários exibidos vêm do
-                  // servidor, e manter o valor antigo na tela depois de
-                  // salvar faria a pessoa duvidar se gravou.
-                  await plan.refetch();
-                }}
-                onAskChange={(texto) => {
-                  // Vira uma mensagem comum: o Age já sabe que a
-                  // proposta está na tela, então "tira os de sábado"
-                  // chega com o contexto inteiro do turno anterior.
-                  void send(texto);
-                }}
-              />
-            ) : null}
-          </MessageList>
+          <>
+            <PropostasPendentes propostos={propostas.data ?? []} idAtivo={idAtivo} />
+            <MessageList
+              messages={comEcoLocal(messages.data?.items ?? [], ecoLocal)}
+              streaming={streaming}
+              streamingText={streamingText}
+              traces={traces}
+              timezone={timezone}
+            >
+              {plan.data && plan.data.status === "proposed" ? (
+                <PlanReview
+                  plan={plan.data}
+                  timezone={timezone}
+                  applying={applying}
+                  onApply={applyPlan}
+                  onReject={rejeitarPlano(plan.data)}
+                  onReschedule={async (itemId, start, end) => {
+                    await api.patch(`/plans/items/${itemId}`, { start, end });
+                    // Recarrega o plano: os horários exibidos vêm do
+                    // servidor, e manter o valor antigo na tela depois de
+                    // salvar faria a pessoa duvidar se gravou.
+                    await plan.refetch();
+                  }}
+                  onAskChange={(texto) => {
+                    // Vira uma mensagem comum: o Age já sabe que a
+                    // proposta está na tela, então "tira os de sábado"
+                    // chega com o contexto inteiro do turno anterior.
+                    void send(texto);
+                  }}
+                />
+              ) : null}
+            </MessageList>
+          </>
         )}
 
         {/*
