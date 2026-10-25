@@ -45,6 +45,13 @@ class ToolContext:
     read_calendar: Callable[..., Awaitable[Any]] | None = None
     plan_builder: Any | None = None
     preferences: dict[str, Any] = field(default_factory=dict)
+    # Busca na web: mesmo padrão de injeção do `read_calendar` — a tool
+    # fica pura e o cliente HTTP mora fora do domínio (§5.10).
+    search_web: Callable[..., Awaitable[Any]] | None = None
+    # Orçamento de busca, decidido pelo BOTÃO da pessoa e não pelo
+    # modelo: aprofundado lê o conteúdo das páginas (~6.500 tokens
+    # contra ~1.200). Deixar o modelo escolher seria deixá-lo gastar.
+    deep_search: bool = False
 
 
 ToolHandler = Callable[[ToolContext, dict], Awaitable[dict]]
@@ -84,8 +91,18 @@ def register_tool(
     return decorator
 
 
+# Ferramentas que dependem da API de busca do provedor (§5.1.3). Ficam
+# numa constante, e não num `if nome.startswith("web_")`: o prefixo é
+# convenção de nome, e uma tool nova chamada `web_hook` entraria na
+# regra sem querer.
+TOOLS_DE_WEB = frozenset({"web_search", "web_fetch"})
+
+
 def build_tool_specs(
-    *, include_write: bool = True, include_record: bool = True
+    *,
+    include_write: bool = True,
+    include_record: bool = True,
+    include_web: bool = True,
 ) -> list[ToolSpec]:
     """Especificações para enviar ao modelo.
 
@@ -98,6 +115,10 @@ def build_tool_specs(
         if tool.category == ToolCategory.WRITE and not include_write:
             continue
         if tool.category == ToolCategory.RECORD and not include_record:
+            continue
+        # Provedor sem busca na web não recebe as tools de busca: elas
+        # falhariam em toda chamada, e o modelo tentaria de novo.
+        if tool.name in TOOLS_DE_WEB and not include_web:
             continue
         specs.append(
             ToolSpec(

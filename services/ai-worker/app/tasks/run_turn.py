@@ -57,11 +57,13 @@ from app.domain.tools import (
     routine_tools,  # noqa: F401
     study_tools,  # noqa: F401
     task_tools,  # noqa: F401
+    web_tools,  # noqa: F401
 )
 from app.ports.llm import LLMError, Message
 from app.prompts import build_system_prompt
 from app.publishers import TurnPublisher
 from app.staging import StagingBuilder
+from app.web_client import WebClient
 
 log = logging.getLogger("ai-worker.run_turn")
 
@@ -70,6 +72,9 @@ async def run_turn(ctx: dict, payload: dict) -> dict:
     turn_id = payload["turn_id"]
     user_id = UUID(payload["user_id"])
     conversation_id = UUID(payload["conversation_id"])
+    # Botao do composer (secao 5.1.3). `.get` e nao `[...]`: job
+    # enfileirado antes deste campo existir nao o traz.
+    deep_search = bool(payload.get("deep_search", False))
 
     # Primeira linha do job, de propósito: daqui para baixo toda linha de
     # log — deste arquivo, do orquestrador, de cada tool, e também de
@@ -316,6 +321,12 @@ async def run_turn(ctx: dict, payload: dict) -> dict:
         # O staging acumula propostas sem tocar a agenda (§5.2). As
         # tools de escrita só conhecem este objeto; é estruturalmente
         # impossível uma delas aplicar algo.
+        # Consulta por atributo, nunca `if provider_key == "deepseek"`
+        # (§3.1.2). `getattr` porque um adaptador pode não herdar da base
+        # — o mock não herda, e acessar direto derrubava o turno inteiro
+        # quando a visão entrou.
+        tem_busca = bool(getattr(provider, "supports_web_search", False))
+
         staging = StagingBuilder(user_id=user_id, conversation_id=conversation_id)
         tool_ctx = ToolContext(
             user_id=user_id,
@@ -324,10 +335,21 @@ async def run_turn(ctx: dict, payload: dict) -> dict:
             read_calendar=CalendarClient(user_id),
             plan_builder=staging,
             preferences=prefs_dict,
+            # A busca usa a MESMA chave do chat, já decifrada pelo
+            # resolver. Nenhuma credencial nova, nenhuma conta a mais
+            # para o usuário administrar (§5.1.3).
+            search_web=(
+                WebClient(credencial.api_key) if tem_busca else None
+            ),
+            deep_search=deep_search,
         )
 
         caps = provider.capabilities
-        tools = build_tool_specs() if caps.supports_tools else None
+        tools = (
+            build_tool_specs(include_web=tem_busca)
+            if caps.supports_tools
+            else None
+        )
 
         async def _run_tool(name: str, arguments: dict) -> str:
             return await execute_tool(name, arguments, tool_ctx)

@@ -197,6 +197,21 @@ export const IconSearch = (p: IconProps) => (
   </Svg>
 );
 
+/**
+ * Globo, para "pesquisar na internet".
+ *
+ * Não reaproveitei `IconSearch`: a lupa já significa "buscar na
+ * conversa" na lista de conversas, e dois sentidos para o mesmo glifo
+ * na mesma tela confunde. Globo diz "fora daqui".
+ */
+export const IconGlobe = (p: IconProps) => (
+  <Svg {...p}>
+    <circle cx="12" cy="12" r="8.5" />
+    <path d="M3.5 12h17" />
+    <path d="M12 3.5c2.2 2.3 3.4 5.3 3.4 8.5S14.2 18.2 12 20.5c-2.2-2.3-3.4-5.3-3.4-8.5S9.8 5.8 12 3.5Z" />
+  </Svg>
+);
+
 export const IconMenu = (p: IconProps) => (
   <Svg {...p}>
     <path d="M4 7h16M4 12h16M4 17h16" />

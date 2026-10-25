@@ -17,7 +17,7 @@
 
 import { useEffect, useRef, useState } from "react";
 
-import { Badge, Button, IconSend, Select, cx } from "@/components/ui";
+import { Badge, Button, IconGlobe, IconSend, Select, cx } from "@/components/ui";
 import {
   BotaoDeAnexo,
   type EstadoDeAnexos,
@@ -55,6 +55,7 @@ export function Composer({
   onProviderChange,
   onTargetChange,
   estadoDeAnexos,
+  buscaNaWeb = true,
 }: {
   providers: ProviderInfo[];
   credentials: Credential[];
@@ -68,7 +69,7 @@ export function Composer({
    * `attachmentIds` so chega com imagem anexada; sem anexo, a
    * lista vem vazia e o caminho e o mesmo de sempre.
    */
-  onSend: (text: string, attachmentIds: string[]) => void;
+  onSend: (text: string, attachmentIds: string[], deepSearch: boolean) => void;
   onProviderChange: (providerKey: string, model: string) => void;
   onTargetChange: (target: Target) => void;
   /**
@@ -80,10 +81,22 @@ export function Composer({
    * que mantém o componente usável sozinho, como os testes o montam.
    */
   estadoDeAnexos?: EstadoDeAnexos;
+  /**
+   * Se o provedor tem busca na web (so a DeepSeek, hoje).
+   *
+   * `false` esconde o botao em vez de desabilita-lo: um botao
+   * morto promete o que o modelo nao faz -- a mesma licao do
+   * clipe aparecendo em modelo sem visao.
+   */
+  buscaNaWeb?: boolean;
 }) {
   const [text, setText] = useState("");
   const area = useRef<HTMLTextAreaElement>(null);
   const [pulse, setPulse] = useState(false);
+  // Pesquisa aprofundada: le o conteudo das paginas (~6.500 tokens
+  // contra ~1.200). Vive por MENSAGEM, nao por conversa: ligar para
+  // uma pergunta e deixar ligado encareceria todo o resto.
+  const [deep, setDeep] = useState(false);
   // `useAnexos` roda sempre (regra dos hooks), e o do pai vence
   // quando existe. Chamar condicionalmente quebraria a ordem dos
   // hooks entre renders.
@@ -136,6 +149,19 @@ export function Composer({
       providers.find((p) => p.key === providerKey)?.vision_models?.includes(model),
   );
 
+  // Busca na web: do PROVEDOR, nao do modelo (a busca e um endpoint
+  // separado, e o resultado entra como texto). Derivado do catalogo
+  // aqui, como a visao acima, e nao exigido do pai: foi assim que o
+  // clipe sumiu da conta real -- quem monta o componente nao sabe
+  // responder por capacidade de provedor.
+  //
+  // `buscaNaWeb` ainda existe como prop para o teste poder forcar, mas
+  // o default vem do catalogo.
+  const provedorBusca = Boolean(
+    providers.find((p) => p.key === providerKey)?.web_search,
+  );
+  const mostrarBusca = buscaNaWeb && provedorBusca;
+
   // PDF vira texto extraído e funciona em QUALQUER modelo; só a
   // imagem exige visão. Sem esta distinção, anexar um PDF a um modelo
   // sem visão bloquearia o envio sem razão.
@@ -162,9 +188,14 @@ export function Composer({
 
   function submit() {
     if (!canSend) return;
-    onSend(text.trim(), idsProntos);
+    onSend(text.trim(), idsProntos, deep && mostrarBusca);
     setText("");
     limpar();
+    // Desliga depois de enviar, junto com o texto e os anexos: a
+    // pesquisa aprofundada vale para a pergunta que a pessoa acabou de
+    // fazer. Deixar ligado faria toda mensagem seguinte custar 5x sem
+    // ela ter pedido.
+    setDeep(false);
   }
 
   return (
@@ -303,6 +334,32 @@ export function Composer({
                 )),
               )}
             </Select>
+
+            {/*
+             * Pesquisa aprofundada.
+             *
+             * `aria-pressed` num `<button>`, e nao `<label>`+checkbox:
+             * jsdom nao propaga clique de label, entao um teste do
+             * segundo caminho passaria sem testar nada (foi o que
+             * aconteceu no teste do clipe).
+             */}
+            {mostrarBusca ? (
+              <Button
+                variant={deep ? "primary" : "ghost"}
+                size="icon"
+                className="rounded-xl"
+                aria-pressed={deep}
+                onClick={() => setDeep((v) => !v)}
+                title={
+                  deep
+                    ? "Pesquisa aprofundada ligada: entra nos sites e le as paginas"
+                    : "Pesquisar na internet e ler as paginas (gasta mais)"
+                }
+                aria-label="Pesquisa aprofundada na internet"
+              >
+                <IconGlobe />
+              </Button>
+            ) : null}
 
             <span aria-hidden className="h-4 w-px bg-line" />
 

@@ -576,7 +576,11 @@ export function ChatScreen({
     [queryClient],
   );
 
-  async function send(text: string, attachmentIds: string[] = []) {
+  async function send(
+    text: string,
+    attachmentIds: string[] = [],
+    deepSearch = false,
+  ) {
     setTurnError(null);
     // O aviso de "entrou na agenda" vale para o que acabou de
     // acontecer. Mantê-lo durante o turno seguinte o transformaria em
@@ -636,6 +640,9 @@ export function ChatScreen({
           // mensagem mudaria o payload de 100% dos envios por causa de
           // um caso que é minoria.
           ...(attachmentIds.length > 0 ? { attachment_ids: attachmentIds } : {}),
+          // Mesmo criterio do anexo: so vai no corpo quando ligado, para
+          // o payload da mensagem comum nao mudar.
+          ...(deepSearch ? { deep_search: true } : {}),
         },
       );
 

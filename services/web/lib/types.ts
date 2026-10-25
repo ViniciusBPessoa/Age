@@ -113,6 +113,14 @@ export interface ProviderInfo {
    * que oferecer um anexo que o worker vai descartar.
    */
   vision_models?: string[];
+  /**
+   * Se este provedor tem busca na web pela propria API (§5.1.3).
+   *
+   * Opcional pelo mesmo motivo do `vision_models`: backend anterior a
+   * este campo nao o manda, e ausente significa "nao tem" -- esconder
+   * o botao e melhor que oferecer uma pesquisa que nao acontece.
+   */
+  web_search?: boolean;
 }
 
 /** Note a ausência de `api_key`: é deliberada no backend (§4.3). */

@@ -143,6 +143,13 @@ class SendMessage(BaseModel):
     # recusa de novo porque e ele que fala com o banco.
     attachment_ids: list[UUID] = Field(default_factory=list, max_length=4)
 
+    # Botao "pesquisa aprofundada" do composer (§5.1.3).
+    #
+    # Vive na MENSAGEM, nao na conversa: ligar para uma pergunta e
+    # deixar ligado faria toda mensagem seguinte ler o conteudo das
+    # paginas (~6.500 tokens contra ~1.200), sem a pessoa ter pedido.
+    deep_search: bool = False
+
 
 class TurnAccepted(BaseModel):
     turn_id: UUID
@@ -756,6 +763,7 @@ async def send_message(
             "user_id": str(user.id),
             "message_id": str(message_id),
             "trace_id": trace_id,
+            "deep_search": body.deep_search,
         },
         _job_id=f"turn:{turn_id}",
     )

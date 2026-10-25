@@ -41,6 +41,14 @@ class ProviderInfo(BaseModel):
     # é o lado seguro: esconde o botão em vez de oferecer um anexo que
     # seria descartado.
     vision_models: list[str] = []
+    # Se o provedor tem busca na web pela propria API (§5.1.3). Default
+    # `False` pelo mesmo motivo do campo acima: um worker sem o campo
+    # degrada para "nao tem", que esconde o botao em vez de oferecer
+    # uma pesquisa que nunca acontece.
+    #
+    # Sem esta linha o pydantic DESCARTA o campo calado e o botao nunca
+    # aparece -- foi assim que o clipe sumiu da conta real.
+    web_search: bool = False
 
 
 class KeySourceOut(BaseModel):

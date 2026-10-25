@@ -181,6 +181,9 @@ const TOOL_LABELS: Record<string, string> = {
   get_external_changes: "vendo o que mudou por fora",
   get_user_preferences: "conferindo suas preferências",
   save_preference: "guardando a preferência",
+  // Pesquisa na internet (§5.1.3)
+  web_search: "pesquisando na internet",
+  web_fetch: "lendo a página",
 };
 
 export function toolLabel(name: string): string {

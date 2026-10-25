@@ -178,6 +178,10 @@ class DeepSeekProvider(OpenAICompatibleProvider):
     key = "deepseek"
     display_name = "DeepSeek"
     api_base = "https://api.deepseek.com/v1"
+    # Medido em 24/10/2026: `/v1/tools/search` responde 200 em ~0,9 s
+    # com a mesma chave do chat, e `/v1/tools/fetch` traz a pagina em
+    # Markdown. Nenhuma credencial a mais para o usuario administrar.
+    supports_web_search = True
 
     # Só os nomes atuais são oferecidos na UI: apresentar um nome
     # obsoleto como opção seria convidar a escolher o que o provedor já

@@ -72,6 +72,11 @@ def available_providers() -> list[dict]:
                         if model_sees_images(cls.key, m)
                     }
                 ),
+                # Busca na web. Do provedor, nao do modelo: a tela usa
+                # isto para esconder o botao de pesquisa em quem nao
+                # tem -- botao morto promete o que o modelo nao faz, a
+                # mesma licao do clipe em modelo sem visao.
+                "web_search": bool(getattr(cls, "supports_web_search", False)),
             }
         )
     return sorted(out, key=lambda p: p["name"])

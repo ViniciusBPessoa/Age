@@ -340,6 +340,16 @@ class LLMProvider(ABC):
     display_name: str
     known_models: tuple[str, ...] = ()
     default_model: str = ""
+    # Busca na web pela API do próprio provedor (§5.1.3).
+    #
+    # É do PROVEDOR, não do modelo: a busca é um endpoint separado
+    # (`/tools/search`), autenticado pela mesma chave, e o resultado
+    # entra como texto — então funciona em qualquer modelo daquele
+    # provedor, inclusive um sem visão.
+    #
+    # Default `False`: provedor que não declara não tem. O lado seguro é
+    # não oferecer um botão que não leva a lugar nenhum.
+    supports_web_search: bool = False
 
     @property
     @abstractmethod

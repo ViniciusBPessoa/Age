@@ -49,6 +49,14 @@ class TurnPayload(_BasePayload):
     conversation_id: UUID
     user_id: UUID
     message_id: UUID
+    # Botão "pesquisa aprofundada" do composer (§5.10). Com `False` a
+    # busca ainda acontece se o modelo julgar necessário, mas sem ler o
+    # conteúdo das páginas (~1.200 tokens contra ~6.500).
+    #
+    # Default obrigatório: `_BasePayload` é `extra="forbid"`, e um job
+    # já enfileirado antes deste campo não o traz — sem o default, o
+    # worker rejeitaria o payload e o turno morreria na fila.
+    deep_search: bool = False
 
 
 class SyncCalendarPayload(_BasePayload):
