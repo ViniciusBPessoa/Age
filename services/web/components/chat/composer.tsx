@@ -26,6 +26,7 @@ import {
   useAnexos,
 } from "./anexos-do-composer";
 import type { Credential, ProviderInfo, Target } from "@/lib/types";
+import { lerRascunho, limparRascunho, salvarRascunho } from "@/lib/rascunho";
 
 const TARGET_LABEL: Record<Target, string> = {
   event: "Agenda",
@@ -56,6 +57,7 @@ export function Composer({
   onTargetChange,
   estadoDeAnexos,
   buscaNaWeb = true,
+  conversaId = null,
 }: {
   providers: ProviderInfo[];
   credentials: Credential[];
@@ -89,7 +91,22 @@ export function Composer({
    * clipe aparecendo em modelo sem visao.
    */
   buscaNaWeb?: boolean;
+  /**
+   * A conversa deste composer, para guardar o rascunho por chat.
+   *
+   * `null` na conversa ainda não criada: o rascunho vai para a chave
+   * `nova` e migra quando ela ganha id.
+   */
+  conversaId?: string | null;
 }) {
+  /*
+   * O texto começa VAZIO e é preenchido no efeito abaixo, não em
+   * `useState(() => lerRascunho(...))`.
+   *
+   * O motivo é render no servidor: `localStorage` não existe lá, e ler
+   * no inicializador faria o HTML do servidor diferir do primeiro
+   * render do cliente — o erro de hidratação do React.
+   */
   const [text, setText] = useState("");
   const area = useRef<HTMLTextAreaElement>(null);
   const [pulse, setPulse] = useState(false);
@@ -103,6 +120,21 @@ export function Composer({
   const proprio = useAnexos();
   const { anexos, adicionar, remover, limpar, idsProntos, subindo } =
     estadoDeAnexos ?? proprio;
+
+  // Carrega o rascunho desta conversa, e recarrega ao trocar de
+  // conversa: sem a dependência, abrir outro chat mostraria o texto
+  // do anterior.
+  useEffect(() => {
+    setText(lerRascunho(conversaId));
+  }, [conversaId]);
+
+  // Guarda com atraso: salvar a cada tecla escreveria no disco dezenas
+  // de vezes por frase. 400ms é curto o bastante para sobreviver a um
+  // clique em "Agenda" logo depois de digitar.
+  useEffect(() => {
+    const t = setTimeout(() => salvarRascunho(conversaId, text), 400);
+    return () => clearTimeout(t);
+  }, [conversaId, text]);
 
   // O chip pisca quando a mensagem sobrepôs o padrão (§8.1).
   useEffect(() => {
@@ -190,6 +222,9 @@ export function Composer({
     if (!canSend) return;
     onSend(text.trim(), idsProntos, deep && mostrarBusca);
     setText("");
+    // O rascunho morre junto com o envio: deixá-lo marcaria a conversa
+    // como "tem mensagem não enviada" logo depois de enviar.
+    limparRascunho(conversaId);
     limpar();
     // Desliga depois de enviar, junto com o texto e os anexos: a
     // pesquisa aprofundada vale para a pergunta que a pessoa acabou de

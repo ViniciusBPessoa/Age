@@ -51,6 +51,7 @@ import { Composer } from "@/components/chat/composer";
 import { ConversationSidebar } from "@/components/conversation-list/sidebar";
 import { PlanReview } from "@/components/plan-review/plan-review";
 import { PropostasPendentes } from "@/components/chat/propostas-pendentes";
+import { limparRascunho, migrarRascunho } from "@/lib/rascunho";
 import { Button, IconAlert, IconInfo, IconX, LoadError, cx } from "@/components/ui";
 import { useAnexos } from "./anexos-do-composer";
 import { SobreposicaoDeArraste, useArrastarImagem } from "./arrastar-imagem";
@@ -638,6 +639,10 @@ export function ChatScreen({
         // remontaria esta tela e mataria o turno que está por começar.
         // A URL é acertada no `done`.
         setNovaConversa(created.id);
+        // O rascunho foi escrito antes de a conversa existir, na chave
+        // `nova`. Sem migrar, ele ficaria preso lá e a marca de
+        // pendente apareceria na conversa errada.
+        migrarRascunho(created.id);
         // Sem `await`: a lista de conversas da barra lateral nao e
         // requisito para o turno comecar, e esperar por ela atrasava a
         // primeira resposta por uma ida a rede inteira.
@@ -1078,6 +1083,7 @@ export function ChatScreen({
         ) : null}
 
         <Composer
+          conversaId={idAtivo}
           estadoDeAnexos={estadoDeAnexos}
           providers={providers}
           credentials={credentials}

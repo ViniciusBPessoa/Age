@@ -35,11 +35,40 @@ import {
 } from "@/components/ui";
 import { BUCKET_LABEL, recencyBucket, type RecencyBucket } from "@/lib/format";
 import type { Conversation } from "@/lib/types";
+import { EVENTO_RASCUNHO, conversasComRascunho } from "@/lib/rascunho";
 
 export interface ConversationCounts {
   /** Itens de plano aplicados nesta conversa, por destino (§5.7). */
   events: number;
   tasks: number;
+}
+
+/**
+ * As conversas com texto não enviado.
+ *
+ * Lê as chaves de uma vez, não uma por linha: a lista pode ter dezenas
+ * de conversas, e `localStorage` é síncrono — uma leitura por item
+ * bloquearia a rolagem.
+ *
+ * Reage ao evento próprio porque `storage` do navegador só dispara em
+ * OUTRAS abas: digitar nesta aba não avisaria a lista.
+ */
+function useConversasComRascunho(): Set<string> {
+  const [ids, setIds] = useState<Set<string>>(() => new Set());
+
+  useEffect(() => {
+    const atualizar = () => setIds(conversasComRascunho());
+    atualizar();
+    window.addEventListener(EVENTO_RASCUNHO, atualizar);
+    // `storage` cobre o caso de outra aba apagar ou escrever.
+    window.addEventListener("storage", atualizar);
+    return () => {
+      window.removeEventListener(EVENTO_RASCUNHO, atualizar);
+      window.removeEventListener("storage", atualizar);
+    };
+  }, []);
+
+  return ids;
 }
 
 export function ConversationSidebar({
@@ -157,9 +186,12 @@ export function ConversationSidebar({
     return { pinned, byBucket, archived };
   }, [conversations, timezone]);
 
+  const comRascunho = useConversasComRascunho();
+
   const rowProps = (c: Conversation) => ({
     conversation: c,
     counts: counts[c.id],
+    temRascunho: comRascunho.has(c.id),
     active: c.id === activeId,
     selecting,
     checked: chosen.has(c.id),
@@ -461,6 +493,7 @@ function Row({
   onArchive,
   onDelete,
   onFork,
+  temRascunho,
 }: {
   conversation: Conversation;
   counts?: ConversationCounts;
@@ -475,6 +508,8 @@ function Row({
   onArchive: () => void;
   onDelete: () => void;
   onFork: () => void;
+  /** Tem texto escrito e não enviado nesta conversa. */
+  temRascunho?: boolean;
 }) {
   const title = conversation.title ?? "Sem título";
   const wrap = useRef<HTMLLIElement>(null);
@@ -553,6 +588,22 @@ function Row({
         )}
       >
         <span className="min-w-0 flex-1 truncate">{title}</span>
+
+        {/*
+         * Mensagem escrita e não enviada.
+         *
+         * `title` e `aria-label` não são enfeite: um ponto colorido
+         * sozinho não existe para quem não enxerga, nem para quem não
+         * adivinha a convenção. §8.2.
+         */}
+        {temRascunho ? (
+          <span
+            title="Mensagem não enviada"
+            aria-label="Mensagem não enviada"
+            role="img"
+            className="h-1.5 w-1.5 shrink-0 rounded-full bg-brand"
+          />
+        ) : null}
 
         {/* O contador de itens aplicados: a razão desta sidebar ser
             diferente das outras (§8.1). */}
