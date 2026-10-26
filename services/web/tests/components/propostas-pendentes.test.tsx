@@ -72,10 +72,7 @@ describe("quais propostas o aviso mostra", () => {
      * Plano tem TTL. Mandar a pessoa para um cartão que não aplica
      * mais é pior que não avisar.
      */
-    const fora = pendentesDeOutrasConversas(
-      [plano({ is_expired: true })],
-      "outra",
-    );
+    const fora = pendentesDeOutrasConversas([plano({ is_expired: true })], "outra");
     expect(fora).toHaveLength(0);
   });
 
@@ -108,9 +105,7 @@ describe("quais propostas o aviso mostra", () => {
 
 describe("o aviso na tela", () => {
   it("diz quantos itens e leva à conversa", () => {
-    render(
-      <PropostasPendentes propostos={[plano()]} idAtivo="conversa-aberta" />,
-    );
+    render(<PropostasPendentes propostos={[plano()]} idAtivo="conversa-aberta" />);
 
     const link = screen.getByRole("link");
     expect(link.getAttribute("href")).toBe("/chat/conversa-antiga");
@@ -126,9 +121,7 @@ describe("o aviso na tela", () => {
      * O aviso aparece sozinho, sem clique. Uma pista puramente visual
      * não existe para quem não enxerga — §8.2.
      */
-    render(
-      <PropostasPendentes propostos={[plano()]} idAtivo="conversa-aberta" />,
-    );
+    render(<PropostasPendentes propostos={[plano()]} idAtivo="conversa-aberta" />);
     const status = screen.getByRole("status");
     expect(status.getAttribute("aria-live")).toBe("polite");
   });
@@ -140,9 +133,7 @@ describe("o aviso na tela", () => {
      * É o estado normal da esmagadora maioria dos turnos; uma barra
      * vazia no topo de toda conversa seria mobília.
      */
-    const { container } = render(
-      <PropostasPendentes propostos={[]} idAtivo="x" />,
-    );
+    const { container } = render(<PropostasPendentes propostos={[]} idAtivo="x" />);
     expect(container.firstChild).toBeNull();
   });
 });

@@ -90,10 +90,7 @@ describe("os campos de data e hora", () => {
 
   it("ida e volta pelos campos preserva o instante", () => {
     const original = new Date(2026, 10, 8, 18, 15);
-    const voltou = instanteDosCampos(
-      paraCampoData(original),
-      paraCampoHora(original),
-    )!;
+    const voltou = instanteDosCampos(paraCampoData(original), paraCampoHora(original))!;
     expect(voltou.getTime()).toBe(original.getTime());
   });
 });
