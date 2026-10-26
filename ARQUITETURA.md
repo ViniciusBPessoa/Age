@@ -2583,6 +2583,32 @@ Como o worker não tem conexão com o navegador, ele **não pode** detectar desc
 
 ## 8. Frontend
 
+### 8.0 Edição direta: o que a pessoa faz não vira proposta
+
+Esta seção existe porque a regra de §5.8 foi aplicada larga demais por um tempo, e o produto ficou sem edição nenhuma.
+
+**A regra é sobre o MODELO.** "Nada entra na agenda sem aprovação" protege de um assistente que mexe na sua semana sem avisar: ele propõe, você decide. Uma edição que **você** fez, num item que você está olhando, já *é* a decisão — pedir aprovação do que acabou de ser digitado é cerimônia sem conteúdo.
+
+Caminhos diretos, todos de ação própria:
+
+| Ação | Rota | Observação |
+|---|---|---|
+| Criar evento à mão | `POST /calendar/events` | existia desde o M2 |
+| Editar evento | `PATCH /calendar/events/{id}` | só `local_events` |
+| Apagar evento | `DELETE /calendar/events/{id}` | existia |
+| Editar tarefa | `PATCH /tasks/{id}` | existia desde o M4, **sem tela** |
+| Reservar tempo | `POST /tasks/{id}/schedule` | este **gera proposta**, porque envolve o Scheduler |
+
+**Evento externo não se edita.** O que vem do Google vive em `events_shadow` e é espelho: escrever ali seria alterar uma cópia que o próximo sync sobrescreve, sem aviso. A rota devolve 404 dizendo onde editar.
+
+**Arrastar na grade cria, não move.** `onSelectSlot` (faixa vazia → evento novo) é ação direta e está ligado. `onEventDrop` (mover evento existente) continua desligado, e a nota no fim de `calendar-timeline.tsx` explica: mover é mudança na agenda, e o caminho certo é gerar um plano de um item com o motivo "você arrastou" — rota que ainda não existe.
+
+**O que estava invisível, e por quê.** Três defeitos do mesmo tipo foram corrigidos juntos, todos com a forma "a tela mostra um estado e a verdade é outra":
+
+- proposta pendente em **outra** conversa não aparecia em lugar nenhum (`propostas-pendentes.tsx`);
+- o rascunho do composer morria ao trocar de tela (`lib/rascunho.ts`, uma chave por conversa, com marca na lista);
+- as fontes da busca na web chegavam ao modelo e não à tela (§5.1.3).
+
 ### 8.1 Telas
 
 **Onboarding (primeiro acesso)**
