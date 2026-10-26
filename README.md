@@ -7,6 +7,7 @@ for flexível quando necessário.
 
 Nada é escrito sem você aprovar.
 
+- **Como subir e encerrar:** [COMO-RODAR.md](COMO-RODAR.md)
 - **Especificação completa:** [ARQUITETURA.md](ARQUITETURA.md)
 - **Acompanhamento:** [PROGRESSO.md](PROGRESSO.md)
 
@@ -29,15 +30,24 @@ O que funciona, ponta a ponta, contra containers reais:
   procura padrão no que foi pulado, e reação passiva a mudança externa.
 - **Privacidade**: export completo, três níveis de exclusão e os
   limites ditos na cara — o que o provedor de LLM retém não volta.
+- **Busca na web**, com um botão de pesquisa aprofundada: ele entra nos
+  sites, filtra o resultado ruim por score de relevância e mostra as
+  fontes que usou, clicáveis e guardadas junto da mensagem.
+- **Anexos**: imagem e PDF arrastados para o chat, lidos pelo modelo.
+- **Edição direta** (§8.0): criar evento arrastando na grade, editar
+  tarefa e evento sem passar pelo chat. O que *você* faz é decisão
+  tomada, não proposta a aprovar.
+- **Uso e custo** por dia e por mensagem, com preço fora de pico e
+  acerto de cache contabilizados.
 - **Interface**: onboarding que não deixa ninguém num chat morto,
   chat com streaming token a token, revisão de plano item por item,
   timeline com proposto hachurado, e as telas de tarefa, estudo, rotina,
   relatório e privacidade. Tema escuro e claro, tipografia Inter
   auto-hospedada, ícones próprios e contraste AA verificado.
 
-Validado: **282 verificações de smoke** (22 + 35 + 27 + 30 + 38 + 56 +
-74) contra containers reais, **240 testes** no backend e **100** no
-front. Lint limpo nos três serviços, `tsc --noEmit` e
+Validado: **290 verificações de smoke** (22 + 35 + 27 + 30 + 38 + 56 +
+82) contra containers reais, **686 testes** no backend (384 no core-api,
+302 no ai-worker) e **377** no front. Lint limpo nos três serviços, `tsc --noEmit` e
 `prettier --check` sem erros, `next build` passando.
 
 Abra <http://localhost:3000>. As APIs ficam em

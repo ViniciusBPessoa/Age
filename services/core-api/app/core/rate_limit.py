@@ -1,6 +1,6 @@
 """Rate limit por janela deslizante, no Redis.
 
-ARQUITETURA.md §2219 ("rate limit por usuário, com `429` e
+ARQUITETURA.md §7.0 ("rate limit por usuário, com `429` e
 `Retry-After`; limite separado e mais baixo para rotas que disparam
 LLM") e §9.1 ("por usuário e por IP").
 

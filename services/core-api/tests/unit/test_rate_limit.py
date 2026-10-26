@@ -1,6 +1,6 @@
 """Testes do rate limit.
 
-ARQUITETURA.md §2219 e §9.1.
+ARQUITETURA.md §7.0 e §9.1.
 
 Estes testes rodam contra um **fake de Redis**, não contra o real: o que
 está sendo verificado é a aritmética da janela deslizante e o

@@ -1275,11 +1275,10 @@ testes de componente terem passado de 10 para 29.
       também o que impede subir a lista para `lg:`, onde ela caberia
       melhor (em 768px a nav e a lista somam ~500px e espremem a
       conversa).
-- [ ] Arrastar evento na timeline — a prop existe em
-      `<CalendarTimeline>`, mas ligar o drag a um `PATCH` criaria um
-      caminho de escrita sem `PlanDiff` e fora do undo (§5.8). O certo
-      é o drag gerar um plano de um item, e isso precisa de uma rota que
-      ainda não existe
+- [ ] Arrastar um evento **que já existe** para outro horário — o
+      `PATCH` de §8.0 move pelo diálogo, mas mover arrastando ainda
+      não existe. Criar arrastando na grade vazia **foi feito**
+      (§8.0, `onCriarNoGrid`)
 - [ ] Ramificar pela UI com escolha da mensagem — `POST /fork` é
       chamado, mas sempre do fim da conversa
 - [ ] `age-types` gerado do OpenAPI (§2.5) — os tipos são escritos à
@@ -1290,8 +1289,8 @@ testes de componente terem passado de 10 para 29.
 ## Estado atual
 
 **Os sete marcos estão concluídos e validados**: 290 verificações de
-smoke contra containers reais (22 + 35 + 27 + 30 + 38 + 56 + 82), 378
-testes no backend (285 no core-api, 93 no ai-worker) e 129 no front,
+smoke contra containers reais (22 + 35 + 27 + 30 + 38 + 56 + 82), 686
+testes no backend (384 no core-api, 302 no ai-worker) e 377 no front,
 lint limpo nos três serviços, `tsc --noEmit` e `prettier --check` sem
 erros, e `next build` passando.
 
@@ -1369,6 +1368,54 @@ Valor em dinheiro tem uma porta só, sustentada por teste de arquitetura
 — que achou um violador já existente no onboarding.
 
 Fecha com **351 core-api · 229 worker · 276 front**, todos verdes.
+
+---
+
+## Nove defeitos relatados no uso real — 26/10/2026
+
+Vinícius usou o Age por alguns dias e trouxe nove problemas. Oito eram
+de interface; **nenhum** dos 998 testes verdes pegava qualquer um deles.
+
+| # | Relato | Conserto | Commit |
+|---|---|---|---|
+| 1 | a mensagem digitada some ao sair do chat | rascunho em `localStorage`, chave por conversa | `730f448` |
+| 2 | os filmes da Pixar saíram errados | **não era erro do modelo** — proposta pendente invisível; aviso com link | `00344aa` |
+| 3 | não vinculou os to-dos sozinho | mesma raiz do #4: ele afirmou o vínculo que o `plan_store` descartou | `2d40424` |
+| 4 | o card dizia "Aplicar os 0 itens" | evento citado por id resolve **por id**; plano vazio levanta | `2d40424` |
+| 5 | não dá para criar evento à mão | arrastar na grade (`onCriarNoGrid`) + botão para o celular | `a5f204a` |
+| 6 | a tela de reservar horário é ruim | refeita: data e hora na mão, com aviso de conflito | `67d1599` |
+| 7 | não existe edição | diálogos de tarefa e evento, `PATCH /calendar/events/{id}` (§8.0) | `a5f204a` |
+| 8 | o Deep Search não mostra as fontes | fontes no `ToolEndEvent`, gravadas na mensagem, clicáveis | `9357efe` |
+| 9 | marca na lista de quem tem rascunho | ponto com `aria-label`, não só cor | `730f448` |
+
+O menu de anexo e PDF foi aprovado por ele sem ressalva, e por isso não
+foi mexido.
+
+**O achado que mudou o diagnóstico.** Os três ids que o `plan_store`
+recusava com *"evento não existe na agenda"* eram eventos **vivos** em
+`core.local_events` — os filmes da Pixar. A culpa era da janela de
+leitura: ela sai dos campos `start`/`new_start` dos payloads do próprio
+plano, e um item que só REFERENCIA um evento (`MOVE`, `DELETE`) não traz
+horário, então a janela virava "ontem até daqui a 7 dias" e um evento de
+novembro caía fora. Eu ia consertar `resolve_events` para enxergar bloco
+proposto, que não era o problema.
+
+**E o #2 exigiu me corrigir.** Eu havia escrito que o modelo errou a
+ordem dos filmes. Li as duas conversas no banco e ele acertou, com todas
+as letras. O que falhou foi a tela: em 20/10 ele pediu os 4 primeiros e
+só 3 foram aprovados; em 25/10 o Age ofereceu o conserto, ninguém
+respondeu, e a proposta sumiu da vista. Três dos nove casos têm essa
+mesma raiz — **proposta pendente é invisível**.
+
+**Por que teste verde não bastou.** O rastro de ferramenta vivia só
+durante o streaming (`streaming || traces.length > 0`): ao fim do turno a
+mensagem recarregava do banco e a caixa de fontes desaparecia. Os testes
+passaram; só a captura de tela mostrou. Daí as fontes passarem a ser
+gravadas na coluna `tool_calls`.
+
+Fecha com **384 core-api · 302 worker · 377 front**, todos verdes,
+`ruff`, `tsc` e `prettier` limpos, e cada conserto conferido no
+navegador — não apenas em teste.
 
 ---
 

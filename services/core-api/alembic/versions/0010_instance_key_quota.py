@@ -4,7 +4,7 @@ Revision ID: 0010_instance_key_quota
 Revises: 0009_m5_routines
 Create Date: 2026-10-14
 
-ARQUITETURA.md §3451 previu este modo: "o operador fornece a chave com
+ARQUITETURA.md §14.2 previu este modo: "o operador fornece a chave com
 cota por usuário — o esquema já suporta, mas aí o custo passa a ser
 seu". O que faltava era onde guardar o limite.
 

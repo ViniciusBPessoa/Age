@@ -1,6 +1,6 @@
 """Qual chave de LLM usar neste turno, e se ele cabe na cota.
 
-ARQUITETURA.md §3451, que previu este modo:
+ARQUITETURA.md §14.2, que previu este modo:
 
     "a saída é um modo opcional em que o operador fornece a chave com
     cota por usuário — o esquema já suporta (`llm_credentials` por
