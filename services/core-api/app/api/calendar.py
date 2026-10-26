@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import logging
+from dataclasses import replace
 from datetime import datetime, timedelta
 from typing import Annotated, Literal
 from uuid import UUID
@@ -84,6 +85,23 @@ class CreateEventIn(BaseModel):
     location: str | None = Field(default=None, max_length=300)
     all_day: bool = False
     recurrence: str | None = Field(default=None, max_length=500)
+    flexibility: Literal["fixed", "semi_flexible", "flexible"] | None = None
+
+
+class UpdateEventIn(BaseModel):
+    """Campos editáveis de um evento local.
+
+    Todos opcionais: um PATCH que muda só o título não deve exigir que
+    o cliente reenvie start, end e o resto — reenviar tudo é como se
+    perde campo numa tela que ainda não os mostra.
+    """
+
+    title: str | None = Field(default=None, min_length=1, max_length=300)
+    start: datetime | None = None
+    end: datetime | None = None
+    description: str | None = Field(default=None, max_length=5000)
+    location: str | None = Field(default=None, max_length=300)
+    all_day: bool | None = None
     flexibility: Literal["fixed", "semi_flexible", "flexible"] | None = None
 
 
@@ -296,6 +314,136 @@ async def set_flexibility(
         created_by_age=row[10],
         etag=str(row[11]),
     )
+
+
+@router.patch("/events/{event_id}", response_model=EventOut)
+async def update_event(
+    event_id: str, body: UpdateEventIn, user: CurrentUser, db: DbSession
+) -> EventOut:
+    """Edita um evento local, direto, sem passar por proposta.
+
+    ## Por que isto NÃO fere §5.8
+
+    "Nada entra na agenda sem aprovação" é sobre o que o **modelo**
+    propõe: ele sugere, a pessoa decide. Uma edição que a própria
+    pessoa fez, num evento que ela está olhando, já É a decisão —
+    pedir que ela aprove o que acabou de digitar seria cerimônia sem
+    conteúdo. É o mesmo princípio que já vale para `POST /events` e
+    para `DELETE`, que existem desde antes e escrevem direto.
+
+    ## Só evento local
+
+    Evento vindo do Google vive em `events_shadow` e é espelho: editar
+    ali seria escrever numa cópia que o próximo sync sobrescreve, sem
+    aviso. Quem não é local recebe 404, com mensagem dizendo onde
+    editar.
+
+    ## Campos ausentes preservam o valor
+
+    O adaptador faz `UPDATE` de todas as colunas, então a rota precisa
+    carregar o evento atual e sobrepor só o que veio — sem isto, um
+    PATCH de título apagaria a descrição.
+    """
+    local = LocalCalendar(db=db, user_id=user.id)
+
+    # `resolve_events` acha por ID (sem janela) e diz em QUAL tabela o
+    # evento vive, que e o que separa local de espelho externo.
+    from app.services.task_store import resolve_events
+
+    achado = next(iter(await resolve_events(db, user.id, [event_id])), None)
+    if achado is None or not achado.found:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "error": {
+                    "code": "event_not_found",
+                    "message": "Esse compromisso não está na sua agenda.",
+                }
+            },
+        )
+    if achado.kind != "local_events":
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "error": {
+                    "code": "event_not_local",
+                    "message": (
+                        "Esse compromisso veio de um calendário externo. "
+                        "Edite no app de origem."
+                    ),
+                }
+            },
+        )
+
+    atual = next(
+        (
+            e
+            for e in await read_events(
+                db,
+                user.id,
+                achado.start - timedelta(minutes=1),
+                achado.end + timedelta(minutes=1),
+            )
+            if e.id == event_id
+        ),
+        None,
+    )
+    if atual is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "error": {
+                    "code": "event_not_found",
+                    "message": "Esse compromisso não está na sua agenda.",
+                }
+            },
+        )
+
+    inicio = body.start or atual.start
+    fim = body.end or atual.end
+    if fim <= inicio:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "error": {
+                    "code": "invalid_event",
+                    "message": "O fim precisa vir depois do começo.",
+                }
+            },
+        )
+
+    try:
+        atualizado = await local.update_event(
+            replace(
+                atual,
+                title=body.title if body.title is not None else atual.title,
+                start=inicio,
+                end=fim,
+                description=(
+                    body.description
+                    if body.description is not None
+                    else atual.description
+                ),
+                location=(
+                    body.location if body.location is not None else atual.location
+                ),
+                all_day=(
+                    body.all_day if body.all_day is not None else atual.all_day
+                ),
+                flexibility=(
+                    Flexibility(body.flexibility)
+                    if body.flexibility is not None
+                    else atual.flexibility
+                ),
+            )
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"error": {"code": "invalid_event", "message": str(exc)}},
+        ) from exc
+
+    return _to_out(atualizado)
 
 
 @router.delete("/events/{event_id}", status_code=status.HTTP_204_NO_CONTENT)

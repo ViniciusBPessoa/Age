@@ -29,6 +29,7 @@ import {
   IconCheck,
   IconClock,
   IconPlus,
+  IconEdit,
   IconTrash,
   cx,
 } from "@/components/ui";
@@ -57,6 +58,7 @@ export function TaskRow({
   onToggle,
   onSchedule,
   onDelete,
+  onEdit,
 }: {
   task: Task;
   timezone: string;
@@ -73,6 +75,8 @@ export function TaskRow({
   onToggle: (task: Task) => void;
   onSchedule: (task: Task) => void;
   onDelete: (task: Task) => void;
+  /** Abre o diálogo de edição. Opcional: nem toda lista oferece. */
+  onEdit?: (task: Task) => void;
 }) {
   const done = task.status === "done";
   /* Agrupado por horário, o bloco do cabeçalho sai do item; os OUTROS
@@ -249,6 +253,21 @@ export function TaskRow({
             </p>
           ) : null}
         </div>
+
+        {/*
+         * Editar, ao lado de apagar. Aparece no hover como o apagar
+         * já aparecia, mas com `focus-visible` também: quem navega por
+         * teclado precisa alcançar os dois.
+         */}
+        {onEdit ? (
+          <button
+            onClick={() => onEdit(task)}
+            aria-label={`Editar ${task.title}`}
+            className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-muted opacity-0 transition-all hover:bg-surface-3 hover:text-ink focus-visible:opacity-100 group-hover:opacity-100"
+          >
+            <IconEdit className="h-3.5 w-3.5" />
+          </button>
+        ) : null}
 
         <button
           onClick={() => onDelete(task)}

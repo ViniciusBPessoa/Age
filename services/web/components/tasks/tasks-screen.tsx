@@ -15,6 +15,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { PlanReview } from "@/components/plan-review/plan-review";
 import { ReserveTimeDialog } from "@/components/tasks/reserve-time-dialog";
+import { EditarTarefaDialog } from "@/components/tasks/editar-tarefa-dialog";
 import { TaskRow } from "@/components/tasks/task-list";
 import {
   Button,
@@ -82,6 +83,7 @@ export function TasksScreen({ timezone }: { timezone: string }) {
   }, []);
   const [showDone, setShowDone] = useState(false);
   const [reserving, setReserving] = useState<Task | null>(null);
+  const [editando, setEditando] = useState<Task | null>(null);
   const [creating, setCreating] = useState(false);
   // O plano que a reserva acabou de gerar, à espera de aprovação. Vive
   // aqui e não no diálogo porque o diálogo fecha: a revisão tem de
@@ -388,6 +390,7 @@ export function TasksScreen({ timezone }: { timezone: string }) {
                         onToggle={(t) => toggle.mutate(t)}
                         onSchedule={setReserving}
                         onDelete={(t) => remove.mutate(t)}
+                        onEdit={setEditando}
                       />
                     ))}
                   </ul>
@@ -407,6 +410,10 @@ export function TasksScreen({ timezone }: { timezone: string }) {
           mostrar concluídas
         </label>
       </div>
+
+      {editando ? (
+        <EditarTarefaDialog task={editando} onClose={() => setEditando(null)} />
+      ) : null}
 
       {reserving ? (
         <ReserveTimeDialog

@@ -91,6 +91,7 @@ export function CalendarTimeline({
   onNavigate,
   onSelectEvent,
   onEventDrop,
+  onCriarNoGrid,
 }: {
   events: AgeEvent[];
   proposals?: Proposal[];
@@ -102,6 +103,15 @@ export function CalendarTimeline({
   onSelectEvent?: (id: string, kind: "event" | "proposal") => void;
   /** Arrastar no grid. Ainda não ligado — ver nota no fim do arquivo. */
   onEventDrop?: (id: string, start: Date, end: Date) => void;
+  /**
+   * Arrastar numa faixa VAZIA para criar um compromisso (§8.1).
+   *
+   * Diferente de `onEventDrop`, e a diferença decide: mover um evento
+   * que já existe é mudança na agenda e passa por aprovação (ver a
+   * nota no fim do arquivo); criar um novo é ação direta da pessoa,
+   * igual ao `POST /calendar/events` que a tela já usa.
+   */
+  onCriarNoGrid?: (inicio: Date, fim: Date) => void;
 }) {
   /**
    * Converte ISO (UTC) em `Date` no fuso da conta.
@@ -213,6 +223,29 @@ export function CalendarTimeline({
         onView={(next) => onView?.(next as TimelineView)}
         onNavigate={(next) => onNavigate?.(next)}
         onSelectEvent={(entry) => onSelectEvent?.(entry.payload.id, entry.payload.kind)}
+        /*
+         * Arrastar numa faixa vazia cria um compromisso.
+         *
+         * `selectable` é da lib e já trata ponteiro e toque, então não
+         * reimplemento `pointerdown/move/up` à mão.
+         *
+         * Um CLIQUE seco também chega aqui, com `start === end` ou uma
+         * faixa de um slot. Sem o mínimo abaixo, ele viraria um bloco
+         * de 0 ou 30 minutos que ninguém pediu — por isso a duração é
+         * elevada a 1h, que é o que a pessoa quase sempre quer e pode
+         * ajustar no diálogo que abre em seguida.
+         */
+        selectable={onCriarNoGrid ? true : false}
+        onSelectSlot={(slot) => {
+          if (!onCriarNoGrid) return;
+          const inicio = new Date(slot.start);
+          const fim = new Date(slot.end);
+          const minimo = new Date(inicio.getTime() + 60 * 60_000);
+          onCriarNoGrid(
+            inicio,
+            fim.getTime() - inicio.getTime() < 60 * 60_000 ? minimo : fim,
+          );
+        }}
         eventPropGetter={eventPropGetter}
         components={components}
         popup

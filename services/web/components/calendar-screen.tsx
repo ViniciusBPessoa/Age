@@ -39,6 +39,7 @@ import {
   Dialog,
   IconChevronLeft,
   IconChevronRight,
+  IconPlus,
   IconLock,
   IconSparkle,
   LoadError,
@@ -49,6 +50,7 @@ import { PlanReview } from "@/components/plan-review/plan-review";
 import { RequestFailed, api } from "@/lib/api-client";
 import { mensagemDeFalha } from "@/lib/resultado-do-apply";
 import { range } from "@/lib/format";
+import { EventoDialog } from "@/components/calendar-timeline/evento-dialog";
 import { guardarUltimaVista, lerUltimaVista } from "@/lib/ultimo-lugar";
 import type { AgeEvent, ApplyResult, Flexibility, Plan } from "@/lib/types";
 
@@ -83,6 +85,13 @@ export function CalendarScreen({ timezone }: { timezone: string }) {
    */
   const [cursor, setCursor] = useState<Date | null>(null);
   const [selected, setSelected] = useState<AgeEvent | null>(null);
+  // Edição e criação manual (§8.1). `criando` guarda o horário quando
+  // vem do arrasto na grade; um objeto vazio abre o diálogo em branco.
+  const [editando, setEditando] = useState<AgeEvent | null>(null);
+  const [criando, setCriando] = useState<{
+    inicio?: Date;
+    fim?: Date;
+  } | null>(null);
 
   /*
    * A visualização volta como a pessoa deixou (§8.1).
@@ -490,6 +499,24 @@ export function CalendarScreen({ timezone }: { timezone: string }) {
               >
                 <IconChevronRight />
               </Button>
+
+              {/*
+               * Criar à mão, sem arrastar.
+               *
+               * O arrasto cobre o computador, mas no celular a grade é
+               * estreita demais para mirar uma faixa de horário com o
+               * dedo. Sem este botão, a criação manual existiria só
+               * para quem usa mouse.
+               */}
+              <Button
+                size="sm"
+                variant="secondary"
+                className="ml-1"
+                onClick={() => setCriando({})}
+              >
+                <IconPlus className="h-3.5 w-3.5" />
+                novo
+              </Button>
             </div>
           </div>
         </div>
@@ -514,6 +541,7 @@ export function CalendarScreen({ timezone }: { timezone: string }) {
               if (kind === "proposal") return;
               setSelected(byId.get(id) ?? null);
             }}
+            onCriarNoGrid={(inicio, fim) => setCriando({ inicio, fim })}
           />
         )}
       </div>
@@ -686,6 +714,22 @@ export function CalendarScreen({ timezone }: { timezone: string }) {
         />
       </Dialog>
 
+      {editando ? (
+        <EventoDialog
+          evento={editando}
+          onClose={() => setEditando(null)}
+          onDone={() => setSelected(null)}
+        />
+      ) : null}
+
+      {criando ? (
+        <EventoDialog
+          inicioSugerido={criando.inicio}
+          fimSugerido={criando.fim}
+          onClose={() => setCriando(null)}
+        />
+      ) : null}
+
       <Dialog
         open={selected !== null}
         onClose={() => setSelected(null)}
@@ -698,6 +742,19 @@ export function CalendarScreen({ timezone }: { timezone: string }) {
             <>
               <Button variant="ghost" onClick={() => setSelected(null)}>
                 Fechar
+              </Button>
+              {/*
+               * Editar antes de Apagar: a ação comum fica mais longe da
+               * destrutiva, que é a que não tem volta.
+               */}
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  setEditando(selected);
+                  setSelected(null);
+                }}
+              >
+                Editar
               </Button>
               <Button variant="danger" onClick={() => void remove(selected.id)}>
                 Apagar
