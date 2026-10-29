@@ -42,3 +42,9 @@ npm-debug.log*
 # para /app aparece aqui — duas vezes eles entraram no stage por
 # descuido.
 probe_*.py
+
+# Configuracao local de editor e de IDE; nao faz parte do projeto.
+.vscode/
+.idea/
+.claude/
+*.code-workspace
