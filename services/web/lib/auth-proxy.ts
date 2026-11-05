@@ -11,6 +11,13 @@
 
 import { type NextRequest } from "next/server";
 
+import {
+  corpoGrandeDemais,
+  ipDoCliente,
+  lerCorpoLimitado,
+  proxiesConfiaveis,
+  traceSeguro,
+} from "@/lib/bff-seguranca";
 import { ACCESS_COOKIE, CORE_API_URL, accessCookieOptions } from "@/lib/session";
 import type { TokenResponse } from "@/lib/session";
 
@@ -52,7 +59,16 @@ export async function proxyTokenRoute(
   // objeto de headers o deixaria inacessível para as respostas que esta
   // função monta — e a de 503 é a que mais precisa dele, porque nela
   // não existe nenhuma linha de log do core-api para procurar.
-  const trace = req.headers.get("x-trace-id") ?? crypto.randomUUID();
+  const trace = traceSeguro(req.headers.get("x-trace-id"));
+
+  // Login e cadastro são JSON pequeno; 64 KB sobra e corta o abuso.
+  const corpo = await lerCorpoLimitado(req, 64 * 1024);
+  if (corpo === null) return corpoGrandeDemais(trace);
+
+  // O IP que o rate limit de login usa. Antes era o `X-Forwarded-For`
+  // que o próprio navegador mandou, e um IP inventado por tentativa
+  // passava pelo limite de 20 em 15 minutos sem nunca bater nele.
+  const ip = ipDoCliente(req.headers.get("x-forwarded-for"), proxiesConfiaveis());
 
   let upstream: Response;
   try {
@@ -62,9 +78,9 @@ export async function proxyTokenRoute(
         "Content-Type": "application/json",
         "x-trace-id": trace,
         "User-Agent": req.headers.get("user-agent") ?? "",
-        "X-Forwarded-For": req.headers.get("x-forwarded-for") ?? "",
+        "X-Forwarded-For": ip ?? "",
       },
-      body: await req.arrayBuffer(),
+      body: corpo,
       cache: "no-store",
     });
   } catch {

@@ -18,10 +18,14 @@ aplicado a um problema maior.
 
 from __future__ import annotations
 
+import re
+
 from app.domain.tools.registry import ToolCategory, ToolContext, register_tool
 
 _ISO = "data-hora ISO 8601 com fuso, ex. 2026-10-20T14:00:00-03:00"
 
+
+_CHAVE_DE_PREFERENCIA = re.compile(r"[a-z][a-z0-9_]{1,47}")
 
 @register_tool(
     name="propose_study_plan",
@@ -300,6 +304,18 @@ async def mark_study_session(ctx: ToolContext, args: dict) -> dict:
 async def save_preference(ctx: ToolContext, args: dict) -> dict:
     if ctx.read_calendar is None:
         return {"error": "não disponível neste turno"}
+
+    # Esta tool grava SEM aprovação (categoria RECORD), e o valor volta
+    # ao modelo em todo turno futuro por `get_user_preferences`. Sem
+    # forma, ela seria o lugar perfeito para uma página da web plantar
+    # uma instrução persistente. A chave tem cara de identificador e o
+    # valor é curto: cabe "10:00", true, 60; não cabe um parágrafo.
+    chave = str(args.get("key", ""))
+    valor = args.get("value")
+    if not _CHAVE_DE_PREFERENCIA.fullmatch(chave):
+        return {"error": "chave de preferência inválida (use snake_case curto)"}
+    if not isinstance(valor, (bool, int, float)) and len(str(valor)) > 120:
+        return {"error": "valor de preferência longo demais (máx. 120 caracteres)"}
 
     await ctx.read_calendar(
         "save_preference",

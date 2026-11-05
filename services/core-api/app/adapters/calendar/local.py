@@ -213,12 +213,29 @@ class LocalCalendar(CalendarProvider):
             },
         )
         return [
-            BusyInterval(start=max(r[0], start), end=min(r[1], end))
-            for r in rows.all()
+            BusyInterval(start=max(r[0], start), end=min(r[1], end)) for r in rows.all()
         ]
 
     # -----------------------------------------------------------
     async def create_event(self, event: Event) -> Event:
+        # O calendário precisa ser DESTA conta. O RLS de `local_events`
+        # confere só `user_id`, e a chave estrangeira para
+        # `local_calendars` é verificada pelo Postgres sem RLS: um
+        # `calendar_id` de outra pessoa passava, e o evento nascia
+        # apontando para a agenda alheia. Achado na auditoria, com dois
+        # usuários reais e um `POST /calendar/events` de 201.
+        dono = (
+            await self._db.execute(
+                text(
+                    "SELECT 1 FROM core.local_calendars "
+                    "WHERE id = CAST(:cal AS uuid) AND user_id = :uid"
+                ),
+                {"cal": str(event.calendar_id), "uid": str(self._user_id)},
+            )
+        ).first()
+        if dono is None:
+            raise ValueError("Esse calendário não existe na sua conta.")
+
         row = (
             await self._db.execute(
                 text(
@@ -399,9 +416,7 @@ class LocalCalendar(CalendarProvider):
         )
 
     # -----------------------------------------------------------
-    async def sync(
-        self, calendar_id: str, cursor: SyncCursor | None
-    ) -> SyncResult:
+    async def sync(self, calendar_id: str, cursor: SyncCursor | None) -> SyncResult:
         """Delta por timestamp de atualização.
 
         O calendário nativo não precisa de sync para funcionar — os dados

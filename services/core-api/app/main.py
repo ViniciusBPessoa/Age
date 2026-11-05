@@ -60,13 +60,19 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     log.info("core-api encerrado")
 
 
+# Docs só fora de produção. "O serviço não é público em produção" era
+# a defesa, mas a auditoria alcançou `/openapi.json` pelo BFF com um
+# `..%2F` no caminho: o mapa completo da API, entregue a quem pedisse.
+# A travessia foi fechada no BFF; isto é a segunda camada.
+_EXPOR_DOCS = not get_settings().is_production
+
 app = FastAPI(
     title="Age — core-api",
     version="0.1.0",
     lifespan=lifespan,
-    # Docs ficam abertas em dev; em produção o serviço não é público.
-    docs_url="/docs",
-    openapi_url="/openapi.json",
+    docs_url="/docs" if _EXPOR_DOCS else None,
+    redoc_url="/redoc" if _EXPOR_DOCS else None,
+    openapi_url="/openapi.json" if _EXPOR_DOCS else None,
 )
 
 # Primeiro da pilha, portanto o mais externo: o trace precisa existir

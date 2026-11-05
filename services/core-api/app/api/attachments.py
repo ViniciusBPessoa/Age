@@ -88,9 +88,10 @@ async def upload_attachment(
     file: UploadFile = File(...),
 ) -> AttachmentOut:
     # `file.size` vem do cliente e pode mentir; o que vale é o que
-    # chegou. Leio tudo porque o limite é 5 MB — para limite grande,
-    # isto teria de ser leitura em pedaços com corte no meio.
-    dados = await file.read()
+    # chegou. Lê no máximo um byte além do limite: é o bastante para
+    # `validar` recusar com a frase de tamanho, e um envio de 2 GB não
+    # vira 2 GB na memória do processo antes de ser recusado.
+    dados = await file.read(TAMANHO_MAXIMO + 1)
 
     try:
         anexo = validar(dados)

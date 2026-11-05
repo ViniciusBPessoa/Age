@@ -50,6 +50,17 @@
 import { type NextRequest } from "next/server";
 
 import {
+  caminhoCanonico,
+  caminhoInvalido,
+  cabecalhosParaRepasse,
+  corpoGrandeDemais,
+  destinoSeguro,
+  ipDoCliente,
+  lerCorpoLimitado,
+  proxiesConfiaveis,
+  traceSeguro,
+} from "@/lib/bff-seguranca";
+import {
   ACCESS_COOKIE,
   CORE_API_URL,
   REFRESH_COOKIE,
@@ -88,7 +99,9 @@ const HOP_BY_HOP = new Set([
  * para procurar no log e não vai encontrar nenhuma linha do core-api.
  */
 function traceOf(req: NextRequest): string {
-  return req.headers.get("x-trace-id") ?? crypto.randomUUID();
+  // Só aceita o trace do cliente se tiver cara de id: o valor vai para o
+  // log de três serviços, e texto livre ali é injeção de log.
+  return traceSeguro(req.headers.get("x-trace-id"));
 }
 
 function forwardHeaders(
@@ -96,10 +109,14 @@ function forwardHeaders(
   accessToken: string | null,
   trace: string,
 ): Headers {
-  const headers = new Headers();
-  req.headers.forEach((value, key) => {
-    if (!HOP_BY_HOP.has(key.toLowerCase())) headers.set(key, value);
-  });
+  // Lista fechada (`CABECALHOS_PERMITIDOS`), não lista de bloqueio: o
+  // cliente não escolhe `cookie`, `authorization`, `x-forwarded-*` nem
+  // os headers que as rotas internas do core-api leem.
+  const headers = cabecalhosParaRepasse(req.headers);
+  // O IP vem do socket (via `scripts/ip-do-cliente.cjs`), nunca do que o
+  // navegador escreveu. É o que o rate limit por IP do login usa.
+  const ip = ipDoCliente(req.headers.get("x-forwarded-for"), proxiesConfiaveis());
+  if (ip) headers.set("X-Forwarded-For", ip);
   if (accessToken) headers.set("Authorization", `Bearer ${accessToken}`);
   // Rastreabilidade ponta a ponta: o trace_id nasce aqui e é propagado
   // até o worker, inclusive dentro do payload da fila (§12).
@@ -132,7 +149,14 @@ function upstreamDown(trace: string): Response {
 const TOKEN_BEARING = new Set(["auth/login", "auth/register", "auth/refresh"]);
 
 async function proxy(req: NextRequest, path: string[]): Promise<Response> {
-  const joined = path.join("/");
+  const joined = caminhoCanonico(path);
+  const trace = traceOf(req);
+
+  // Primeiro a forma do caminho: `..`, `.` e barra embutida são recusados
+  // antes de qualquer outra regra, porque a lista abaixo compara texto e
+  // `x/../auth/login` não é igual a `auth/login` até ser normalizado.
+  const target = destinoSeguro(path, CORE_API_URL);
+  if (target === null) return caminhoInvalido(trace);
 
   if (TOKEN_BEARING.has(joined)) {
     return Response.json(
@@ -146,7 +170,6 @@ async function proxy(req: NextRequest, path: string[]): Promise<Response> {
     );
   }
 
-  const target = new URL(`/api/v1/${joined}`, CORE_API_URL);
   target.search = req.nextUrl.search;
 
   const isStream = path.includes("stream");
@@ -155,9 +178,9 @@ async function proxy(req: NextRequest, path: string[]): Promise<Response> {
 
   // Corpo bufferizado para poder repetir após renovar (ver cabeçalho).
   const hasBody = req.method !== "GET" && req.method !== "HEAD";
-  const body = hasBody ? await req.arrayBuffer() : undefined;
+  const body = hasBody ? await lerCorpoLimitado(req) : undefined;
+  if (body === null) return corpoGrandeDemais(trace);
 
-  const trace = traceOf(req);
   const send = (token: string | null) =>
     fetch(target, {
       method: req.method,

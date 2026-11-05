@@ -55,6 +55,11 @@ services:
       CORE_API_URL: http://core-api:8000
       NODE_ENV: production
       NEXT_TELEMETRY_DISABLED: "1"
+      # Quantos proxies NOSSOS ficam na frente do Next. 0 quando o
+      # navegador fala direto com ele (como aqui, porta 3000 publicada);
+      # 1 atrás do Caddy de ARQUITETURA.md §11.1.1. Errar para mais
+      # devolve ao atacante o controle do IP do rate limit de login.
+      AGE_TRUSTED_PROXY_HOPS: "${AGE_TRUSTED_PROXY_HOPS:-0}"
       # O build `standalone` do Next ouve em 0.0.0.0 só com isto.
       HOSTNAME: "0.0.0.0"
       PORT: "3000"

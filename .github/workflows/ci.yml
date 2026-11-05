@@ -43,6 +43,12 @@ jobs:
       - name: Instalar
         working-directory: services/web
         run: npm install --no-audit --no-fund
+      # Falha conhecida em dependência de produção derruba o PR. Foi
+      # assim que a auditoria achou o Next 15.5.27 com uma falha crítica:
+      # ninguém tinha rodado `npm audit` desde a instalação.
+      - name: Auditoria de dependências
+        working-directory: services/web
+        run: npm audit --omit=dev --audit-level=high
       - name: Typecheck
         working-directory: services/web
         run: npm run typecheck

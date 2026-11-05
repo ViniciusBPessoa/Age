@@ -45,7 +45,10 @@ RUN addgroup -S age && adduser -S age -G age
 COPY --from=build --chown=age:age /app/.next/standalone ./
 COPY --from=build --chown=age:age /app/.next/static ./.next/static
 COPY --from=build --chown=age:age /app/public ./public
+# Fixa o X-Forwarded-For pelo socket antes do Next ver o pedido: sem
+# isto, o IP do rate limit de login é o que o navegador inventar.
+COPY --from=build --chown=age:age /app/scripts/ip-do-cliente.cjs ./scripts/ip-do-cliente.cjs
 USER age
 EXPOSE 3000
 ENV PORT=3000 HOSTNAME=0.0.0.0
-CMD ["node", "server.js"]
+CMD ["node", "--require", "./scripts/ip-do-cliente.cjs", "server.js"]
