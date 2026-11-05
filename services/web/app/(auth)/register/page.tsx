@@ -4,7 +4,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
-import { Button, Field, Input, Panel } from "@/components/ui";
+import { CampoSenha } from "@/components/auth/campo-senha";
+import { Button, Field, IconAlert, IconCheck, Input, cx } from "@/components/ui";
 import { RequestFailed, auth } from "@/lib/api-client";
 
 /** O backend exige 10 (§9.1), e dizer isso antes evita um 422. */
@@ -51,15 +52,29 @@ export default function RegisterPage() {
   }
 
   return (
-    <Panel className="p-6 shadow-raised">
-      <h1 className="mb-5 text-2xl font-semibold tracking-[-0.02em]">Criar conta</h1>
+    <div className="animate-fade-up">
+      <h1 className="text-3xl font-semibold tracking-[-0.025em]">Criar conta</h1>
+      <p className="mt-1.5 text-sm text-muted">
+        Leva um minuto. Depois o Age pergunta como você estuda.
+      </p>
 
-      <form onSubmit={submit} noValidate className="space-y-4">
-        <Field label="Nome" htmlFor="name" hint="Opcional.">
+      {error ? (
+        <p
+          role="alert"
+          className="mt-6 flex items-start gap-2 rounded-xl bg-danger/10 px-3.5 py-2.5 text-sm text-danger ring-1 ring-inset ring-danger/25"
+        >
+          <IconAlert className="mt-0.5 h-4 w-4 shrink-0" />
+          {error}
+        </p>
+      ) : null}
+
+      <form onSubmit={submit} noValidate className="mt-6 space-y-4">
+        <Field label="Como quer ser chamado" htmlFor="name" hint="Opcional.">
           <Input
             id="name"
             name="name"
-            autoComplete="name"
+            autoComplete="given-name"
+            autoFocus
             value={name}
             onChange={(e) => setName(e.target.value)}
           />
@@ -71,23 +86,17 @@ export default function RegisterPage() {
             type="email"
             name="email"
             autoComplete="email"
+            inputMode="email"
             required
+            placeholder="voce@exemplo.com"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
           />
         </Field>
 
-        <Field
-          label="Senha"
-          htmlFor="password"
-          hint={`Pelo menos ${MIN_PASSWORD} caracteres.`}
-          error={
-            error ?? (tooShort ? `Faltam ${MIN_PASSWORD - password.length}.` : null)
-          }
-        >
-          <Input
+        <Field label="Senha" htmlFor="password">
+          <CampoSenha
             id="password"
-            type="password"
             name="password"
             autoComplete="new-password"
             required
@@ -95,6 +104,21 @@ export default function RegisterPage() {
             value={password}
             onChange={(e) => setPassword(e.target.value)}
           />
+          {/* A regra à vista e marcada quando cumprida, em vez de um erro
+              que só aparece depois de enviar. */}
+          <p
+            className={cx(
+              "mt-1.5 flex items-center gap-1.5 text-xs transition-colors",
+              password.length >= MIN_PASSWORD ? "text-ok" : "text-muted",
+            )}
+          >
+            <IconCheck className="h-3.5 w-3.5" />
+            {password.length >= MIN_PASSWORD
+              ? "Tamanho bom."
+              : tooShort
+                ? `Pelo menos ${MIN_PASSWORD} caracteres. Faltam ${MIN_PASSWORD - password.length}.`
+                : `Pelo menos ${MIN_PASSWORD} caracteres.`}
+          </p>
         </Field>
 
         <Button
@@ -109,15 +133,15 @@ export default function RegisterPage() {
         </Button>
       </form>
 
-      <p className="mt-6 border-t border-line pt-5 text-center text-sm text-muted">
+      <p className="mt-8 text-center text-sm text-muted">
         Já tem conta?{" "}
         <Link
           href="/login"
-          className="font-medium text-brand transition-opacity hover:opacity-80"
+          className="font-semibold text-brand underline-offset-4 transition-opacity hover:underline"
         >
           Entrar
         </Link>
       </p>
-    </Panel>
+    </div>
   );
 }

@@ -4,7 +4,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
-import { Button, Field, Input, Panel } from "@/components/ui";
+import { CampoSenha } from "@/components/auth/campo-senha";
+import { Button, Field, IconAlert, Input } from "@/components/ui";
 import { RequestFailed, auth } from "@/lib/api-client";
 
 export default function LoginPage() {
@@ -34,31 +35,43 @@ export default function LoginPage() {
   }
 
   return (
-    <Panel className="p-6 shadow-raised">
-      {/* 2xl, não lg: é o título principal da tela, e precisa dizer de
-          longe que aqui se entra — não que se cadastra. */}
-      <h1 className="mb-5 text-2xl font-semibold tracking-[-0.02em]">Entrar</h1>
+    <div className="animate-fade-up">
+      {/* O título principal da tela, e diz de longe que aqui se ENTRA. */}
+      <h1 className="text-3xl font-semibold tracking-[-0.025em]">Entrar</h1>
+      <p className="mt-1.5 text-sm text-muted">Que bom te ver de novo.</p>
+
+      {error ? (
+        <p
+          role="alert"
+          className="mt-6 flex items-start gap-2 rounded-xl bg-danger/10 px-3.5 py-2.5 text-sm text-danger ring-1 ring-inset ring-danger/25"
+        >
+          <IconAlert className="mt-0.5 h-4 w-4 shrink-0" />
+          {error}
+        </p>
+      ) : null}
 
       {/* `noValidate` deixa a validação para a mensagem do servidor: a
           do browser aparece num balão que o leitor de tela não anuncia
           de forma confiável. */}
-      <form onSubmit={submit} noValidate className="space-y-4">
+      <form onSubmit={submit} noValidate className="mt-6 space-y-4">
         <Field label="E-mail" htmlFor="email">
           <Input
             id="email"
             type="email"
             name="email"
             autoComplete="email"
+            inputMode="email"
+            autoFocus
             required
+            placeholder="voce@exemplo.com"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
           />
         </Field>
 
-        <Field label="Senha" htmlFor="password" error={error}>
-          <Input
+        <Field label="Senha" htmlFor="password">
+          <CampoSenha
             id="password"
-            type="password"
             name="password"
             autoComplete="current-password"
             required
@@ -79,15 +92,15 @@ export default function LoginPage() {
         </Button>
       </form>
 
-      <p className="mt-6 border-t border-line pt-5 text-center text-sm text-muted">
+      <p className="mt-8 text-center text-sm text-muted">
         Ainda não tem conta?{" "}
         <Link
           href="/register"
-          className="font-medium text-brand transition-opacity hover:opacity-80"
+          className="font-semibold text-brand underline-offset-4 transition-opacity hover:underline"
         >
-          Criar uma
+          Criar conta
         </Link>
       </p>
-    </Panel>
+    </div>
   );
 }

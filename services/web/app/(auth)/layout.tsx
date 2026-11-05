@@ -1,48 +1,40 @@
 /**
- * Shell das telas sem sessão: login e registro.
+ * Entrar e criar conta: vitrine à esquerda, formulário à direita.
  *
- * Separado do shell do app porque não tem sidebar, nem navegação, nem
- * nada que exija estar autenticado — e porque colocar as duas coisas
- * num layout só levaria a `if (user)` espalhado pela árvore.
- *
- * É a primeira tela que alguém vê, e a versão anterior era um cartão
- * cinza num fundo preto chapado. Agora tem a aurora do `globals.css` e
- * uma frase que diz o que o produto faz — porque "Sua agenda,
- * organizada por conversa" sozinho não distingue isto de um app de
- * calendário qualquer.
+ * No celular a vitrine some e fica só o formulário, com a marca em
+ * cima: a pessoa que abre o login no telefone quer entrar, não ler.
+ * O tema pode ser trocado aqui mesmo, antes de ter conta.
  */
 
 import Link from "next/link";
 import type { ReactNode } from "react";
 
 import { Logo } from "@/components/app-nav";
+import { Vitrine } from "@/components/auth/vitrine";
+import { BotaoDeTema } from "@/components/seletor-de-tema";
 
 export default function AuthLayout({ children }: { children: ReactNode }) {
   return (
-    <div className="aurora flex min-h-dvh flex-col">
-      <main className="mx-auto flex w-full max-w-sm flex-1 flex-col justify-center px-5 py-10">
-        <header className="mb-8">
+    <div className="grid min-h-dvh bg-canvas lg:grid-cols-[minmax(0,1.05fr)_minmax(0,1fr)]">
+      <Vitrine />
+
+      <div className="flex min-h-dvh flex-col">
+        <div className="flex items-center justify-between px-5 pt-5 sm:px-8">
           <Link href="/" className="inline-flex items-center gap-2.5">
             <Logo />
             <span className="text-lg font-semibold tracking-[-0.02em]">Age</span>
           </Link>
-          {/* Subordinado de propósito. Na versão anterior esta frase
-              era um `h2` de 24px e o "Entrar" da página um `h1` de
-              18px: o título menos importante maior que o principal,
-              invertido inclusive na semântica. O resultado é que a
-              tela de login parecia uma página de apresentação, e quem
-              já tinha conta não achava onde entrar. */}
-          <p className="mt-4 text-sm leading-relaxed text-muted">
-            Diga o que precisa fazer. O Age lê sua agenda, propõe um plano e espera você
-            aprovar antes de escrever qualquer coisa.
-          </p>
-        </header>
-        {children}
-      </main>
+          <BotaoDeTema />
+        </div>
 
-      <footer className="px-5 pb-6 text-center text-2xs text-faint">
-        Sua chave de LLM é sua. O Age não tem chave própria.
-      </footer>
+        <main className="mx-auto flex w-full max-w-sm flex-1 flex-col justify-center px-5 py-10">
+          {children}
+        </main>
+
+        <footer className="px-5 pb-6 text-center text-2xs text-faint">
+          Sua chave de LLM fica cifrada e só é usada nas suas conversas.
+        </footer>
+      </div>
     </div>
   );
 }

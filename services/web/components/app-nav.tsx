@@ -15,6 +15,8 @@
 
 "use client";
 
+import { BotaoDeTema } from "@/components/seletor-de-tema";
+
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -23,12 +25,10 @@ import {
   IconCalendar,
   IconChat,
   IconLogout,
-  IconMoon,
   IconReport,
   IconRoutine,
   IconSettings,
   IconStudy,
-  IconSun,
   IconTasks,
   cx,
 } from "@/components/ui";
@@ -236,51 +236,10 @@ export function Logo({ className }: { className?: string }) {
 }
 
 /**
- * Alternador de tema.
- *
- * Escreve `data-theme` no `<html>` e guarda em `localStorage`. O estado
- * inicial vem de ler o atributo no efeito, não na renderização: o
- * servidor não sabe o tema, e ler `localStorage` no corpo do componente
- * daria divergência de hidratação.
+ * Alternador de tema: agora em três estados (sistema, claro, escuro),
+ * em `components/seletor-de-tema.tsx`. Este nome fica para quem já o
+ * usava aqui.
  */
 function ThemeToggle() {
-  const [theme, setTheme] = useState<"dark" | "light" | null>(null);
-
-  useEffect(() => {
-    const stored = localStorage.getItem("age-theme");
-    if (stored === "dark" || stored === "light") {
-      document.documentElement.dataset.theme = stored;
-      setTheme(stored);
-    } else {
-      setTheme(
-        window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark",
-      );
-    }
-  }, []);
-
-  function toggle() {
-    const next = theme === "light" ? "dark" : "light";
-    document.documentElement.dataset.theme = next;
-    try {
-      localStorage.setItem("age-theme", next);
-    } catch {
-      // Navegação privada pode recusar a escrita. O tema da sessão
-      // ainda vale; só não é lembrado.
-    }
-    setTheme(next);
-  }
-
-  return (
-    <button
-      onClick={toggle}
-      className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-xs text-muted transition-colors hover:bg-surface-2/60 hover:text-ink"
-    >
-      {theme === "light" ? (
-        <IconMoon className="h-[18px] w-[18px]" />
-      ) : (
-        <IconSun className="h-[18px] w-[18px]" />
-      )}
-      {theme === "light" ? "Tema escuro" : "Tema claro"}
-    </button>
-  );
+  return <BotaoDeTema comTexto />;
 }

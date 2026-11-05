@@ -17,6 +17,7 @@
 
 "use client";
 
+import { SeletorDeTema } from "@/components/seletor-de-tema";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -76,6 +77,7 @@ export function SettingsScreen({ me }: { me: Me }) {
 
       <div className="mx-auto max-w-2xl space-y-8 px-4 py-6 md:px-7">
         <ProfileSection me={me} />
+        <AppearanceSection />
         <CredentialsSection />
         <ConnectionsSection />
         <SchedulingSection />
@@ -103,6 +105,26 @@ function Section({
       ) : null}
       <div className="mt-2">{children}</div>
     </section>
+  );
+}
+
+// ---------------------------------------------------------------
+/**
+ * Aparência: claro, escuro ou seguir o sistema.
+ *
+ * Fica nas configurações, além do botão rápido da barra lateral,
+ * porque é onde a pessoa procura quando quer fixar a escolha.
+ */
+function AppearanceSection() {
+  return (
+    <Section
+      title="Aparência"
+      description="O Age segue o tema do seu aparelho, ou fica sempre claro ou sempre escuro."
+    >
+      <Panel className="px-4 py-4">
+        <SeletorDeTema className="w-full sm:w-auto" />
+      </Panel>
+    </Section>
   );
 }
 
