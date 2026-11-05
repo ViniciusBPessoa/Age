@@ -8,6 +8,7 @@ for flexível quando necessário.
 Nada é escrito sem você aprovar.
 
 - **Como subir e encerrar:** [COMO-RODAR.md](COMO-RODAR.md)
+- **Clonar noutra máquina:** [SUBIR-NO-GITHUB.md](SUBIR-NO-GITHUB.md)
 - **Especificação completa:** [ARQUITETURA.md](ARQUITETURA.md)
 - **Acompanhamento:** [PROGRESSO.md](PROGRESSO.md)
 
