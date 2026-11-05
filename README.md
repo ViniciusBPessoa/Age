@@ -46,8 +46,10 @@ O que funciona, ponta a ponta, contra containers reais:
 - **Interface**: onboarding que não deixa ninguém num chat morto,
   chat com streaming token a token, revisão de plano item por item,
   timeline com proposto hachurado, e as telas de tarefa, estudo, rotina,
-  relatório e privacidade. Tema escuro e claro, tipografia Inter
-  auto-hospedada, ícones próprios e contraste AA verificado.
+  relatório e privacidade. Paleta **Céu** (azul de agenda, laranja no
+  fixo, roxo no proposto) calculada em OKLCH com contraste AA nos dois
+  modos; tema sistema, claro ou escuro à escolha de quem usa;
+  tipografia Inter auto-hospedada e ícones próprios.
 
 Validado: **290 verificações de smoke** (22 + 35 + 27 + 30 + 38 + 56 +
 82) contra containers reais, **686 testes** no backend (384 no core-api,

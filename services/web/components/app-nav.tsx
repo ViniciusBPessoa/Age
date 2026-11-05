@@ -220,17 +220,36 @@ export function AppNav({ me }: { me: Me }) {
 }
 
 export function Logo({ className }: { className?: string }) {
+  /*
+   * A marca: o "A" do Age desenhado como um pico, sobre a cor da marca,
+   * o mesmo desenho do ícone da aba (`public/icon.svg`). Antes era a
+   * letra em branco sobre um gradiente azul-roxo, que com a paleta Céu
+   * escura (azul claro) ficava com contraste baixo. `brand-ink` é a cor
+   * calculada para ler sobre `brand` nos dois temas.
+   */
   return (
     <span
       aria-hidden
       className={cx(
-        "grid h-8 w-8 shrink-0 place-items-center rounded-[10px]",
-        "bg-gradient-to-br from-brand to-proposed text-sm font-bold text-white",
-        "shadow-brand",
+        "grid h-8 w-8 shrink-0 place-items-center rounded-[10px] bg-brand text-brand-ink shadow-brand",
         className,
       )}
     >
-      A
+      <svg viewBox="0 0 32 32" className="h-5 w-5" fill="none">
+        <path
+          d="M9 23 16 9l7 14"
+          stroke="currentColor"
+          strokeWidth="3"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        <path
+          d="M11.8 18h8.4"
+          stroke="currentColor"
+          strokeWidth="2.5"
+          strokeLinecap="round"
+        />
+      </svg>
     </span>
   );
 }

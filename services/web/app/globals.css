@@ -23,14 +23,25 @@
  *    framework entrega de fábrica; `#6388ff` tem a mesma função e um
  *    caráter próprio.
  *
- * 3. Contraste continua verificado, e os números ficam aqui porque
- *    contraste que ninguém mede volta a quebrar:
- *      --ink   #f0f2f6 sobre --canvas (#0a0b0f)   -> 16.8:1
- *      --ink-2 #c8cdd8 sobre --canvas             -> 11.3:1
- *      --muted #98a0b0 sobre --canvas             ->  6.6:1
- *      --muted #98a0b0 sobre --surface-2 (#171a21)->  5.6:1
- *      --faint #6b7280 sobre --canvas             ->  3.4:1  <- só para
- *        texto decorativo e ícone; NUNCA para informação (§8.2).
+ * 3. Paleta "Céu" (escolhida entre seis candidatas, demonstradas
+ *    lado a lado nos dois modos): azul de agenda, familiar para quem
+ *    vem do Google Agenda e do Samsung Calendar, com laranja no FIXO e
+ *    roxo no PROPOSTO. Calculada em OKLCH, com neutros levemente
+ *    azulados. Os contrastes ficam aqui porque contraste que ninguém
+ *    mede volta a quebrar:
+ *
+ *                              escuro    claro
+ *      --ink sobre --canvas     16.75    17.05
+ *      --muted sobre surface-2   7.03     5.39
+ *      --brand sobre surface     6.73     5.19
+ *      --brand-ink sobre brand   7.15     5.23
+ *      --danger sobre surface    7.33     5.12
+ *      --fixed sobre surface     7.97     5.18
+ *      --proposed sobre surface  7.43     5.13
+ *
+ *    Todos acima de 4,5:1 (AA para texto). `--faint` fica abaixo de
+ *    propósito: só para texto decorativo e ícone, NUNCA para
+ *    informação (§8.2).
  */
 :root {
   /* Diz ao navegador em que esquema desenhar o que é DELE: a lista
@@ -42,32 +53,32 @@
   color-scheme: dark;
 
   /* Superfícies, do fundo para cima. */
-  --canvas: 10 11 15;
-  --surface: 17 19 26;
-  --surface-2: 23 26 33;
-  --surface-3: 30 34 43;
+  --canvas: 12 16 20;
+  --surface: 18 23 27;
+  --surface-2: 25 30 35;
+  --surface-3: 33 38 43;
 
-  --line: 35 39 47;
-  --line-strong: 50 56 69;
+  --line: 39 44 49;
+  --line-strong: 55 60 66;
 
   /* Texto, do mais forte ao mais fraco. */
-  --ink: 240 242 246;
-  --ink-2: 200 205 216;
-  --muted: 152 160 176;
-  --faint: 107 114 128;
+  --ink: 233 241 250;
+  --ink-2: 201 210 220;
+  --muted: 158 169 181;
+  --faint: 108 118 128;
 
-  --brand: 99 136 255;
-  --brand-soft: 42 51 86;
-  --brand-ink: 7 11 24;
+  --brand: 84 160 254;
+  --brand-soft: 18 46 81;
+  --brand-ink: 0 14 42;
 
-  --ok: 62 207 142;
-  --warn: 227 160 8;
-  --danger: 241 98 108;
+  --ok: 98 195 122;
+  --warn: 225 155 27;
+  --danger: 255 126 125;
 
   /* Semânticos do domínio (§5.6), para não repetir a decisão por tela. */
-  --fixed: 245 158 92; /* FIXED — não se mexe */
-  --flexible: 99 136 255; /* FLEXIBLE — pode mover */
-  --proposed: 169 123 247; /* proposto, ainda não aplicado */
+  --fixed: 255 143 75; /* FIXED — não se mexe */
+  --flexible: 84 160 254; /* FLEXIBLE — pode mover */
+  --proposed: 186 147 251; /* proposto, ainda não aplicado */
 
   /* `--font-inter` vem do `next/font` no layout raiz: ele gera um nome
    * de família com hash, então citar "Inter" aqui cairia no fallback. */
@@ -100,25 +111,25 @@
 @media (prefers-color-scheme: light) {
   :root:not([data-theme="dark"]) {
     color-scheme: light;
-    --canvas: 251 251 253;
-    --surface: 255 255 255;
-    --surface-2: 244 245 248;
-    --surface-3: 236 238 243;
-    --line: 227 229 234;
-    --line-strong: 207 211 219;
-    --ink: 19 21 26;
-    --ink-2: 58 63 74;
-    --muted: 97 104 122;
-    --faint: 144 153 170;
-    --brand: 63 95 224;
-    --brand-soft: 223 229 255;
+    --canvas: 246 250 255;
+    --surface: 254 254 255;
+    --surface-2: 237 243 250;
+    --surface-3: 229 235 242;
+    --line: 220 227 234;
+    --line-strong: 204 210 217;
+    --ink: 18 24 30;
+    --ink-2: 57 65 72;
+    --muted: 90 100 111;
+    --faint: 138 147 158;
+    --brand: 27 108 199;
+    --brand-soft: 217 234 255;
     --brand-ink: 255 255 255;
-    --ok: 21 128 61;
-    --warn: 161 98 7;
-    --danger: 199 48 60;
-    --fixed: 194 99 15;
-    --flexible: 63 95 224;
-    --proposed: 123 63 212;
+    --ok: 10 126 58;
+    --warn: 149 99 0;
+    --danger: 195 61 67;
+    --fixed: 176 81 0;
+    --flexible: 27 108 199;
+    --proposed: 128 89 187;
     --ev-tomate: 208 44 42;
     --ev-flamingo: 209 114 118;
     --ev-tangerina: 220 99 30;
@@ -135,25 +146,25 @@
 
 :root[data-theme="light"] {
   color-scheme: light;
-  --canvas: 251 251 253;
-  --surface: 255 255 255;
-  --surface-2: 244 245 248;
-  --surface-3: 236 238 243;
-  --line: 227 229 234;
-  --line-strong: 207 211 219;
-  --ink: 19 21 26;
-  --ink-2: 58 63 74;
-  --muted: 97 104 122;
-  --faint: 144 153 170;
-  --brand: 63 95 224;
-  --brand-soft: 223 229 255;
+  --canvas: 246 250 255;
+  --surface: 254 254 255;
+  --surface-2: 237 243 250;
+  --surface-3: 229 235 242;
+  --line: 220 227 234;
+  --line-strong: 204 210 217;
+  --ink: 18 24 30;
+  --ink-2: 57 65 72;
+  --muted: 90 100 111;
+  --faint: 138 147 158;
+  --brand: 27 108 199;
+  --brand-soft: 217 234 255;
   --brand-ink: 255 255 255;
-  --ok: 21 128 61;
-  --warn: 161 98 7;
-  --danger: 199 48 60;
-  --fixed: 194 99 15;
-  --flexible: 63 95 224;
-  --proposed: 123 63 212;
+  --ok: 10 126 58;
+  --warn: 149 99 0;
+  --danger: 195 61 67;
+  --fixed: 176 81 0;
+  --flexible: 27 108 199;
+  --proposed: 128 89 187;
   --ev-tomate: 208 44 42;
   --ev-flamingo: 209 114 118;
   --ev-tangerina: 220 99 30;
@@ -293,7 +304,7 @@
     background: linear-gradient(
       90deg,
       transparent,
-      rgb(255 255 255 / 0.06),
+      rgb(var(--ink) / 0.06),
       transparent
     );
     animation: shimmer 1.6s infinite;
@@ -366,8 +377,10 @@
     45deg,
     transparent,
     transparent 5px,
-    rgb(255 255 255 / 0.1) 5px,
-    rgb(255 255 255 / 0.1) 10px
+    /* Na cor da proposta, não em branco: o branco a 10% sumia no tema
+     * claro, e a hachura é a pista de "ainda não é real" (§8.1). */
+      rgb(var(--proposed) / 0.16) 5px,
+    rgb(var(--proposed) / 0.16) 10px
   );
 }
 

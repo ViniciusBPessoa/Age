@@ -68,7 +68,9 @@ export function BarraLateral({
   return (
     <aside
       aria-label="Ferramentas da agenda"
-      className="hidden w-64 shrink-0 flex-col gap-5 overflow-y-auto border-r border-line px-4 py-4 lg:flex"
+      // `[&>*]:shrink-0`: numa tela baixa a coluna rola em vez de
+      // espremer os itens (o botão de criar ficava com 20px de altura).
+      className="hidden w-64 shrink-0 flex-col gap-5 overflow-y-auto border-r border-line px-4 py-4 lg:flex [&>*]:shrink-0"
     >
       <Button
         variant="primary"
