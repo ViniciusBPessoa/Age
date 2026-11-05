@@ -24,7 +24,7 @@ const CHAVE_VISTA = "age-ultima-vista-agenda";
 const CHAVE_AGRUPAMENTO = "age-agrupamento-tarefas";
 
 /** As visualizações da agenda. Espelha `TimelineView`. */
-export type VistaAgenda = "day" | "week" | "month";
+export type VistaAgenda = "day" | "week" | "month" | "agenda";
 
 /** Como a tela de tarefas agrupa. Espelha `GroupBy`. */
 export type AgrupamentoTarefas = "due" | "horario" | "tema" | "list" | "priority";
@@ -96,7 +96,9 @@ export function esquecerUltimaConversa(): void {
 
 export function lerUltimaVista(): VistaAgenda | null {
   const valor = ler(CHAVE_VISTA);
-  return valor === "day" || valor === "week" || valor === "month" ? valor : null;
+  return valor === "day" || valor === "week" || valor === "month" || valor === "agenda"
+    ? valor
+    : null;
 }
 
 /**

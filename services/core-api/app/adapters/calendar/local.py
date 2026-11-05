@@ -164,7 +164,8 @@ class LocalCalendar(CalendarProvider):
                 """
                 SELECT id, local_calendar_id, title, start_at, end_at,
                        all_day, description, location, recurrence,
-                       flexibility, created_by_age, version, routine_id
+                       flexibility, created_by_age, version, routine_id,
+                       color
                 FROM core.local_events
                 WHERE user_id = :uid
                   AND local_calendar_id = ANY(:cals)
@@ -243,14 +244,14 @@ class LocalCalendar(CalendarProvider):
                     INSERT INTO core.local_events
                       (user_id, local_calendar_id, title, start_at, end_at,
                        all_day, description, location, recurrence,
-                       flexibility, created_by_age, routine_id)
+                       flexibility, created_by_age, routine_id, color)
                     VALUES (:uid, :cal, :title, :start, :end, :all_day,
                             :descr, :loc, :rrule, :flex, :by_age,
-                            CAST(:routine AS uuid))
+                            CAST(:routine AS uuid), :color)
                     RETURNING id, local_calendar_id, title, start_at, end_at,
                               all_day, description, location, recurrence,
                               flexibility, created_by_age, version,
-                              routine_id
+                              routine_id, color
                     """
                 ),
                 {
@@ -266,6 +267,7 @@ class LocalCalendar(CalendarProvider):
                     "flex": event.flexibility.value,
                     "by_age": event.source == "age",
                     "routine": event.routine_id,
+                    "color": event.color,
                 },
             )
         ).first()
@@ -296,7 +298,7 @@ class LocalCalendar(CalendarProvider):
                     SET title = :title, start_at = :start, end_at = :end,
                         all_day = :all_day, description = :descr,
                         location = :loc, recurrence = :rrule,
-                        flexibility = :flex,
+                        flexibility = :flex, color = :color,
                         version = version + 1, updated_at = now()
                     WHERE id = :eid AND user_id = :uid AND deleted_at IS NULL
                       AND (CAST(:expected AS integer) IS NULL
@@ -304,7 +306,7 @@ class LocalCalendar(CalendarProvider):
                     RETURNING id, local_calendar_id, title, start_at, end_at,
                               all_day, description, location, recurrence,
                               flexibility, created_by_age, version,
-                              routine_id
+                              routine_id, color
                     """
                 ),
                 {
@@ -318,6 +320,7 @@ class LocalCalendar(CalendarProvider):
                     "loc": event.location,
                     "rrule": event.recurrence,
                     "flex": event.flexibility.value,
+                    "color": event.color,
                     "expected": expected_version,
                 },
             )
@@ -436,7 +439,8 @@ class LocalCalendar(CalendarProvider):
                 """
                 SELECT id, local_calendar_id, title, start_at, end_at,
                        all_day, description, location, recurrence,
-                       flexibility, created_by_age, version, routine_id
+                       flexibility, created_by_age, version, routine_id,
+                       color
                 FROM core.local_events
                 WHERE user_id = :uid AND local_calendar_id = :cal
                   AND deleted_at IS NULL
@@ -494,4 +498,6 @@ class LocalCalendar(CalendarProvider):
             # roundtrip. Trocar por nome exigiria `mappings()` em todos
             # eles, o que é mudança maior do que o M5 precisa.
             routine_id=str(row[12]) if len(row) > 12 and row[12] else None,
+            # Cor de categoria escolhida pela pessoa (migration 0015).
+            color=row[13] if len(row) > 13 else None,
         )

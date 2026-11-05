@@ -73,6 +73,21 @@
    * de família com hash, então citar "Inter" aqui cairia no fallback. */
   --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
   --font-mono: ui-monospace, "SFMono-Regular", Menlo, monospace;
+
+  /* Cores de categoria de evento (migration 0015). Tons do tema
+   * escuro: mais claros, para a faixa lateral aparecer sobre a
+   * superfície escura. Nomes das cores do Google Agenda. */
+  --ev-tomate: 255 101 90;
+  --ev-flamingo: 244 145 148;
+  --ev-tangerina: 255 131 70;
+  --ev-banana: 246 195 48;
+  --ev-salvia: 104 200 148;
+  --ev-manjericao: 82 167 109;
+  --ev-pavao: 68 188 242;
+  --ev-mirtilo: 121 144 244;
+  --ev-lavanda: 166 175 238;
+  --ev-uva: 201 120 226;
+  --ev-grafite: 143 146 152;
 }
 
 /*
@@ -104,6 +119,17 @@
     --fixed: 194 99 15;
     --flexible: 63 95 224;
     --proposed: 123 63 212;
+    --ev-tomate: 208 44 42;
+    --ev-flamingo: 209 114 118;
+    --ev-tangerina: 220 99 30;
+    --ev-banana: 232 182 22;
+    --ev-salvia: 70 168 118;
+    --ev-manjericao: 26 118 63;
+    --ev-pavao: 3 152 205;
+    --ev-mirtilo: 71 89 183;
+    --ev-lavanda: 133 141 201;
+    --ev-uva: 138 58 160;
+    --ev-grafite: 96 99 105;
   }
 }
 
@@ -128,6 +154,17 @@
   --fixed: 194 99 15;
   --flexible: 63 95 224;
   --proposed: 123 63 212;
+  --ev-tomate: 208 44 42;
+  --ev-flamingo: 209 114 118;
+  --ev-tangerina: 220 99 30;
+  --ev-banana: 232 182 22;
+  --ev-salvia: 70 168 118;
+  --ev-manjericao: 26 118 63;
+  --ev-pavao: 3 152 205;
+  --ev-mirtilo: 71 89 183;
+  --ev-lavanda: 133 141 201;
+  --ev-uva: 138 58 160;
+  --ev-grafite: 96 99 105;
 }
 
 @layer base {

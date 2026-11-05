@@ -1,15 +1,24 @@
 /**
- * Timeline da agenda (§8.1).
+ * A agenda (§8.1), repaginada para marcar e organizar sem sair dela.
  *
- * "Visão semana/mês. Eventos criados pelo Age marcados visualmente.
- * Cadeado para fixar/soltar flexibilidade. Diferencia proposto
- * (hachurado) de confirmado."
+ * O que a pessoa faz aqui, e de onde veio cada padrão:
  *
- * As quatro coisas estão aqui. O cadeado é o detalhe que mais importa
- * do ponto de vista do domínio: ele deixa a pessoa corrigir a
- * heurística de classificação (§5.6), que erra por desenho — ela tem
- * viés para rígido justamente porque mover algo que não podia ser
- * movido é pior que deixar de mover algo que podia.
+ * - **Clicar ou arrastar num horário vazio** abre a criação rápida ao
+ *   lado, como no Google Agenda: título, cor, Enter.
+ * - **Arrastar um bloco** muda o horário; **puxar a borda** muda a
+ *   duração. Grava na hora (§8.0) e oferece "Desfazer" no rodapé, como
+ *   o Gmail.
+ * - **Arrastar uma tarefa** da barra lateral para a grade vira proposta
+ *   de reserva no lugar onde caiu, e abre a revisão para aprovar.
+ * - **Cor por categoria** e **cadeado de flexibilidade** num toque, no
+ *   balão do evento.
+ * - **Atalhos de teclado** (N, T, D/S/M/L, setas), como no Google Agenda
+ *   e no Notion Calendar. `?` mostra a lista.
+ * - No celular: abre no dia, o botão de criar flutua ao alcance do
+ *   polegar (Samsung One UI), e os balões viram folha de baixo.
+ *
+ * O que já existia e continua: propostas hachuradas na grade, painel
+ * para aprovar, remarcar e descartar, e o cadeado de três estados (§5.6).
  */
 
 "use client";
@@ -30,9 +39,20 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import {
   CalendarTimeline,
+  type Ancora,
   type Proposal,
   type TimelineView,
 } from "@/components/calendar-timeline/calendar-timeline";
+import { EventoDialog } from "@/components/calendar-timeline/evento-dialog";
+import { Aviso, type AvisoAgenda } from "@/components/calendar/aviso";
+import { Balao } from "@/components/calendar/balao";
+import {
+  BarraLateral,
+  type TarefaArrastada,
+} from "@/components/calendar/barra-lateral";
+import { CriacaoRapida } from "@/components/calendar/criacao-rapida";
+import { DetalhesDoEvento } from "@/components/calendar/detalhes-do-evento";
+import { PlanReview } from "@/components/plan-review/plan-review";
 import {
   Badge,
   Button,
@@ -40,113 +60,74 @@ import {
   IconChevronLeft,
   IconChevronRight,
   IconPlus,
-  IconLock,
-  IconSparkle,
   LoadError,
-  Select,
   cx,
 } from "@/components/ui";
-import { PlanReview } from "@/components/plan-review/plan-review";
 import { RequestFailed, api } from "@/lib/api-client";
-import { mensagemDeFalha } from "@/lib/resultado-do-apply";
+import { ATALHOS_DA_AGENDA, useAtalhos } from "@/lib/atalhos";
 import { range } from "@/lib/format";
-import { EventoDialog } from "@/components/calendar-timeline/evento-dialog";
+import { mensagemDeFalha } from "@/lib/resultado-do-apply";
 import { guardarUltimaVista, lerUltimaVista } from "@/lib/ultimo-lugar";
-import type { AgeEvent, ApplyResult, Flexibility, Plan } from "@/lib/types";
+import type { AgeEvent, ApplyResult, EventColor, Flexibility, Plan } from "@/lib/types";
 
-const VIEWS = [
-  { value: "day" as const, label: "dia" },
-  { value: "week" as const, label: "semana" },
-  { value: "month" as const, label: "mês" },
+const VIEWS: { value: TimelineView; label: string; tecla: string }[] = [
+  { value: "day", label: "dia", tecla: "D" },
+  { value: "week", label: "semana", tecla: "S" },
+  { value: "month", label: "mês", tecla: "M" },
+  { value: "agenda", label: "lista", tecla: "L" },
 ];
 
-const FLEX_LABEL: Record<Flexibility, string> = {
-  fixed: "Fixo: não movo",
-  semi_flexible: "Semi-flexível: movo avisando",
-  flexible: "Flexível: movo quando precisar",
+/** Dias que a visão de lista mostra a partir do dia escolhido. */
+const DIAS_DA_LISTA = 30;
+
+type Criando = { inicio: Date; fim: Date; ancora: Ancora | null };
+type CriandoCompleto = {
+  inicio?: Date;
+  fim?: Date;
+  titulo?: string;
+  cor?: EventColor | null;
 };
+
+function mensagem(err: unknown, padrao: string): string {
+  return err instanceof RequestFailed ? err.message : padrao;
+}
 
 export function CalendarScreen({ timezone }: { timezone: string }) {
   const queryClient = useQueryClient();
   const [view, setViewState] = useState<TimelineView>("week");
   /*
-   * A data de hoje so e decidida no CLIENTE.
-   *
-   * `new Date()` durante a renderizacao roda duas vezes, no servidor e
-   * no navegador, e os dois relogios nao batem: o React avisava
-   * "server rendered HTML didn't match the client properties" apontando
-   * para `date={Date}` da timeline. O aviso so aparecia nesta rota, e
-   * so foi achado capturando as telas, porque nenhum teste olha o
-   * console.
-   *
-   * `null` ate o efeito rodar: a tela so desenha a grade quando ja sabe
-   * que dia e hoje. E o mesmo cuidado que a visualizacao logo abaixo ja
-   * tomava com o `localStorage`.
+   * A data de hoje so e decidida no CLIENTE: `new Date()` no render roda
+   * no servidor e no navegador com relogios diferentes, e o React
+   * acusava divergencia de hidratacao em `date={Date}`.
    */
   const [cursor, setCursor] = useState<Date | null>(null);
-  const [selected, setSelected] = useState<AgeEvent | null>(null);
-  // Edição e criação manual (§8.1). `criando` guarda o horário quando
-  // vem do arrasto na grade; um objeto vazio abre o diálogo em branco.
-  const [editando, setEditando] = useState<AgeEvent | null>(null);
-  const [criando, setCriando] = useState<{
-    inicio?: Date;
-    fim?: Date;
-  } | null>(null);
 
-  /*
-   * A visualização volta como a pessoa deixou (§8.1).
-   *
-   * Lido num efeito, não no `useState`: o servidor pré-renderiza esta
-   * tela e não tem `localStorage`, então ler durante a renderização
-   * daria divergência de hidratação. É o mesmo cuidado do tema.
-   *
-   * A DATA não é restaurada de propósito — sempre abre em hoje.
-   */
   useEffect(() => {
     const salva = lerUltimaVista();
     if (salva !== null) {
       setViewState(salva);
     } else if (globalThis.matchMedia?.("(max-width: 640px)").matches) {
-      /*
-       * No celular, a semana nao cabe.
-       *
-       * Sete colunas em 390px dao 47px por dia: o nome do dia sai
-       * cortado ("18 dom", "20 terc") e nenhum titulo de evento tem
-       * onde caber. Visto na captura em 390px, nunca num teste.
-       *
-       * So vale como PADRAO: se a pessoa escolheu semana alguma vez, a
-       * escolha dela manda, por isso este ramo so roda quando nao ha
-       * nada salvo.
-       *
-       * `globalThis` e nao `window` porque ha uma variavel local
-       * chamada `window` neste componente (a janela de datas buscada),
-       * que sombreia a global.
-       */
+      // No celular, sete colunas em 390px nao cabem: o padrao e o dia.
       setViewState("day");
     }
     setCursor(new Date());
   }, []);
 
-  // Troca de visualização passa por aqui para ser lembrada. Um
-  // `setViewState` solto em qualquer um dos dois pontos de troca
-  // voltaria a esquecer, e em silêncio.
   const setView = useCallback((proxima: TimelineView) => {
     setViewState(proxima);
     guardarUltimaVista(proxima);
   }, []);
 
-  // A janela buscada é maior que a visível: `react-big-calendar` mostra
-  // dias da semana anterior e seguinte nas bordas do mês, e buscar só o
-  // mês exato deixaria esses dias vazios na tela.
-  /*
-   * Enquanto `cursor` e nulo (so no primeiro render, antes do efeito),
-   * os hooks abaixo precisam de ALGUMA data: hook nao pode rodar
-   * condicionalmente. A tela em si nao e desenhada nesse instante, o
-   * guarda logo antes do `return` cuida disso.
-   */
   const dia = cursor ?? new Date(0);
 
-  const window = useMemo(() => {
+  // A janela buscada é maior que a visível nas bordas do mês.
+  const janela = useMemo(() => {
+    if (view === "agenda") {
+      return {
+        start: dia.toISOString(),
+        end: addDays(dia, DIAS_DA_LISTA).toISOString(),
+      };
+    }
     const base =
       view === "month"
         ? { from: startOfMonth(dia), to: endOfMonth(dia) }
@@ -158,21 +139,14 @@ export function CalendarScreen({ timezone }: { timezone: string }) {
   }, [dia, view]);
 
   const events = useQuery({
-    queryKey: ["events", window.start, window.end],
+    queryKey: ["events", janela.start, janela.end],
     queryFn: () =>
       api.get<{ events: AgeEvent[] }>("/calendar/events", {
-        start: window.start,
-        end: window.end,
+        start: janela.start,
+        end: janela.end,
       }),
   });
 
-  /**
-   * Planos ainda propostos viram eventos hachurados na timeline (§8.1).
-   *
-   * Mostrar a proposta junto do confirmado é o que permite julgar se
-   * ela cabe: um cartão de diff diz "qua 14:00–15:30", mas só a
-   * timeline mostra que isso fica encostado na aula das 16h.
-   */
   const plans = useQuery({
     queryKey: ["plans", "proposed"],
     queryFn: () => api.get<Plan[]>("/plans", { status: "proposed" }),
@@ -200,18 +174,6 @@ export function CalendarScreen({ timezone }: { timezone: string }) {
     return out;
   }, [plans.data]);
 
-  /**
-   * Os planos que ainda tem item pendente: os OBJETOS, nao os itens.
-   *
-   * `proposals` acima achata tudo em itens para a timeline desenhar os
-   * blocos hachurados, e joga o plano fora. O painel herdou isso, e por
-   * isso so sabia descartar e remarcar: sem o plano nao ha id para
-   * `POST /plans/{id}/apply`, e o botao de aprovar simplesmente nao
-   * existia nesta tela.
-   *
-   * O relato era esse beco: o cartao do chat morria com a conversa, e a
-   * agenda, que MOSTRA as propostas, nao oferecia como aceita-las.
-   */
   const planosPendentes = useMemo(
     () =>
       (plans.data ?? []).filter(
@@ -226,18 +188,205 @@ export function CalendarScreen({ timezone }: { timezone: string }) {
     return map;
   }, [events.data]);
 
-  // Painel de gerência das propostas, aberto pelo selo do cabeçalho.
+  // ---------------------------------------------------------------
+  // Estado da tela
+  // ---------------------------------------------------------------
+  const [selecionado, setSelecionado] = useState<{ id: string; ancora: Ancora } | null>(
+    null,
+  );
+  const evento = selecionado ? (byId.get(selecionado.id) ?? null) : null;
+  const [editando, setEditando] = useState<AgeEvent | null>(null);
+  const [criandoRapido, setCriandoRapido] = useState<Criando | null>(null);
+  const [criandoCompleto, setCriandoCompleto] = useState<CriandoCompleto | null>(null);
+  const [arrastando, setArrastando] = useState<TarefaArrastada | null>(null);
+  const [aviso, setAviso] = useState<AvisoAgenda | null>(null);
+  const [ajuda, setAjuda] = useState(false);
+
   const [gerenciando, setGerenciando] = useState(false);
   const [remarcando, setRemarcando] = useState<Proposal | null>(null);
   const [novoInicio, setNovoInicio] = useState("");
   const [ocupado, setOcupado] = useState(false);
-  // O que falhou ao descartar. Sem isto, falha de rede virava "pronto".
   const [erroDescarte, setErroDescarte] = useState<string | null>(null);
 
+  const avisar = useCallback(
+    (texto: string, extra?: Omit<AvisoAgenda, "id" | "texto">) =>
+      setAviso({ id: Date.now(), texto, ...extra }),
+    [],
+  );
+  const sumirAviso = useCallback(() => setAviso(null), []);
+
+  const recarregarEventos = useCallback(
+    () => queryClient.invalidateQueries({ queryKey: ["events"] }),
+    [queryClient],
+  );
   async function recarregarPropostas() {
     await queryClient.invalidateQueries({ queryKey: ["plans", "proposed"] });
   }
 
+  // ---------------------------------------------------------------
+  // Edição direta (§8.0), sempre com volta
+  // ---------------------------------------------------------------
+  async function patchEvento(id: string, corpo: Record<string, unknown>) {
+    await api.patch<AgeEvent>(`/calendar/events/${id}`, corpo);
+    await recarregarEventos();
+  }
+
+  async function aoSoltar(
+    id: string,
+    kind: "event" | "proposal",
+    inicio: Date,
+    fim: Date,
+    acao: "mover" | "duracao",
+  ) {
+    if (kind === "proposal") {
+      // Continua proposta: só muda o horário sugerido, como o "Remarcar".
+      try {
+        await api.patch(`/plans/items/${id}`, {
+          start: inicio.toISOString(),
+          end: fim.toISOString(),
+        });
+        await recarregarPropostas();
+        avisar("Proposta remarcada. Ela ainda espera sua aprovação.");
+      } catch (err) {
+        avisar(mensagem(err, "Não consegui remarcar a proposta."), { tom: "erro" });
+      }
+      return;
+    }
+    const antes = byId.get(id);
+    if (!antes) return;
+    // Otimista: a grade já mostra onde o bloco caiu, sem esperar a rede.
+    queryClient.setQueryData<{ events: AgeEvent[] }>(
+      ["events", janela.start, janela.end],
+      (velho) =>
+        velho
+          ? {
+              ...velho,
+              events: velho.events.map((e) =>
+                e.id === id
+                  ? { ...e, start: inicio.toISOString(), end: fim.toISOString() }
+                  : e,
+              ),
+            }
+          : velho,
+    );
+    try {
+      await patchEvento(id, { start: inicio.toISOString(), end: fim.toISOString() });
+      avisar(
+        acao === "mover"
+          ? `"${antes.title}" foi para ${range(inicio.toISOString(), fim.toISOString(), timezone)}.`
+          : `"${antes.title}" agora vai até ${format(fim, "HH:mm")}.`,
+        {
+          desfazer: async () => {
+            await patchEvento(id, { start: antes.start, end: antes.end });
+          },
+        },
+      );
+    } catch (err) {
+      await recarregarEventos();
+      avisar(mensagem(err, "Não consegui mudar o horário."), { tom: "erro" });
+    }
+  }
+
+  async function mudarCor(ev: AgeEvent, cor: EventColor | null) {
+    try {
+      await patchEvento(ev.id, { color: cor });
+    } catch (err) {
+      avisar(mensagem(err, "Não consegui trocar a cor."), { tom: "erro" });
+    }
+  }
+
+  async function mudarFlex(ev: AgeEvent, flexibility: Flexibility) {
+    try {
+      await api.patch<AgeEvent>(`/calendar/events/${ev.id}/flexibility`, {
+        flexibility,
+      });
+      await recarregarEventos();
+    } catch (err) {
+      avisar(mensagem(err, "Não consegui mudar a flexibilidade."), { tom: "erro" });
+    }
+  }
+
+  function corpoDe(ev: AgeEvent) {
+    return {
+      title: ev.title,
+      start: ev.start,
+      end: ev.end,
+      description: ev.description,
+      location: ev.location,
+      all_day: ev.all_day,
+      flexibility: ev.flexibility,
+      color: ev.color,
+    };
+  }
+
+  async function apagar(ev: AgeEvent) {
+    setOcupado(true);
+    try {
+      await api.del(`/calendar/events/${ev.id}`);
+      setSelecionado(null);
+      await recarregarEventos();
+      avisar(`"${ev.title}" apagado.`, {
+        desfazer: async () => {
+          await api.post<AgeEvent>("/calendar/events", corpoDe(ev));
+          await recarregarEventos();
+        },
+      });
+    } catch (err) {
+      avisar(mensagem(err, "Não consegui apagar."), { tom: "erro" });
+    } finally {
+      setOcupado(false);
+    }
+  }
+
+  async function duplicar(ev: AgeEvent) {
+    // Mesmo horário na semana seguinte: é o "repetir isto" mais comum.
+    const semana = 7 * 86_400_000;
+    setOcupado(true);
+    try {
+      const copia = await api.post<AgeEvent>("/calendar/events", {
+        ...corpoDe(ev),
+        start: new Date(new Date(ev.start).getTime() + semana).toISOString(),
+        end: new Date(new Date(ev.end).getTime() + semana).toISOString(),
+      });
+      setSelecionado(null);
+      await recarregarEventos();
+      avisar(`Cópia criada na semana seguinte.`, {
+        desfazer: async () => {
+          await api.del(`/calendar/events/${copia.id}`);
+          await recarregarEventos();
+        },
+      });
+    } catch (err) {
+      avisar(mensagem(err, "Não consegui duplicar."), { tom: "erro" });
+    } finally {
+      setOcupado(false);
+    }
+  }
+
+  // Tarefa solta na grade: proposta de reserva + revisão aberta.
+  async function soltarTarefa(inicio: Date, fim: Date) {
+    const tarefa = arrastando;
+    setArrastando(null);
+    if (!tarefa) return;
+    try {
+      await api.post<{ plan_id: string }>(`/tasks/${tarefa.id}/schedule`, {
+        start: inicio.toISOString(),
+        end: fim.toISOString(),
+        title: tarefa.titulo,
+      });
+      await Promise.all([
+        recarregarPropostas(),
+        queryClient.invalidateQueries({ queryKey: ["tasks"] }),
+      ]);
+      setGerenciando(true);
+    } catch (err) {
+      avisar(mensagem(err, "Não consegui reservar esse horário."), { tom: "erro" });
+    }
+  }
+
+  // ---------------------------------------------------------------
+  // Propostas (o painel que já existia)
+  // ---------------------------------------------------------------
   async function descartar(itemId: string) {
     setOcupado(true);
     setErroDescarte(null);
@@ -245,12 +394,8 @@ export function CalendarScreen({ timezone }: { timezone: string }) {
       await api.del(`/plans/items/${itemId}`);
       await recarregarPropostas();
     } catch (err) {
-      // Sem este `catch` a exceção subia e a pessoa via o painel
-      // intacto, sem nenhuma indicação de que o descarte não foi.
       setErroDescarte(
-        err instanceof RequestFailed
-          ? err.message
-          : "Não consegui descartar essa proposta. Tente de novo.",
+        mensagem(err, "Não consegui descartar essa proposta. Tente de novo."),
       );
     } finally {
       setOcupado(false);
@@ -264,11 +409,7 @@ export function CalendarScreen({ timezone }: { timezone: string }) {
       await api.post(`/plans/${plano.id}/reject`);
       await queryClient.invalidateQueries({ queryKey: ["plans"] });
     } catch (err) {
-      setErroDescarte(
-        err instanceof RequestFailed
-          ? err.message
-          : "Nao consegui descartar esta proposta.",
-      );
+      setErroDescarte(mensagem(err, "Não consegui descartar esta proposta."));
     } finally {
       setOcupado(false);
     }
@@ -287,18 +428,15 @@ export function CalendarScreen({ timezone }: { timezone: string }) {
         queryClient.invalidateQueries({ queryKey: ["events"] }),
         queryClient.invalidateQueries({ queryKey: ["tasks"] }),
       ]);
-      const aviso = mensagemDeFalha(result);
-      if (aviso !== null) {
-        // O painel FICA aberto quando algo nao entrou: fecha-lo
-        // esconderia o motivo, que e o defeito que estamos consertando.
-        setErroDescarte(aviso);
+      const falha = mensagemDeFalha(result);
+      if (falha !== null) {
+        setErroDescarte(falha);
       } else if (planosPendentes.length <= 1) {
         setGerenciando(false);
+        avisar("Pronto, está na sua agenda.");
       }
     } catch (err) {
-      setErroDescarte(
-        err instanceof RequestFailed ? err.message : "Nao consegui aplicar.",
-      );
+      setErroDescarte(mensagem(err, "Não consegui aplicar."));
     } finally {
       setOcupado(false);
     }
@@ -307,14 +445,7 @@ export function CalendarScreen({ timezone }: { timezone: string }) {
   async function descartarTudo() {
     setOcupado(true);
     try {
-      // Em série: o rate limit do core-api responde 429 ao excedente, e
-      // um lote paralelo deixaria parte das propostas na tela depois do
-      // "descartei tudo".
-      //
-      // O erro de UMA proposta não interrompe as outras (a pessoa pediu
-      // para descartar todas), mas é contado: antes o `catch` engolia
-      // tudo e a tela fechava dizendo que descartou mesmo que as 8
-      // chamadas tivessem falhado.
+      // Em série: o rate limit do core-api responde 429 ao excedente.
       let falhas = 0;
       for (const proposta of proposals) {
         try {
@@ -330,7 +461,6 @@ export function CalendarScreen({ timezone }: { timezone: string }) {
             ? "Não consegui descartar as propostas. Tente de novo."
             : `Descartei parte delas: ${falhas} não saíram.`,
         );
-        // O painel fica aberto: fechar esconderia o que não saiu.
         return;
       }
       setErroDescarte(null);
@@ -342,8 +472,6 @@ export function CalendarScreen({ timezone }: { timezone: string }) {
 
   async function salvarRemarcacao() {
     if (!remarcando || !novoInicio) return;
-    // Preserva a duração original: a pessoa escolhe quando começa, e
-    // mexer no tamanho do bloco sem ela pedir seria outra decisão.
     const duracao =
       new Date(remarcando.end).getTime() - new Date(remarcando.start).getTime();
     const inicio = new Date(novoInicio);
@@ -360,30 +488,24 @@ export function CalendarScreen({ timezone }: { timezone: string }) {
     }
   }
 
-  async function setFlexibility(eventId: string, flexibility: Flexibility) {
-    await api.patch<AgeEvent>(`/calendar/events/${eventId}/flexibility`, {
-      flexibility,
-    });
-    await queryClient.invalidateQueries({ queryKey: ["events"] });
-    setSelected(null);
-  }
-
-  async function remove(eventId: string) {
-    await api.del(`/calendar/events/${eventId}`);
-    await queryClient.invalidateQueries({ queryKey: ["events"] });
-    setSelected(null);
-  }
-
-  /**
-   * O título do período, que a barra da lib dava e agora é nosso.
-   *
-   * Na semana, o intervalo pode atravessar dois meses ("29 set – 5 out")
-   * e é isso que a pessoa precisa ler; repetir o mês nas duas pontas
-   * quando é o mesmo seria ruído.
-   */
+  // ---------------------------------------------------------------
+  // Navegação e atalhos
+  // ---------------------------------------------------------------
   const periodLabel = useMemo(() => {
     if (view === "month") return format(dia, "MMMM yyyy", { locale: ptBR });
-    if (view === "day") return format(dia, "EEEE, d 'de' MMMM", { locale: ptBR });
+    if (view === "day") {
+      // No celular o nome inteiro do dia não cabe ao lado dos botões.
+      const curto = globalThis.matchMedia?.("(max-width: 640px)").matches;
+      return curto
+        ? `${["dom", "seg", "ter", "qua", "qui", "sex", "sáb"][dia.getDay()]}, ${format(dia, "d MMM", { locale: ptBR })}`
+        : format(dia, "EEEE, d 'de' MMMM", { locale: ptBR });
+    }
+    if (view === "agenda")
+      return `${format(dia, "d 'de' MMM", { locale: ptBR })} – ${format(
+        addDays(dia, DIAS_DA_LISTA),
+        "d 'de' MMM",
+        { locale: ptBR },
+      )}`;
     const from = startOfWeek(dia, { locale: ptBR });
     const to = addDays(from, 6);
     return from.getMonth() === to.getMonth()
@@ -393,61 +515,98 @@ export function CalendarScreen({ timezone }: { timezone: string }) {
         })}`;
   }, [dia, view]);
 
-  function shift(direction: -1 | 1) {
-    setCursor((current) => {
-      const base = current ?? new Date();
-      return view === "month"
-        ? addMonths(base, direction)
-        : addWeeks(base, view === "day" ? direction / 7 : direction);
-    });
-  }
+  const shift = useCallback(
+    (direction: -1 | 1) => {
+      setCursor((current) => {
+        const base = current ?? new Date();
+        if (view === "month") return addMonths(base, direction);
+        if (view === "day") return addDays(base, direction);
+        if (view === "agenda") return addDays(base, direction * 7);
+        return addWeeks(base, direction);
+      });
+    },
+    [view],
+  );
 
-  // A grade so e desenhada quando o CLIENTE ja disse que dia e hoje.
-  // Desenhar antes com a data do servidor era a divergencia de
-  // hidratacao que o React apontava em `date={Date}`.
+  const novo = useCallback(() => {
+    const agora = new Date();
+    const inicio = new Date(cursor ?? agora);
+    inicio.setHours(agora.getHours() + 1, 0, 0, 0);
+    setCriandoCompleto({ inicio, fim: new Date(inicio.getTime() + 3600_000) });
+  }, [cursor]);
+
+  const atalhos = useMemo(
+    () => ({
+      n: novo,
+      t: () => setCursor(new Date()),
+      d: () => setView("day"),
+      s: () => setView("week"),
+      w: () => setView("week"),
+      m: () => setView("month"),
+      l: () => setView("agenda"),
+      a: () => setView("agenda"),
+      j: () => shift(1),
+      k: () => shift(-1),
+      ArrowRight: () => shift(1),
+      ArrowLeft: () => shift(-1),
+      "?": () => setAjuda(true),
+    }),
+    [novo, setView, shift],
+  );
+  const algoAberto =
+    selecionado !== null ||
+    criandoRapido !== null ||
+    criandoCompleto !== null ||
+    editando !== null ||
+    gerenciando ||
+    ajuda;
+  useAtalhos(atalhos, cursor !== null && !algoAberto);
+
   if (cursor === null) {
     return <div className="flex h-dvh flex-col pb-16 md:pb-0" />;
   }
 
   return (
     <div className="flex h-dvh flex-col pb-16 md:pb-0">
-      {/*
-       * A barra da agenda é a nossa, e a da lib foi desligada
-       * (`toolbar: () => null`). Antes as duas apareciam: dois botões
-       * de "hoje", duas formas de trocar a visão, e só uma delas com o
-       * estilo do produto.
-       */}
       <header className="glass sticky top-0 z-20 border-b border-line">
-        <div className="mx-auto flex w-full max-w-6xl flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3.5 md:px-6">
-          <div className="min-w-0">
-            <h1 className="flex items-center gap-2 text-xl font-semibold">
-              {/* `first-letter:uppercase`, não `capitalize`: este último
-                  põe maiúscula em cada palavra e produz "4 – 10 De
-                  Outubro". Só a primeira letra é que deve subir. */}
+        <div className="flex w-full flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3 md:px-6">
+          <div className="flex min-w-0 items-center gap-2">
+            <Button size="sm" variant="secondary" onClick={() => setCursor(new Date())}>
+              Hoje
+            </Button>
+            <div className="flex items-center">
+              <Button
+                size="icon"
+                variant="ghost"
+                onClick={() => shift(-1)}
+                aria-label="Período anterior"
+              >
+                <IconChevronLeft />
+              </Button>
+              <Button
+                size="icon"
+                variant="ghost"
+                onClick={() => shift(1)}
+                aria-label="Próximo período"
+              >
+                <IconChevronRight />
+              </Button>
+            </div>
+            <h1 className="flex min-w-0 items-center gap-2 text-lg font-semibold sm:text-xl">
               <span className="inline-block truncate first-letter:uppercase">
                 {periodLabel}
               </span>
               {proposals.length > 0 ? (
-                /*
-                 * O selo era só informativo, e o relato foi "está lá
-                 * como proposta, não posso mais alterar, não posso mais
-                 * editar". A agenda desenhava os blocos hachurados e
-                 * não oferecia uma única ação sobre eles: só dava para
-                 * aprovar ou rejeitar o plano INTEIRO, e apenas pelo
-                 * cartão do turno que os criou — que some assim que a
-                 * conversa avança.
-                 *
-                 * Agora o selo é a porta: abre a lista com horário, e
-                 * cada item pode ser remarcado ou descartado sozinho.
-                 */
                 <button
                   onClick={() => setGerenciando(true)}
                   className="rounded-full transition-opacity hover:opacity-80"
                   aria-label={`Gerenciar ${proposals.length} propostas`}
                 >
                   <Badge tone="proposed">
-                    {proposals.length} proposto
-                    {proposals.length === 1 ? "" : "s"}
+                    <span className="whitespace-nowrap">
+                      {proposals.length} proposto
+                      {proposals.length === 1 ? "" : "s"}
+                    </span>
                   </Badge>
                 </button>
               ) : null}
@@ -455,8 +614,6 @@ export function CalendarScreen({ timezone }: { timezone: string }) {
           </div>
 
           <div className="ml-auto flex items-center gap-2">
-            {/* Grupo segmentado para a visão: três opções que se
-                excluem, e o estado atual visível sem abrir nada. */}
             <div
               role="group"
               aria-label="Visão"
@@ -467,6 +624,8 @@ export function CalendarScreen({ timezone }: { timezone: string }) {
                   key={option.value}
                   onClick={() => setView(option.value)}
                   aria-pressed={view === option.value}
+                  aria-keyshortcuts={option.tecla}
+                  title={`${option.label} (${option.tecla})`}
                   className={cx(
                     "rounded-md px-2.5 py-1 text-xs font-medium transition-colors",
                     view === option.value
@@ -478,73 +637,158 @@ export function CalendarScreen({ timezone }: { timezone: string }) {
                 </button>
               ))}
             </div>
-
-            <div className="flex items-center gap-0.5">
-              <Button
-                size="icon"
-                variant="ghost"
-                onClick={() => shift(-1)}
-                aria-label="Período anterior"
-              >
-                <IconChevronLeft />
-              </Button>
-              <Button size="sm" variant="ghost" onClick={() => setCursor(new Date())}>
-                hoje
-              </Button>
-              <Button
-                size="icon"
-                variant="ghost"
-                onClick={() => shift(1)}
-                aria-label="Próximo período"
-              >
-                <IconChevronRight />
-              </Button>
-
-              {/*
-               * Criar à mão, sem arrastar.
-               *
-               * O arrasto cobre o computador, mas no celular a grade é
-               * estreita demais para mirar uma faixa de horário com o
-               * dedo. Sem este botão, a criação manual existiria só
-               * para quem usa mouse.
-               */}
-              <Button
-                size="sm"
-                variant="secondary"
-                className="ml-1"
-                onClick={() => setCriando({})}
-              >
-                <IconPlus className="h-3.5 w-3.5" />
-                novo
-              </Button>
-            </div>
+            <Button
+              size="sm"
+              variant="primary"
+              className="hidden sm:inline-flex lg:hidden"
+              onClick={novo}
+              aria-keyshortcuts="N"
+            >
+              <IconPlus className="h-3.5 w-3.5" />
+              novo
+            </Button>
           </div>
         </div>
       </header>
 
-      <div className="mx-auto min-h-0 w-full max-w-6xl flex-1 px-3 py-3 md:px-6 md:py-4">
-        {events.isError ? (
-          <LoadError
-            message="Não consegui carregar sua agenda."
-            onRetry={() => void events.refetch()}
-          />
-        ) : (
-          <CalendarTimeline
-            events={events.data?.events ?? []}
-            proposals={proposals}
-            timezone={timezone}
-            view={view}
-            date={cursor}
-            onView={setView}
-            onNavigate={setCursor}
-            onSelectEvent={(id, kind) => {
-              if (kind === "proposal") return;
-              setSelected(byId.get(id) ?? null);
-            }}
-            onCriarNoGrid={(inicio, fim) => setCriando({ inicio, fim })}
-          />
-        )}
+      <div className="flex min-h-0 flex-1">
+        <BarraLateral
+          cursor={cursor}
+          timezone={timezone}
+          onEscolherDia={(d) => {
+            setCursor(d);
+            if (view === "month") setView("day");
+          }}
+          onNovo={novo}
+          onArrastarTarefa={setArrastando}
+          onAjuda={() => setAjuda(true)}
+        />
+
+        <div className="min-h-0 min-w-0 flex-1 px-2 py-2 md:px-4 md:py-3">
+          {events.isError ? (
+            <LoadError
+              message="Não consegui carregar sua agenda."
+              onRetry={() => void events.refetch()}
+            />
+          ) : (
+            <CalendarTimeline
+              events={events.data?.events ?? []}
+              proposals={proposals}
+              timezone={timezone}
+              view={view}
+              date={cursor}
+              onView={setView}
+              onNavigate={setCursor}
+              onSelectEvent={(id, kind, ancora) => {
+                if (kind === "proposal") {
+                  setGerenciando(true);
+                  return;
+                }
+                setCriandoRapido(null);
+                setSelecionado({ id, ancora });
+              }}
+              onCriarNoGrid={(inicio, fim, ancora) => {
+                setSelecionado(null);
+                setCriandoRapido({ inicio, fim, ancora });
+              }}
+              onEventDrop={(id, kind, inicio, fim, acao) =>
+                void aoSoltar(id, kind, inicio, fim, acao)
+              }
+              onSoltarDeFora={(inicio, fim) => void soltarTarefa(inicio, fim)}
+              arrastandoDeFora={
+                arrastando
+                  ? { titulo: arrastando.titulo, minutos: arrastando.minutos }
+                  : null
+              }
+            />
+          )}
+        </div>
       </div>
+
+      {/* Botão flutuante no celular, ao alcance do polegar (One UI). */}
+      <button
+        type="button"
+        onClick={novo}
+        aria-label="Novo compromisso"
+        className="fixed bottom-[calc(4.75rem+env(safe-area-inset-bottom))] right-[max(1rem,env(safe-area-inset-right))] z-30 grid h-14 w-14 place-items-center rounded-2xl bg-brand text-brand-ink shadow-float transition-transform active:scale-95 sm:hidden"
+      >
+        <IconPlus className="h-6 w-6" />
+      </button>
+
+      <Balao
+        aberto={criandoRapido !== null}
+        ancora={criandoRapido?.ancora ?? null}
+        onFechar={() => setCriandoRapido(null)}
+        rotulo="Novo compromisso"
+      >
+        {criandoRapido ? (
+          <CriacaoRapida
+            inicio={criandoRapido.inicio}
+            fim={criandoRapido.fim}
+            timezone={timezone}
+            onCriado={(ev) => {
+              setCriandoRapido(null);
+              avisar(`"${ev.title}" marcado.`, {
+                desfazer: async () => {
+                  await api.del(`/calendar/events/${ev.id}`);
+                  await recarregarEventos();
+                },
+              });
+            }}
+            onMaisOpcoes={(titulo, cor) => {
+              setCriandoCompleto({
+                inicio: criandoRapido.inicio,
+                fim: criandoRapido.fim,
+                titulo,
+                cor,
+              });
+              setCriandoRapido(null);
+            }}
+          />
+        ) : null}
+      </Balao>
+
+      <Balao
+        aberto={evento !== null}
+        ancora={selecionado?.ancora ?? null}
+        onFechar={() => setSelecionado(null)}
+        rotulo={evento?.title ?? "Compromisso"}
+      >
+        {evento ? (
+          <DetalhesDoEvento
+            evento={evento}
+            timezone={timezone}
+            ocupado={ocupado}
+            onEditar={() => {
+              setEditando(evento);
+              setSelecionado(null);
+            }}
+            onDuplicar={() => void duplicar(evento)}
+            onApagar={() => void apagar(evento)}
+            onCor={(cor) => void mudarCor(evento, cor)}
+            onFlex={(f) => void mudarFlex(evento, f)}
+          />
+        ) : null}
+      </Balao>
+
+      {editando ? (
+        <EventoDialog
+          evento={editando}
+          timezone={timezone}
+          onClose={() => setEditando(null)}
+        />
+      ) : null}
+
+      {criandoCompleto ? (
+        <EventoDialog
+          timezone={timezone}
+          inicioSugerido={criandoCompleto.inicio}
+          fimSugerido={criandoCompleto.fim}
+          tituloSugerido={criandoCompleto.titulo}
+          corSugerida={criandoCompleto.cor}
+          onClose={() => setCriandoCompleto(null)}
+        />
+      ) : null}
 
       <Dialog
         open={gerenciando}
@@ -580,27 +824,14 @@ export function CalendarScreen({ timezone }: { timezone: string }) {
           </p>
         ) : null}
 
-        {/*
-         * O cartao de aprovacao, aqui dentro.
-         *
-         * Este painel se chamava "Propostas esperando aprovacao" e oferecia
-         * Remarcar, Descartar e Descartar todas. Aprovar, nao: um grep por
-         * `apply` neste arquivo devolvia zero. Era a segunda metade do
-         * relato, depois do cartao do chat que sumia.
-         *
-         * Reusa o `PlanReview` do chat em vez de um botao "aprovar tudo"
-         * proprio: aprovacao granular e primeira-classe (§5.8, §8.1), e uma
-         * segunda superficie com semantica mais fraca divergiria da primeira.
-         *
-         * Um cartao por plano, empilhados. `confirm_blocking`, `item_ids` e
-         * a janela de undo sao POR PLANO: juntar itens de planos diferentes
-         * num cartao so mentiria sobre atomicidade.
-         */}
+        {/* Um cartão por plano: `item_ids`, `confirm_blocking` e o undo são
+            POR PLANO, e juntar itens de planos diferentes mentiria sobre
+            atomicidade (§5.8). */}
         {planosPendentes.length > 0 ? (
           <div className="mb-4 space-y-3">
             {planosPendentes.length > 1 ? (
               <p className="text-xs text-muted">
-                {planosPendentes.length} propostas separadas. Cada uma e aprovada por
+                {planosPendentes.length} propostas separadas. Cada uma é aprovada por
                 conta.
               </p>
             ) : null}
@@ -619,20 +850,13 @@ export function CalendarScreen({ timezone }: { timezone: string }) {
           </div>
         ) : null}
 
-        {/*
-         * A lista abaixo existe so para REMARCAR, que o cartao nao faz.
-         *
-         * Ao ver a tela pronta, as mesmas propostas apareciam duas vezes:
-         * uma no cartao, com caixa de selecao, e outra aqui com Remarcar e
-         * Descartar. Aprovar e descartar agora moram no cartao, entao aqui
-         * fica so o que falta, sem repetir a decisao.
-         */}
         {proposals.length === 0 ? (
           <p className="text-sm text-muted">Nenhuma proposta pendente.</p>
         ) : (
           <>
             <p className="mb-2 text-xs text-muted">
-              Precisa remarcar ou tirar alguma antes de aprovar?
+              Precisa remarcar ou tirar alguma antes de aprovar? Também dá para arrastar
+              o bloco hachurado na agenda.
             </p>
             <ul className="max-h-60 space-y-1.5 overflow-y-auto">
               {proposals.map((proposta) => (
@@ -652,16 +876,11 @@ export function CalendarScreen({ timezone }: { timezone: string }) {
                     disabled={ocupado}
                     onClick={() => {
                       setRemarcando(proposta);
-                      // `datetime-local` não aceita offset: o valor tem de
-                      // ser a hora local já formatada, sem o fuso.
                       setNovoInicio(proposta.start.slice(0, 16));
                     }}
                   >
                     Remarcar
                   </Button>
-                  {/* Descartar UM item continua util aqui: no cartao, tirar
-                    um item e desmarcar a caixa, que o deixa pendente em
-                    vez de remove-lo. */}
                   <Button
                     variant="quiet"
                     size="sm"
@@ -714,131 +933,32 @@ export function CalendarScreen({ timezone }: { timezone: string }) {
         />
       </Dialog>
 
-      {editando ? (
-        <EventoDialog
-          evento={editando}
-          onClose={() => setEditando(null)}
-          onDone={() => setSelected(null)}
-        />
-      ) : null}
-
-      {criando ? (
-        <EventoDialog
-          inicioSugerido={criando.inicio}
-          fimSugerido={criando.fim}
-          onClose={() => setCriando(null)}
-        />
-      ) : null}
-
       <Dialog
-        open={selected !== null}
-        onClose={() => setSelected(null)}
-        title={selected?.title ?? ""}
-        description={
-          selected ? range(selected.start, selected.end, timezone) : undefined
-        }
-        footer={
-          selected ? (
-            <>
-              <Button variant="ghost" onClick={() => setSelected(null)}>
-                Fechar
-              </Button>
-              {/*
-               * Editar antes de Apagar: a ação comum fica mais longe da
-               * destrutiva, que é a que não tem volta.
-               */}
-              <Button
-                variant="secondary"
-                onClick={() => {
-                  setEditando(selected);
-                  setSelected(null);
-                }}
-              >
-                Editar
-              </Button>
-              <Button variant="danger" onClick={() => void remove(selected.id)}>
-                Apagar
-              </Button>
-            </>
-          ) : null
-        }
+        open={ajuda}
+        onClose={() => setAjuda(false)}
+        title="Atalhos da agenda"
+        description="Funcionam quando nenhum campo de texto está em foco."
       >
-        {selected ? (
-          <div className="space-y-4">
-            {selected.location || selected.created_by_age ? (
-              <div className="flex flex-wrap items-center gap-2">
-                {selected.location ? (
-                  <span className="text-xs text-muted">{selected.location}</span>
-                ) : null}
-                {selected.created_by_age ? (
-                  <Badge tone="brand">
-                    <IconSparkle className="h-2.5 w-2.5" />
-                    criado pelo Age
-                  </Badge>
-                ) : null}
-              </div>
-            ) : null}
-
-            {/* O cadeado de §8.1. Fica num `<Select>` em vez de num
-                ícone de duas posições porque são TRÊS estados (§5.6), e
-                um cadeado aberto/fechado não representa o meio. */}
-            <div className="rounded-xl bg-surface-2 p-4">
-              <label
-                htmlFor="flex"
-                className="flex items-center gap-2 text-sm font-medium"
-              >
-                <IconLock className="h-4 w-4 text-muted" />O Age pode mover este evento?
-              </label>
-              <Select
-                id="flex"
-                value={selected.flexibility}
-                onChange={(e) =>
-                  void setFlexibility(selected.id, e.target.value as Flexibility)
-                }
-                className="mt-2.5"
-              >
-                {(Object.keys(FLEX_LABEL) as Flexibility[]).map((value) => (
-                  <option key={value} value={value}>
-                    {FLEX_LABEL[value]}
-                  </option>
-                ))}
-              </Select>
-              <p className="mt-2.5 text-xs leading-relaxed text-muted">
-                A classificação automática tende para o rígido de propósito: mover algo
-                que não podia ser movido é pior que deixar de mover algo que podia.
-              </p>
+        <dl className="grid grid-cols-[auto_1fr] items-center gap-x-4 gap-y-2.5 text-sm">
+          {ATALHOS_DA_AGENDA.map((a) => (
+            <div key={a.teclas} className="contents">
+              <dt>
+                <kbd className="rounded-md border border-line-strong bg-surface-2 px-2 py-0.5 font-mono text-xs">
+                  {a.teclas}
+                </kbd>
+              </dt>
+              <dd className="text-ink-2">{a.o_que}</dd>
             </div>
-          </div>
-        ) : null}
+          ))}
+        </dl>
+        <p className="mt-4 text-xs leading-relaxed text-muted">
+          Com o mouse: clique num horário vazio para marcar, arraste um bloco para mudar
+          o horário, puxe a borda de baixo para mudar a duração, e arraste uma tarefa da
+          barra lateral para reservar tempo para ela.
+        </p>
       </Dialog>
 
-      <Legend />
-    </div>
-  );
-}
-
-/**
- * A legenda não é enfeite: sem ela, a diferença entre hachurado e
- * cheio, ou entre borda laranja e azul, é adivinhação. §8.2 pede
- * contraste AA, e cor sozinha nunca é informação suficiente —
- * a legenda é o que torna as cores legíveis para quem não as distingue.
- */
-function Legend() {
-  const items = [
-    { className: "age-ev age-ev-flexible", label: "flexível", lock: false },
-    { className: "age-ev age-ev-semi", label: "semi-flexível", lock: false },
-    { className: "age-ev age-ev-fixed", label: "fixo", lock: true },
-    { className: "age-ev age-ev-proposed age-hatch", label: "proposto", lock: false },
-  ];
-  return (
-    <div className="age-timeline flex flex-wrap items-center justify-center gap-x-4 gap-y-2 border-t border-line bg-surface px-4 py-2.5 text-xs text-muted md:px-6">
-      {items.map((item) => (
-        <span key={item.label} className="flex items-center gap-1.5">
-          <span aria-hidden className={`${item.className} h-3 w-6 rounded`} />
-          {item.label}
-          {item.lock ? <IconLock className="h-3 w-3" /> : null}
-        </span>
-      ))}
+      <Aviso aviso={aviso} onSumir={sumirAviso} />
     </div>
   );
 }

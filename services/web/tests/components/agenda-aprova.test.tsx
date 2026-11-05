@@ -123,7 +123,10 @@ describe("a data de hoje so e decidida no cliente", () => {
      */
     montar([]);
 
-    expect(await screen.findByRole("heading")).toBeTruthy();
+    // `level: 1`: a barra lateral da agenda tem subtítulos próprios
+    // ("Sem horário", "Legenda"); o que este teste cobra é o título do
+    // período, que só aparece quando a grade foi desenhada.
+    expect(await screen.findByRole("heading", { level: 1 })).toBeTruthy();
   });
 });
 

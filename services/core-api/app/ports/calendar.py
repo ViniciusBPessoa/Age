@@ -28,10 +28,26 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import StrEnum
 
-
 # ---------------------------------------------------------------
 # Entidades
 # ---------------------------------------------------------------
+EVENT_COLORS: tuple[str, ...] = (
+    "tomate",
+    "tangerina",
+    "banana",
+    "salvia",
+    "manjericao",
+    "pavao",
+    "mirtilo",
+    "lavanda",
+    "uva",
+    "flamingo",
+    "grafite",
+)
+"""As cores de categoria de um evento. Os nomes seguem as onze cores de
+evento que a pessoa já conhece do Google Agenda, em português."""
+
+
 @dataclass(frozen=True)
 class CalendarRef:
     """Um calendário dentro de uma conexão."""
@@ -88,6 +104,11 @@ class Event:
     # repetição no calendário, esta diz a qual rotina do Age o evento
     # pertence, para a aderência saber onde registrar.
     routine_id: str | None = None
+    # Cor de categoria, escolhida pela pessoa na agenda (§8.1). Um nome
+    # da paleta fixa (`EVENT_COLORS`), nunca hex livre: o tema claro e o
+    # escuro pintam o mesmo nome com tons diferentes, e hex livre ficaria
+    # ilegível num dos dois. Metadado local, como `flexibility`.
+    color: str | None = None
 
     def __post_init__(self) -> None:
         if self.start.tzinfo is None or self.end.tzinfo is None:

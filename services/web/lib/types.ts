@@ -192,7 +192,23 @@ export interface AgeEvent {
   flexibility: Flexibility;
   created_by_age: boolean;
   etag: string | null;
+  /** Cor de categoria (migration 0015). `null` usa a cor do tipo. */
+  color: EventColor | null;
 }
+
+/** As onze cores de evento. Espelho de `EVENT_COLORS` no core-api. */
+export type EventColor =
+  | "tomate"
+  | "tangerina"
+  | "banana"
+  | "salvia"
+  | "manjericao"
+  | "pavao"
+  | "mirtilo"
+  | "lavanda"
+  | "uva"
+  | "flamingo"
+  | "grafite";
 
 export interface Slot {
   start: string;

@@ -41,6 +41,23 @@ from app.services.calendar_access import (
 from app.services.plan_store import promote_drafts
 
 log = logging.getLogger("core-api.calendar")
+# Os nomes de `EVENT_COLORS`, como tipo: a validação acontece no
+# Pydantic (422 com a lista de nomes aceitos) e no banco (CHECK da
+# migration 0015), nunca só num dos dois.
+EventColor = Literal[
+    "tomate",
+    "tangerina",
+    "banana",
+    "salvia",
+    "manjericao",
+    "pavao",
+    "mirtilo",
+    "lavanda",
+    "uva",
+    "flamingo",
+    "grafite",
+]
+
 router = APIRouter(prefix="/calendar", tags=["calendar"])
 
 
@@ -60,6 +77,8 @@ class EventOut(BaseModel):
     flexibility: str
     created_by_age: bool
     etag: str | None = None
+    # Cor de categoria (um nome de `EVENT_COLORS`), ou nenhuma.
+    color: str | None = None
 
 
 class EventList(BaseModel):
@@ -86,6 +105,7 @@ class CreateEventIn(BaseModel):
     all_day: bool = False
     recurrence: str | None = Field(default=None, max_length=500)
     flexibility: Literal["fixed", "semi_flexible", "flexible"] | None = None
+    color: EventColor | None = None
 
 
 class UpdateEventIn(BaseModel):
@@ -103,6 +123,9 @@ class UpdateEventIn(BaseModel):
     location: str | None = Field(default=None, max_length=300)
     all_day: bool | None = None
     flexibility: Literal["fixed", "semi_flexible", "flexible"] | None = None
+    # `null` explícito TIRA a cor; ausente mantém. A diferença é lida em
+    # `model_fields_set`, porque os dois chegam como `None`.
+    color: EventColor | None = None
 
 
 class UpdateFlexibilityIn(BaseModel):
@@ -137,6 +160,7 @@ def _to_out(event: Event) -> EventOut:
         flexibility=event.flexibility.value,
         created_by_age=event.source == "age",
         etag=event.etag,
+        color=event.color,
     )
 
 
@@ -227,6 +251,7 @@ async def create_event(
                 all_day=body.all_day,
                 recurrence=body.recurrence,
                 flexibility=flexibility,
+                color=body.color,
             )
         )
     except ValueError as exc:
@@ -434,6 +459,9 @@ async def update_event(
                     Flexibility(body.flexibility)
                     if body.flexibility is not None
                     else atual.flexibility
+                ),
+                color=(
+                    body.color if "color" in body.model_fields_set else atual.color
                 ),
             )
         )

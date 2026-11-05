@@ -26,37 +26,52 @@
 
 "use client";
 
+import { TZDate } from "@date-fns/tz";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
-import { Button, Dialog, Field, Input, Select, Textarea } from "@/components/ui";
+import { SeletorDeCor, SeletorDeFlex } from "@/components/calendar/seletores";
+import { Button, Dialog, Field, Input, Textarea } from "@/components/ui";
 import { RequestFailed, api } from "@/lib/api-client";
-import type { AgeEvent, Flexibility } from "@/lib/types";
+import type { AgeEvent, EventColor, Flexibility } from "@/lib/types";
 
-const FLEX_LABEL: Record<Flexibility, string> = {
-  fixed: "Fixo · não pode mover",
-  semi_flexible: "Semi-flexível · dá para ajustar",
-  flexible: "Flexível · pode remarcar",
-};
-
-/** `YYYY-MM-DD` no fuso LOCAL. `toISOString` converteria para UTC. */
-export function campoData(d: Date): string {
-  const mes = String(d.getMonth() + 1).padStart(2, "0");
-  const dia = String(d.getDate()).padStart(2, "0");
-  return `${d.getFullYear()}-${mes}-${dia}`;
+/**
+ * A data como a pessoa a lê: no fuso da CONTA quando informado.
+ *
+ * Sem o fuso, os campos mostravam a hora do navegador, e quem abrisse a
+ * agenda viajando veria "15:00" no diálogo de um evento que a grade
+ * desenha às 14:00. A grade sempre usou o fuso da conta (§9.5).
+ */
+function noFuso(d: Date, timezone?: string): Date {
+  return timezone ? new TZDate(d, timezone) : d;
 }
 
-/** `HH:MM` no fuso local. */
-export function campoHora(d: Date): string {
-  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(
+/** `YYYY-MM-DD` no fuso da conta (ou local). `toISOString` daria UTC. */
+export function campoData(d: Date, timezone?: string): string {
+  const z = noFuso(d, timezone);
+  const mes = String(z.getMonth() + 1).padStart(2, "0");
+  const dia = String(z.getDate()).padStart(2, "0");
+  return `${z.getFullYear()}-${mes}-${dia}`;
+}
+
+/** `HH:MM` no fuso da conta (ou local). */
+export function campoHora(d: Date, timezone?: string): string {
+  const z = noFuso(d, timezone);
+  return `${String(z.getHours()).padStart(2, "0")}:${String(z.getMinutes()).padStart(
     2,
     "0",
   )}`;
 }
 
 /** Junta os campos num instante local (sem `Z`: a pessoa digita local). */
-export function instante(data: string, hora: string): Date | null {
+export function instante(data: string, hora: string, timezone?: string): Date | null {
   if (!data || !hora) return null;
+  if (timezone) {
+    const [a, m, d] = data.split("-").map(Number);
+    const [h, min] = hora.split(":").map(Number);
+    if ([a, m, d, h, min].some((n) => Number.isNaN(n))) return null;
+    return new Date(new TZDate(a, m - 1, d, h, min, 0, timezone).getTime());
+  }
   const d = new Date(`${data}T${hora}`);
   return Number.isNaN(d.getTime()) ? null : d;
 }
@@ -67,9 +82,17 @@ export function EventoDialog({
   fimSugerido,
   onClose,
   onDone,
+  timezone,
+  tituloSugerido,
+  corSugerida,
 }: {
   /** Preenchido = editar; ausente = criar. */
   evento?: AgeEvent;
+  /** Fuso da conta. Sem ele, os campos usam o do navegador. */
+  timezone?: string;
+  /** Vindo da criação rápida, quando a pessoa pede "mais opções". */
+  tituloSugerido?: string;
+  corSugerida?: EventColor | null;
   /** Para a criação por arrasto na grade, que já sabe o horário. */
   inicioSugerido?: Date;
   fimSugerido?: Date;
@@ -84,17 +107,20 @@ export function EventoDialog({
     ? new Date(evento.end)
     : (fimSugerido ?? new Date(ini.getTime() + 3600_000));
 
-  const [titulo, setTitulo] = useState(evento?.title ?? "");
-  const [data, setData] = useState(() => campoData(ini));
-  const [horaIni, setHoraIni] = useState(() => campoHora(ini));
-  const [horaFim, setHoraFim] = useState(() => campoHora(fim));
+  const [titulo, setTitulo] = useState(evento?.title ?? tituloSugerido ?? "");
+  const [data, setData] = useState(() => campoData(ini, timezone));
+  const [horaIni, setHoraIni] = useState(() => campoHora(ini, timezone));
+  const [horaFim, setHoraFim] = useState(() => campoHora(fim, timezone));
+  const [cor, setCor] = useState<EventColor | null>(
+    evento?.color ?? corSugerida ?? null,
+  );
   const [local, setLocal] = useState(evento?.location ?? "");
   const [descricao, setDescricao] = useState(evento?.description ?? "");
   const [flex, setFlex] = useState<Flexibility>(evento?.flexibility ?? "fixed");
   const [erro, setErro] = useState<string | null>(null);
 
-  const comeco = instante(data, horaIni);
-  const termino = instante(data, horaFim);
+  const comeco = instante(data, horaIni, timezone);
+  const termino = instante(data, horaFim, timezone);
   const horarioValido = comeco != null && termino != null && termino > comeco;
   const podeSalvar = titulo.trim().length > 0 && horarioValido;
 
@@ -107,6 +133,7 @@ export function EventoDialog({
         location: local.trim() || null,
         description: descricao.trim() || null,
         flexibility: flex,
+        color: cor,
       };
       return editando
         ? api.patch<AgeEvent>(`/calendar/events/${evento.id}`, corpo)
@@ -230,17 +257,15 @@ export function EventoDialog({
           htmlFor="ev-flex"
           hint="O Age só move o que você marcou como flexível."
         >
-          <Select
-            id="ev-flex"
-            value={flex}
-            onChange={(e) => setFlex(e.target.value as Flexibility)}
-          >
-            {(Object.keys(FLEX_LABEL) as Flexibility[]).map((f) => (
-              <option key={f} value={f}>
-                {FLEX_LABEL[f]}
-              </option>
-            ))}
-          </Select>
+          <SeletorDeFlex id="ev-flex" valor={flex} onChange={setFlex} />
+        </Field>
+
+        <Field
+          label="Cor"
+          htmlFor="ev-cor"
+          hint="Para separar aula, trabalho, saúde, lazer."
+        >
+          <SeletorDeCor id="ev-cor" valor={cor} onChange={setCor} />
         </Field>
 
         <Field label="Onde" htmlFor="ev-local" hint="Opcional.">

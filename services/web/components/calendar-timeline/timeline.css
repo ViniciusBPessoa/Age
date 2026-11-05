@@ -266,3 +266,200 @@
     align-items: stretch;
   }
 }
+
+/* ---------------------------------------------------------------
+ * Cor de categoria (migration 0015)
+ *
+ * A cor escolhida pinta a faixa e tinge o fundo; o título continua em
+ * `--ink`, então a legibilidade não depende da cor. O tipo segue
+ * legível pela forma: cadeado no fixo, hachura e tracejado no proposto.
+ * --------------------------------------------------------------- */
+.age-timeline .age-ev.age-ev-colorida {
+  border-left-color: rgb(var(--ev));
+  background: color-mix(in srgb, rgb(var(--ev)) 24%, rgb(var(--surface)));
+}
+
+/* ---------------------------------------------------------------
+ * Arrastar e redimensionar
+ * --------------------------------------------------------------- */
+.age-timeline .rbc-addons-dnd .rbc-addons-dnd-resizable {
+  height: 100%;
+}
+.age-timeline .rbc-addons-dnd-resize-ns-anchor .rbc-addons-dnd-resize-ns-icon {
+  width: 22px;
+  border-top: 3px double rgb(var(--ink) / 0.55);
+}
+.age-timeline .rbc-addons-dnd-dragged-event {
+  opacity: 0.35;
+}
+.age-timeline .rbc-addons-dnd-drag-preview,
+.age-timeline .rbc-addons-dnd .rbc-addons-dnd-drag-preview.rbc-event {
+  box-shadow: 0 10px 28px -10px rgb(0 0 0 / 0.55);
+  outline: 2px solid rgb(var(--brand));
+  outline-offset: 0;
+  z-index: 5;
+}
+.age-timeline .rbc-addons-dnd .rbc-event:not(.age-ev-proposed) {
+  cursor: grab;
+}
+.age-timeline .rbc-addons-dnd-is-dragging .rbc-event {
+  cursor: grabbing;
+}
+.age-timeline .rbc-slot-selection {
+  background: rgb(var(--brand) / 0.18);
+  border: 1px solid rgb(var(--brand));
+  border-radius: 6px;
+  color: rgb(var(--ink));
+  font-size: 0.6875rem;
+  font-weight: 600;
+}
+
+/* ---------------------------------------------------------------
+ * Lista (visão "agenda" da lib)
+ * --------------------------------------------------------------- */
+.age-timeline .rbc-agenda-view {
+  background: rgb(var(--surface));
+  border: 1px solid rgb(var(--line));
+  border-radius: 14px;
+  overflow: auto;
+}
+.age-timeline .rbc-agenda-view table.rbc-agenda-table {
+  border: none;
+  font-size: 0.8125rem;
+}
+.age-timeline .rbc-agenda-view table.rbc-agenda-table thead > tr > th {
+  border-bottom: 1px solid rgb(var(--line));
+  color: rgb(var(--muted));
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 0.6rem 0.9rem;
+}
+.age-timeline .rbc-agenda-view table.rbc-agenda-table tbody > tr > td {
+  border-color: rgb(var(--line));
+  padding: 0.55rem 0.9rem;
+  vertical-align: middle;
+}
+.age-timeline .rbc-agenda-view table.rbc-agenda-table tbody > tr + tr {
+  border-top: 1px solid rgb(var(--line));
+}
+.age-timeline .rbc-agenda-date-cell {
+  font-weight: 600;
+  color: rgb(var(--ink));
+  white-space: nowrap;
+}
+.age-timeline .rbc-agenda-date-cell::first-letter {
+  text-transform: uppercase;
+}
+.age-timeline .rbc-agenda-time-cell {
+  color: rgb(var(--muted));
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+/* Na lista, a lib põe a classe do evento na LINHA da tabela. A linha
+ * continua linha; a cor vira uma faixa na célula do evento. */
+.age-timeline .rbc-agenda-view tr.age-ev {
+  display: table-row;
+  background: none;
+  border: 0;
+  outline: 0;
+  box-shadow: none;
+  border-radius: 0;
+  font-size: inherit;
+}
+.age-timeline .rbc-agenda-view tr.age-ev .rbc-agenda-event-cell {
+  box-shadow: inset 3px 0 0 rgb(var(--flexible));
+  font-weight: 500;
+}
+.age-timeline .rbc-agenda-view tr.age-ev-fixed .rbc-agenda-event-cell {
+  box-shadow: inset 3px 0 0 rgb(var(--fixed));
+}
+.age-timeline .rbc-agenda-view tr.age-ev-semi .rbc-agenda-event-cell {
+  box-shadow: inset 3px 0 0 rgb(var(--warn));
+}
+.age-timeline .rbc-agenda-view tr.age-ev-proposed .rbc-agenda-event-cell {
+  box-shadow: inset 3px 0 0 rgb(var(--proposed));
+  color: rgb(var(--proposed));
+  font-style: italic;
+}
+.age-timeline .rbc-agenda-view tr.age-ev-colorida .rbc-agenda-event-cell {
+  box-shadow: inset 3px 0 0 rgb(var(--ev));
+}
+.age-timeline .rbc-agenda-view tr.age-ev:hover td {
+  background: rgb(var(--surface-2));
+}
+.age-timeline .rbc-agenda-empty {
+  padding: 2.5rem 1rem;
+  text-align: center;
+  color: rgb(var(--muted));
+}
+
+/* O dia de hoje no cabeçalho da semana, em pílula, como no Google
+ * Agenda: o olho acha "hoje" antes de ler a data. */
+.age-timeline .rbc-time-header .rbc-header.rbc-today {
+  border-bottom-width: 2px;
+}
+
+.age-timeline .age-cab-dia {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  line-height: 1;
+}
+.age-timeline .age-cab-dia-semana {
+  font-size: 0.6875rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.age-timeline .age-cab-dia-numero {
+  display: grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 999px;
+  font-size: 1.125rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: rgb(var(--ink));
+  text-transform: none;
+}
+.age-timeline .age-cab-dia[data-hoje] .age-cab-dia-semana {
+  color: rgb(var(--brand));
+}
+.age-timeline .age-cab-dia[data-hoje] .age-cab-dia-numero {
+  background: rgb(var(--brand));
+  color: rgb(var(--brand-ink));
+}
+.age-timeline .rbc-time-header .rbc-header {
+  padding: 0.5rem 0.25rem;
+}
+.age-timeline .rbc-time-header .rbc-header.rbc-today {
+  background: transparent;
+  border-bottom: 1px solid rgb(var(--line));
+}
+/* A faixa de "dia todo" fica fina quando vazia: 40px de nada no topo
+ * empurravam a manhã para baixo. */
+.age-timeline .rbc-allday-cell {
+  min-height: 0;
+  max-height: 5.5rem;
+  overflow-y: auto;
+}
+.age-timeline .rbc-time-header-content .rbc-row.rbc-row-resource,
+.age-timeline .rbc-time-header-content > .rbc-row:not(.rbc-time-header-cell) {
+  min-height: 0.5rem;
+}
+.age-timeline .rbc-time-header .rbc-header {
+  height: auto;
+  min-height: 3.5rem;
+  overflow: visible;
+  display: grid;
+  place-items: center;
+}
+.age-timeline .rbc-time-header .rbc-header .rbc-button-link {
+  padding: 0;
+}
+.age-timeline .rbc-allday-cell:not(:has(.rbc-event)) {
+  height: 0.5rem;
+}

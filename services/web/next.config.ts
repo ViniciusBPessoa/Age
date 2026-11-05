@@ -47,7 +47,12 @@ const SECURITY_HEADERS = [
   // HSTS só faz efeito sob HTTPS, e o navegador ignora em http://localhost.
   ...(IS_DEV
     ? []
-    : [{ key: "Strict-Transport-Security", value: "max-age=31536000; includeSubDomains" }]),
+    : [
+        {
+          key: "Strict-Transport-Security",
+          value: "max-age=31536000; includeSubDomains",
+        },
+      ]),
 ];
 
 const nextConfig: NextConfig = {

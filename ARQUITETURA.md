@@ -2594,14 +2594,16 @@ Caminhos diretos, todos de ação própria:
 | Ação | Rota | Observação |
 |---|---|---|
 | Criar evento à mão | `POST /calendar/events` | existia desde o M2 |
-| Editar evento | `PATCH /calendar/events/{id}` | só `local_events` |
+| Editar evento | `PATCH /calendar/events/{id}` | só `local_events`; também ao arrastar e redimensionar na grade |
 | Apagar evento | `DELETE /calendar/events/{id}` | existia |
 | Editar tarefa | `PATCH /tasks/{id}` | existia desde o M4, **sem tela** |
 | Reservar tempo | `POST /tasks/{id}/schedule` | este **gera proposta**, porque envolve o Scheduler |
 
 **Evento externo não se edita.** O que vem do Google vive em `events_shadow` e é espelho: escrever ali seria alterar uma cópia que o próximo sync sobrescreve, sem aviso. A rota devolve 404 dizendo onde editar.
 
-**Arrastar na grade cria, não move.** `onSelectSlot` (faixa vazia → evento novo) é ação direta e está ligado. `onEventDrop` (mover evento existente) continua desligado, e a nota no fim de `calendar-timeline.tsx` explica: mover é mudança na agenda, e o caminho certo é gerar um plano de um item com o motivo "você arrastou" — rota que ainda não existe.
+**Arrastar na grade cria e move.** `onSelectSlot` (faixa vazia → criação rápida ao lado do clique) é ação direta. `onEventDrop` e `onEventResize` também: mover um bloco com o mouse é a mesma decisão que trocar a hora no diálogo de edição, que já grava por `PATCH`, e a tela oferece **Desfazer** logo depois (que devolve o horário anterior pela mesma rota). Proposta arrastada continua proposta: vai por `PATCH /plans/items/{id}`. Tarefa arrastada da barra lateral para a grade vira **proposta** de reserva (`POST /tasks/{id}/schedule`, que passa pelo `validate_plan`) e abre a revisão. Evento recorrente não arrasta.
+
+**Cor por categoria.** `local_events.color` (migration 0015) guarda um dos onze nomes de `EVENT_COLORS`, nunca hex: o tema claro e o escuro pintam o mesmo nome com tons diferentes. O CHECK no banco é a segunda barreira, depois do `Literal` da rota.
 
 **O que estava invisível, e por quê.** Três defeitos do mesmo tipo foram corrigidos juntos, todos com a forma "a tela mostra um estado e a verdade é outra":
 
