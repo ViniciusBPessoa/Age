@@ -1,0 +1,30 @@
+# Final de linha normalizado no repositorio, independente da maquina.
+#
+# Sem isto, o repositorio depende do `core.autocrlf` de cada clone: um
+# Windows sem essa configuracao gravaria CRLF nos scripts, e o CI roda
+# em ubuntu-latest, onde `#!/bin/bash\r` nao existe como interpretador.
+# O erro que aparece la e "bad interpreter", que nao parece erro de
+# final de linha nenhum.
+
+# Texto detectado automaticamente, LF no repositorio.
+* text=auto eol=lf
+
+# Estes PRECISAM de LF: sao executados dentro do container Linux.
+*.sh text eol=lf
+Makefile text eol=lf
+Dockerfile* text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+
+# Este PRECISA de CRLF: PowerShell no Windows.
+*.ps1 text eol=crlf
+
+# Binarios, para o git nao tentar normalizar nem mostrar diff de texto.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.woff binary
+*.woff2 binary
