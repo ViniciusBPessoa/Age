@@ -11,6 +11,8 @@ Nada é escrito sem você aprovar.
 - **Clonar noutra máquina:** [SUBIR-NO-GITHUB.md](SUBIR-NO-GITHUB.md)
 - **Especificação completa:** [ARQUITETURA.md](ARQUITETURA.md)
 - **Acompanhamento:** [PROGRESSO.md](PROGRESSO.md)
+- **Auditoria de segurança:** [SEGURANCA.md](SEGURANCA.md)
+- **Sugestões, priorizadas:** [SUGESTOES.md](SUGESTOES.md)
 
 **Estado atual: os sete marcos estão concluídos** (M0 a M6).
 
@@ -35,9 +37,10 @@ O que funciona, ponta a ponta, contra containers reais:
   sites, filtra o resultado ruim por score de relevância e mostra as
   fontes que usou, clicáveis e guardadas junto da mensagem.
 - **Anexos**: imagem e PDF arrastados para o chat, lidos pelo modelo.
-- **Edição direta** (§8.0): criar evento arrastando na grade, editar
-  tarefa e evento sem passar pelo chat. O que *você* faz é decisão
-  tomada, não proposta a aprovar.
+- **Edição direta** (§8.0): criação rápida ao clicar na grade, arrastar
+  para mover, puxar a borda para mudar a duração (com desfazer), cor por
+  categoria, e tarefas arrastadas da barra lateral viram proposta de
+  reserva. O que *você* faz é decisão tomada, não proposta a aprovar.
 - **Uso e custo** por dia e por mensagem, com preço fora de pico e
   acerto de cache contabilizados.
 - **Interface**: onboarding que não deixa ninguém num chat morto,
@@ -63,10 +66,9 @@ está certa seria investir na parte errada — e a degradação do provedor
 pobre já é testada contra um adaptador que declara as mesmas limitações
 do Google Tasks.
 
-**Arrastar evento na timeline.** A prop existe no componente, mas
-ligá-la a um `PATCH` criaria um caminho de escrita sem `PlanDiff` e
-fora do desfazer. O certo é o drag gerar um plano de um item só, e isso
-precisa de uma rota que ainda não existe.
+**Criptografia dos dados em repouso** (títulos, descrições, conversas),
+combinada como próxima etapa. Ver [SUGESTOES.md](SUGESTOES.md) para o
+restante, priorizado.
 
 ---
 
