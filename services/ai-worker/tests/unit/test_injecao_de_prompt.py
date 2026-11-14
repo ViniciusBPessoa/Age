@@ -85,7 +85,11 @@ class TestPromptDeSistema:
         As três são da categoria RECORD: gravam sem passar pela proposta
         que a pessoa aprova. São exatamente as que uma injeção usaria.
         """
-        for tool in ("save_preference", "mark_study_session", "mark_routine_occurrence"):
+        for tool in (
+            "save_preference",
+            "mark_study_session",
+            "mark_routine_occurrence",
+        ):
             assert tool in _BASE, tool
 
 

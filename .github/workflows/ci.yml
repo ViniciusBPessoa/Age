@@ -17,6 +17,8 @@ jobs:
       - uses: astral-sh/setup-uv@v4
         with:
           enable-cache: true
+          # Sem uv.lock no repo: a chave do cache sai dos pyproject.
+          cache-dependency-glob: "**/pyproject.toml"
 
       - name: Instalar dependências
         working-directory: services/${{ matrix.service }}
@@ -78,14 +80,14 @@ jobs:
             sed -i "s|^$key=.*|$key=$(openssl rand -hex 24)|" .env
           done
       - name: Subir
-        run: docker compose -f infra/docker-compose.yml up -d --build
+        run: docker compose -f infra/docker-compose.yml --env-file .env up -d --build
       - name: Aguardar core-api
         run: |
           for i in $(seq 1 60); do
             curl -sf localhost:8000/readyz | grep -q '"ready":true' && exit 0
             sleep 3
           done
-          docker compose -f infra/docker-compose.yml logs
+          docker compose -f infra/docker-compose.yml --env-file .env logs
           exit 1
       - name: Migrations
         run: make migrate
@@ -93,4 +95,4 @@ jobs:
         run: make smoke
       - name: Logs em caso de falha
         if: failure()
-        run: docker compose -f infra/docker-compose.yml logs
+        run: docker compose -f infra/docker-compose.yml --env-file .env logs

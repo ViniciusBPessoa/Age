@@ -548,7 +548,9 @@ def upgrade() -> None:
     # distinto de qualquer valor. A migração de dados assume que quem
     # está em 'event' hoje nunca escolheu (era o default), e por isso
     # volta a herdar.
-    op.execute("ALTER TABLE core.conversations ALTER COLUMN target_default DROP NOT NULL")
+    op.execute(
+        "ALTER TABLE core.conversations ALTER COLUMN target_default DROP NOT NULL"
+    )
     op.execute(
         "ALTER TABLE core.conversations ALTER COLUMN target_default DROP DEFAULT"
     )
