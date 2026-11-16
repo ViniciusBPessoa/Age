@@ -217,6 +217,19 @@ export interface Slot {
   reasons: string[];
 }
 
+export interface FreeInterval {
+  start: string;
+  end: string;
+  minutes: number;
+}
+
+/** `GET /calendar/free-time`: quanto sobra livre numa janela. */
+export interface FreeTime {
+  free_minutes: number;
+  intervals: FreeInterval[];
+  longest: FreeInterval | null;
+}
+
 // ---------------------------------------------------------------
 // Tarefas (§3.3)
 // ---------------------------------------------------------------

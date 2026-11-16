@@ -1269,12 +1269,11 @@ automatizado que o projeto tinha olharia para eles — é o argumento de
 testes de componente terem passado de 10 para 29.
 
 ### Adiado, de propósito
-- [ ] Gaveta de conversas abaixo de `md:` — hoje a lista só existe a
-      partir de 768px, então no celular não há como trocar de
-      conversa: a barra inferior leva a `/chat`, que abre a atual. É
-      também o que impede subir a lista para `lg:`, onde ela caberia
-      melhor (em 768px a nav e a lista somam ~500px e espremem a
-      conversa).
+- [x] Gaveta de conversas abaixo de `lg:` — feita junto com o painel
+      lateral do chat. Abaixo de 1024px a lista abre pela esquerda (botão
+      no canto da conversa), e por isso ela pôde subir de `md:` para
+      `lg:`: em 768px a nav e a lista somavam ~500px e espremiam a
+      conversa.
 - [ ] Arrastar um evento **que já existe** para outro horário — o
       `PATCH` de §8.0 move pelo diálogo, mas mover arrastando ainda
       não existe. Criar arrastando na grade vazia **foi feito**

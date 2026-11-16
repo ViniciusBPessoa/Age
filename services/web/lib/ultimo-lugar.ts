@@ -139,3 +139,26 @@ export function lerAgrupamentoTarefas(): AgrupamentoTarefas | null {
 export function guardarAgrupamentoTarefas(valor: AgrupamentoTarefas): void {
   gravar(CHAVE_AGRUPAMENTO, valor);
 }
+
+/** As abas do painel ao lado da conversa. */
+export type AbaDoPainel = "tarefas" | "agenda";
+
+const CHAVE_PAINEL = "age-painel-lateral";
+
+/**
+ * O painel ao lado do chat: fechado, ou aberto em qual aba.
+ *
+ * Um valor só, e não "aberto" e "aba" separados: o par tem quatro
+ * combinações e só três querem dizer algo. Fechar e reabrir volta para
+ * a aba de antes porque a tela guarda a aba em memória; aqui fica só o
+ * que precisa atravessar o F5.
+ */
+export function lerPainel(): AbaDoPainel | null {
+  const valor = ler(CHAVE_PAINEL);
+  return valor === "tarefas" || valor === "agenda" ? valor : null;
+}
+
+export function guardarPainel(aba: AbaDoPainel | null): void {
+  if (aba === null) apagar(CHAVE_PAINEL);
+  else gravar(CHAVE_PAINEL, aba);
+}

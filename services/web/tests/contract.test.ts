@@ -96,6 +96,8 @@ const PAIRS: [tsInterface: string, openApiSchema: string][] = [
   ["CalendarRef", "CalendarOut"],
   ["AgeEvent", "EventOut"],
   ["Slot", "SlotOut"],
+  ["FreeInterval", "FreeIntervalOut"],
+  ["FreeTime", "FreeTimeOut"],
   ["TaskListRef", "TaskListOut"],
   ["Reserved", "ReservedOut"],
   ["Task", "TaskOut"],

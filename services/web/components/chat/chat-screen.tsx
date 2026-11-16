@@ -51,8 +51,18 @@ import { Composer } from "@/components/chat/composer";
 import { ConversationSidebar } from "@/components/conversation-list/sidebar";
 import { PlanReview } from "@/components/plan-review/plan-review";
 import { PropostasPendentes } from "@/components/chat/propostas-pendentes";
+import { PainelLateral } from "@/components/painel-lateral/painel-lateral";
 import { limparRascunho, migrarRascunho } from "@/lib/rascunho";
-import { Button, IconAlert, IconInfo, IconX, LoadError, cx } from "@/components/ui";
+import {
+  Button,
+  IconAlert,
+  IconInfo,
+  IconMenu,
+  IconPainel,
+  IconX,
+  LoadError,
+  cx,
+} from "@/components/ui";
 import { useAnexos } from "./anexos-do-composer";
 import { SobreposicaoDeArraste, useArrastarImagem } from "./arrastar-imagem";
 import { RequestFailed, api } from "@/lib/api-client";
@@ -60,8 +70,11 @@ import { mensagemDeFalha } from "@/lib/resultado-do-apply";
 import { subscribeToTurn, toolLabel, type StreamEvent } from "@/lib/sse";
 import {
   esquecerUltimaConversa,
+  guardarPainel,
   guardarUltimaConversa,
+  lerPainel,
   lerUltimaConversa,
+  type AbaDoPainel,
 } from "@/lib/ultimo-lugar";
 import type {
   ApplyResult,
@@ -357,6 +370,75 @@ export function ChatScreen({
       router.replace(`/chat/${novaConversa}`);
     }
   }, [streaming, novaConversa, conversationId, router]);
+
+  /*
+   * O painel ao lado da conversa: fechado, ou aberto numa aba.
+   *
+   * `ultimaAba` separado do aberto/fechado para o botão reabrir onde a
+   * pessoa estava, e não sempre em Tarefas.
+   */
+  const [painel, setPainelState] = useState<AbaDoPainel | null>(null);
+  const [ultimaAba, setUltimaAba] = useState<AbaDoPainel>("tarefas");
+
+  /*
+   * Lido depois do primeiro render (o servidor não tem `localStorage`,
+   * e ler no render daria divergência de hidratação) e SÓ em tela
+   * larga. Abaixo de 1280px o painel cobre a conversa; reabri-lo
+   * sozinho a cada visita esconderia o chat de quem só queria
+   * conversar pelo celular.
+   */
+  useEffect(() => {
+    const salvo = lerPainel();
+    if (salvo === null) return;
+    setUltimaAba(salvo);
+    if (globalThis.matchMedia?.("(min-width: 1280px)").matches) {
+      setPainelState(salvo);
+    }
+  }, []);
+
+  const setPainel = useCallback((aba: AbaDoPainel | null) => {
+    setPainelState(aba);
+    if (aba !== null) setUltimaAba(aba);
+    guardarPainel(aba);
+  }, []);
+  const fecharPainel = useCallback(() => setPainel(null), [setPainel]);
+
+  /*
+   * Ctrl+B (Cmd+B no Mac) abre e fecha o painel — o mesmo atalho da
+   * barra lateral do VS Code e de outros editores.
+   *
+   * Com modificador, e não uma tecla solta como os atalhos da agenda:
+   * no chat o foco mora no campo de escrever, e uma tecla solta seria
+   * texto. Num `<textarea>` simples o Ctrl+B não faz nada, então não
+   * rouba função de ninguém.
+   */
+  useEffect(() => {
+    const ouvir = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey) return;
+      if (e.key.toLowerCase() !== "b") return;
+      if (document.querySelector("dialog[open], [role='dialog']")) return;
+      e.preventDefault();
+      setPainelState((atual) => {
+        const proximo = atual === null ? ultimaAba : null;
+        guardarPainel(proximo);
+        return proximo;
+      });
+    };
+    globalThis.addEventListener("keydown", ouvir);
+    return () => globalThis.removeEventListener("keydown", ouvir);
+  }, [ultimaAba]);
+
+  /*
+   * A lista de conversas abaixo de 1024px, como gaveta.
+   *
+   * Abaixo de 768px a lista simplesmente sumia, e não havia como trocar
+   * de conversa sem voltar pela navegação — anotado como pendência
+   * desde que a lista existe. Agora ela abre por cima, pela esquerda.
+   */
+  const [gaveta, setGaveta] = useState(false);
+  // Escolher uma conversa troca a URL; a gaveta fecha junto, senão a
+  // conversa escolhida abriria escondida atrás dela.
+  useEffect(() => setGaveta(false), [conversationId]);
 
   // Encerra o stream ao sair da tela. Sem isto, trocar de conversa
   // deixaria o EventSource anterior vivo, e os tokens do turno antigo
@@ -816,13 +898,26 @@ export function ChatScreen({
 
   return (
     <div className="flex h-dvh">
-      {/* `md:` dá 768px, onde a nav principal (240px) e esta lista
-          (256px) deixam pouco para a conversa. Subir para `lg:`
-          pioraria outra coisa: não há gaveta de conversas abaixo
-          deste ponto, então a lista some e não há como trocar de
-          conversa. A estreiteza em 768px é o mal menor até existir
-          essa gaveta — anotado em PROGRESSO.md. */}
-      <div className="hidden w-64 shrink-0 md:block">
+      {/* A lista fica fixa a partir de `lg:` (1024px). Em `md:` a nav
+          principal (240px) e ela (256px) somavam ~500px e espremiam a
+          conversa; ficava em `md:` só porque não havia gaveta, e sem
+          ela a lista sumia e não dava para trocar de conversa. Abaixo
+          de 1024px ela abre agora pela gaveta. */}
+      {gaveta ? (
+        <div
+          aria-hidden
+          onClick={() => setGaveta(false)}
+          className="fixed inset-0 z-40 bg-canvas/60 backdrop-blur-[2px] lg:hidden"
+        />
+      ) : null}
+      <div
+        className={cx(
+          "shrink-0 lg:static lg:z-auto lg:block lg:w-64 lg:max-w-none lg:shadow-none",
+          gaveta
+            ? "fixed inset-y-0 left-0 z-50 block w-[85vw] max-w-xs animate-fade-in bg-surface shadow-2xl"
+            : "hidden",
+        )}
+      >
         <ConversationSidebar
           conversations={conversations.data?.items ?? []}
           counts={Object.fromEntries(
@@ -834,7 +929,10 @@ export function ChatScreen({
           activeId={idAtivo}
           timezone={timezone}
           loading={conversations.isLoading}
-          onNew={() => router.push("/chat")}
+          onNew={() => {
+            setGaveta(false);
+            router.push("/chat");
+          }}
           onSearch={(term) => {
             void queryClient.fetchQuery({
               queryKey: ["conversations"],
@@ -909,6 +1007,30 @@ export function ChatScreen({
           visivel={arraste.sobre}
           cheio={estadoDeAnexos.anexos.length >= 4}
         />
+
+        {/* Abre tarefas e agenda ao lado, sem sair da conversa. Some
+            quando o painel está aberto: o fechar mora no próprio painel,
+            e dois botões para a mesma coisa confundem. */}
+        {/* Abaixo de 1024px: abre a lista de conversas. */}
+        <button
+          onClick={() => setGaveta(true)}
+          aria-label="Abrir conversas"
+          className="absolute left-3 top-3 z-10 grid h-8 w-8 place-items-center rounded-lg border border-line bg-surface/90 text-muted shadow-sm backdrop-blur transition-colors hover:bg-surface-2 hover:text-ink lg:hidden"
+        >
+          <IconMenu className="h-4 w-4" />
+        </button>
+
+        {painel === null ? (
+          <button
+            onClick={() => setPainel(ultimaAba)}
+            aria-label="Abrir tarefas e agenda ao lado"
+            title="Tarefas e agenda ao lado (Ctrl+B)"
+            className="absolute right-3 top-3 z-10 flex items-center gap-1.5 rounded-lg border border-line bg-surface/90 px-2.5 py-1.5 text-xs font-medium text-muted shadow-sm backdrop-blur transition-colors hover:bg-surface-2 hover:text-ink md:right-4"
+          >
+            <IconPainel className="h-4 w-4" />
+            <span className="hidden sm:inline">Tarefas e agenda</span>
+          </button>
+        ) : null}
 
         {avisoDeArraste ? (
           <p
@@ -1124,6 +1246,25 @@ export function ChatScreen({
           }}
         />
       </main>
+
+      {painel !== null ? (
+        <PainelLateral
+          aba={painel}
+          timezone={timezone}
+          onAba={setPainel}
+          onFechar={fecharPainel}
+          pedindo={streaming}
+          onPedir={(texto) => {
+            // Sobreposto, o painel cobre a conversa: fecha para a pessoa
+            // ver a resposta chegando. Ao lado, fica aberto — a proposta
+            // aparece tracejada na agenda dele.
+            if (!globalThis.matchMedia?.("(min-width: 1280px)").matches) {
+              fecharPainel();
+            }
+            void send(texto);
+          }}
+        />
+      ) : null}
     </div>
   );
 }

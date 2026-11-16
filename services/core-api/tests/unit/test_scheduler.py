@@ -21,6 +21,7 @@ from app.domain.scheduler import (
     DailyWindow,
     SchedulingPolicy,
     find_free_slots,
+    free_time,
     merge_busy,
     summarize_workload,
 )
@@ -544,3 +545,51 @@ def test_workload_splits_event_crossing_midnight() -> None:
     by_day = {load.day: load for load in loads}
     assert by_day[date(2026, 10, 8)].busy == timedelta(hours=2)
     assert by_day[date(2026, 10, 9)].busy == timedelta(hours=2)
+
+
+# ---------------------------------------------------------------
+# Tempo livre — o painel ao lado do chat
+# ---------------------------------------------------------------
+def _minutos(intervals: list[BusyInterval]) -> int:
+    return int(sum((i.end - i.start).total_seconds() for i in intervals) // 60)
+
+
+def test_tempo_livre_desconta_compromissos_e_fica_no_horario_util():
+    # Das 14h às 23h, com reunião das 15h às 16h. Útil vai até 22h, então
+    # sobra 14–15 e 16–22: 7h. Sabotagem: ignorar `working_hours` daria
+    # 8h (contaria 22h–23h).
+    livres = free_time([busy(8, 15, 16)], dt(8, 14), dt(8, 23), policy())
+    assert [(i.start, i.end) for i in livres] == [
+        (dt(8, 14), dt(8, 15)),
+        (dt(8, 16), dt(8, 22)),
+    ]
+    assert _minutos(livres) == 7 * 60
+
+
+def test_tempo_livre_respeita_faixa_bloqueada():
+    # Almoço bloqueado das 12h às 13h todo dia. Sabotagem: usar só
+    # `working_hours`, sem `_day_windows`, e o almoço contaria como livre.
+    almoco = {d: (DailyWindow(time(12), time(13)),) for d in range(7)}
+    livres = free_time([], dt(8, 11), dt(8, 14), policy(blocked_windows=almoco))
+    assert _minutos(livres) == 2 * 60
+
+
+def test_tempo_livre_funde_compromissos_sobrepostos():
+    # Dois eventos se sobrepondo (10–12 e 11–13): o buraco é 10–13, não
+    # duas subtrações que se anulam. Sabotagem: subtrair sem `merge_busy`.
+    livres = free_time(
+        [busy(8, 10, 12), busy(8, 11, 13)], dt(8, 9), dt(8, 14), policy()
+    )
+    assert _minutos(livres) == 2 * 60
+
+
+def test_tempo_livre_janela_vazia_ou_invertida():
+    assert free_time([], dt(8, 10), dt(8, 10), policy()) == []
+    assert free_time([], dt(8, 12), dt(8, 10), policy()) == []
+
+
+def test_tempo_livre_comeca_de_agora_e_nao_do_inicio_do_dia():
+    # Às 21h30 só sobra meia hora até as 22h. Sabotagem: recortar pelo
+    # dia inteiro em vez de por `start`.
+    livres = free_time([], dt(8, 21, 30), dt(9, 0), policy())
+    assert _minutos(livres) == 30

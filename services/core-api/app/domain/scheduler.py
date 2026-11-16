@@ -475,6 +475,46 @@ def _reasons(
 
 
 # ---------------------------------------------------------------
+# 4b. Tempo livre — "cabe mais alguma coisa hoje?"
+# ---------------------------------------------------------------
+def free_time(
+    busy: list[BusyInterval],
+    start: datetime,
+    end: datetime,
+    policy: SchedulingPolicy,
+) -> list[BusyInterval]:
+    """As lacunas livres entre `start` e `end`, em ordem.
+
+    Livre quer dizer o mesmo que para `find_free_slots`: dentro do
+    horário útil, fora das faixas bloqueadas (almoço, sono) e fora de
+    qualquer compromisso. Sem duração mínima e sem `buffer`: a pergunta
+    aqui é "quanto sobra", não "onde cabe uma sessão de 50 minutos" — e
+    descontar folga faria o painel dizer "nada livre" com 40 minutos
+    vagos na tela.
+
+    O cálculo mora aqui, e não no front, por §9.5: a janela útil depende
+    do fuso e das preferências da conta, e o browser não tem nenhum dos
+    dois de forma confiável.
+    """
+    if end <= start:
+        return []
+
+    tz = policy.tz
+    allowed: list[BusyInterval] = []
+    day = start.astimezone(tz).date()
+    last = end.astimezone(tz).date()
+    while day <= last:
+        for window in _day_windows(day, policy):
+            lo = max(window.start, start)
+            hi = min(window.end, end)
+            if lo < hi:
+                allowed.append(BusyInterval(start=lo, end=hi))
+        day += timedelta(days=1)
+
+    return _subtract(allowed, merge_busy(busy))
+
+
+# ---------------------------------------------------------------
 # 5. Carga por dia — alimenta o diagnóstico (§5.9.1)
 # ---------------------------------------------------------------
 @dataclass(frozen=True)

@@ -93,8 +93,13 @@ export function TaskRow({
    * com data vale até o fim do dia" — regra de domínio, não de
    * apresentação (§9.5).
    */
+  const agora = new Date();
+  /* Sobre TODOS os blocos, não só os visíveis: o omitido pelo cabeçalho
+     também conta para saber se ainda há horário pela frente. */
+  const horarioPassou = !done && situacaoDoHorario(task, agora) === "passou";
   const needsTime =
-    !done && !hasReserved && (task.is_overdue || isSoon(task, timezone));
+    horarioPassou ||
+    (!done && !hasReserved && (task.is_overdue || isSoon(task, timezone)));
 
   return (
     <li
@@ -193,26 +198,51 @@ export function TaskRow({
 
           {/* A linha que é o ponto desta tela. */}
           <div className="mt-2">
-            {hasReserved ? (
+            {hasReserved || horarioPassou ? (
               <div className="space-y-1">
-                {blocos.map((block) => (
-                  <p
-                    key={block.event_ref_id}
-                    /* `ok` e não `brand`: tempo reservado é estado
-                       resolvido, e a cor da marca é a mesma dos botões
-                       "reservar tempo" ao lado. Na mesma cor deles, o
-                       que já está feito disputava atenção com o que
-                       ainda falta — e é só o que falta que pede ação. */
-                    className="flex items-center gap-1.5 text-xs font-medium text-ok"
-                  >
-                    <IconClock className="h-3.5 w-3.5 shrink-0" />
-                    <span className="tnum">
-                      {duration(block.minutes)} reservad
-                      {block.minutes === 60 ? "a" : "as"} ·{" "}
-                      {range(block.start, block.end, timezone)}
+                {blocos.map((block) => {
+                  /* Bloco que já acabou não é tempo reservado: é tempo
+                     que passou. Em verde ele dizia "resolvido" para uma
+                     tarefa atrasada 31 dias — visto na conta real. */
+                  const passou = new Date(block.end) <= agora;
+                  return (
+                    <p
+                      key={block.event_ref_id}
+                      /* `ok` e não `brand`: tempo reservado é estado
+                         resolvido, e a cor da marca é a mesma dos botões
+                         "reservar tempo" ao lado. Na mesma cor deles, o
+                         que já está feito disputava atenção com o que
+                         ainda falta — e é só o que falta que pede ação. */
+                      className={cx(
+                        "flex items-center gap-1.5 text-xs",
+                        passou ? "text-muted" : "font-medium text-ok",
+                      )}
+                    >
+                      <IconClock className="h-3.5 w-3.5 shrink-0" />
+                      <span className="tnum">
+                        {passou
+                          ? `${duration(block.minutes)} · ${range(block.start, block.end, timezone)} · já passou`
+                          : `${duration(block.minutes)} reservad${block.minutes === 60 ? "a" : "as"} · ${range(block.start, block.end, timezone)}`}
+                      </span>
+                    </p>
+                  );
+                })}
+                {horarioPassou ? (
+                  <div className="flex flex-wrap items-center gap-2 pt-0.5">
+                    <span className="flex items-center gap-1.5 text-xs font-medium text-warn">
+                      <IconAlert className="h-3.5 w-3.5 shrink-0" />o horário passou e a
+                      tarefa segue aberta
                     </span>
-                  </p>
-                ))}
+                    <Button
+                      size="sm"
+                      variant="primary"
+                      onClick={() => onSchedule(task)}
+                    >
+                      <IconPlus className="h-3.5 w-3.5" />
+                      reservar de novo
+                    </Button>
+                  </div>
+                ) : null}
               </div>
             ) : done || task.reserved.length > 0 ? null : (
               /* `task.reserved`, não `blocos`: se o único bloco foi
@@ -279,6 +309,24 @@ export function TaskRow({
       </div>
     </li>
   );
+}
+
+/**
+ * A tarefa tem horário pela frente, só horário que já passou, ou nenhum?
+ *
+ * "passou" é o caso que esta função existe para separar: a tarefa tinha
+ * bloco reservado, o bloco acabou e ela não foi concluída. Antes ela
+ * caía junto com "tem horário" e aparecia em verde, como resolvida — o
+ * "Relatório do TCC" atrasado 31 dias com "quinta 15/10 09:15" ao lado.
+ *
+ * Bloco em andamento conta como pela frente: ainda dá para fazer nele.
+ */
+export function situacaoDoHorario(
+  task: Pick<Task, "reserved">,
+  agora: Date = new Date(),
+): "futuro" | "passou" | "sem" {
+  if (task.reserved.length === 0) return "sem";
+  return task.reserved.some((b) => new Date(b.end) > agora) ? "futuro" : "passou";
 }
 
 /**

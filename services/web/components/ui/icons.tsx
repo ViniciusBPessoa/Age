@@ -84,6 +84,14 @@ export const IconTasks = (p: IconProps) => (
   </Svg>
 );
 
+/** Painel à direita: o que abre tarefas e agenda ao lado da conversa. */
+export const IconPainel = (p: IconProps) => (
+  <Svg {...p}>
+    <rect x="3" y="4" width="18" height="16" rx="2.5" />
+    <path d="M15 4v16" />
+  </Svg>
+);
+
 export const IconStudy = (p: IconProps) => (
   <Svg {...p}>
     <path d="M12 7 3 4.8v12.4L12 19.5l9-2.3V4.8L12 7Z" />

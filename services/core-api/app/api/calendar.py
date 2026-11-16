@@ -30,7 +30,7 @@ from app.adapters.calendar.local import LocalCalendar
 from app.core.config import get_settings
 from app.core.db import user_session
 from app.core.deps import CurrentUser, DbSession
-from app.domain.scheduler import find_free_slots, summarize_workload
+from app.domain.scheduler import find_free_slots, free_time, summarize_workload
 from app.ports.calendar import Event, Flexibility
 from app.services.calendar_access import (
     classify_flexibility,
@@ -143,6 +143,20 @@ class SlotList(BaseModel):
     slots: list[SlotOut]
     count: int
     hint: str | None = None
+
+
+class FreeIntervalOut(BaseModel):
+    start: datetime
+    end: datetime
+    minutes: int
+
+
+class FreeTimeOut(BaseModel):
+    """Quanto sobra livre numa janela (o painel ao lado do chat)."""
+
+    free_minutes: int
+    intervals: list[FreeIntervalOut]
+    longest: FreeIntervalOut | None
 
 
 # ---------------------------------------------------------------
@@ -532,6 +546,47 @@ async def get_free_slots(
         ],
         count=len(slots),
         hint=hint,
+    )
+
+
+@router.get("/free-time")
+async def get_free_time(
+    user: CurrentUser,
+    db: DbSession,
+    start: datetime = Query(...),
+    end: datetime = Query(...),
+) -> FreeTimeOut:
+    """Tempo livre na janela, dentro do horário útil da conta.
+
+    Responde "cabe mais alguma coisa hoje?" sem a pessoa somar lacunas
+    de cabeça. É `/free-slots` sem duração nem pontuação: aquela rota
+    procura ONDE encaixar algo; esta diz QUANTO sobra.
+
+    Propostas ainda não aprovadas não contam como ocupado — elas não
+    estão na agenda até o `/apply` (§5.8), e o painel as mostra à parte.
+    """
+    try:
+        busy = await read_busy(db, user.id, start, end)
+    except ValueError as exc:
+        raise _bad_window(str(exc)) from exc
+
+    policy = await load_policy(db, user.id)
+    intervals = [
+        FreeIntervalOut(
+            start=i.start,
+            end=i.end,
+            minutes=int((i.end - i.start).total_seconds() // 60),
+        )
+        for i in free_time(busy, start, end, policy)
+    ]
+    # Lacuna de segundos (evento que acaba 10:00:30) não é tempo livre
+    # que alguém use, e só poluiria o "maior bloco".
+    intervals = [i for i in intervals if i.minutes > 0]
+
+    return FreeTimeOut(
+        free_minutes=sum(i.minutes for i in intervals),
+        intervals=intervals,
+        longest=max(intervals, key=lambda i: i.minutes, default=None),
     )
 
 
